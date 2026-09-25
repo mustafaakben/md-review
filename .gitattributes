@@ -1,0 +1,6 @@
+# Source is LF everywhere.
+* text=auto eol=lf
+
+# Fixtures are byte-exact on purpose (one CRLF, one LF); never convert them.
+test/fixtures/** -text
+*.png binary

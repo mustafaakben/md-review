@@ -1,0 +1,128 @@
+{
+  "name": "md-review",
+  "displayName": "MD Review",
+  "description": "Review Markdown with AI agents: select-and-comment threads stored in a sidecar JSON that Claude, Codex, or any script can read and answer, plus light editing that only rewrites the bytes you changed.",
+  "version": "0.1.0",
+  "publisher": "mustafaakben",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "mdReview.editor",
+        "displayName": "MD Review",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "mdReview.open",
+        "title": "Open in MD Review",
+        "category": "MD Review",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "mdReview.openSource",
+        "title": "Open Markdown Source",
+        "category": "MD Review",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mdReview.open",
+          "when": "resourceExtname == .md && activeCustomEditorId != 'mdReview.editor'",
+          "group": "navigation"
+        },
+        {
+          "command": "mdReview.openSource",
+          "when": "activeCustomEditorId == 'mdReview.editor'",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "mdReview.open",
+          "when": "resourceExtname == .md",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MD Review",
+      "properties": {
+        "mdReview.author": {
+          "type": "string",
+          "default": "",
+          "description": "Name stamped on comments and replies you write. Empty uses your system user name."
+        },
+        "mdReview.showResolved": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show resolved threads in the sidebar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "pretest": "node esbuild.mjs",
+    "test": "node --test test/*.test.mjs",
+    "package": "node esbuild.mjs && vsce package --no-dependencies",
+    "preharness": "node esbuild.mjs",
+    "harness": "node test/harness/server.mjs"
+  },
+  "dependencies": {
+    "katex": "^0.16.22",
+    "markdown-it": "^14.1.0",
+    "markdown-it-attrs": "^4.3.1",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-sub": "^2.0.0",
+    "markdown-it-sup": "^2.0.0",
+    "markdown-it-texmath": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  },
+  "author": "Mustafa Akben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mustafaakben/md-review.git"
+  },
+  "homepage": "https://github.com/mustafaakben/md-review#readme",
+  "bugs": {
+    "url": "https://github.com/mustafaakben/md-review/issues"
+  },
+  "keywords": [
+    "markdown",
+    "review",
+    "comments",
+    "ai",
+    "agents",
+    "claude",
+    "codex",
+    "manuscript",
+    "writing"
+  ],
+  "icon": "media/icon.png"
+}

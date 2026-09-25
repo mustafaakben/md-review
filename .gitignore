@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.vsix
+test/tmp/
+test/screens/
+.DS_Store
+
+# Build outputs (npm run build)
+media/webview.js
+media/style.css
+media/katex/

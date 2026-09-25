@@ -1,0 +1,163 @@
+// Host-side message handling, independent of the VS Code API so the same code
+// drives both the extension and the browser test harness.
+import * as fs from 'fs';
+import * as path from 'path';
+import * as store from './commentStore';
+import { applyBlockEdit, readBlock, BlockEditError } from './blockEdit';
+import { renderMarkdown, ResolveImage } from './render';
+import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
+
+export type ToWebview =
+  | { type: 'render'; html: string; fileName: string }
+  | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
+  | { type: 'block'; ls: number; le: number; text: string }
+  | { type: 'blockSaved'; ls: number }
+  | { type: 'inlineFailed'; ls: number; le: number; text: string; message: string }
+  | { type: 'error'; message: string };
+
+export type FromWebview =
+  | { type: 'ready' }
+  | { type: 'addComment'; anchor: store.Anchor; body: string }
+  | { type: 'reply'; id: string; body: string }
+  | { type: 'setStatus'; id: string; status: store.Status }
+  | { type: 'editBody'; id: string; body: string }
+  | { type: 'deleteComment'; id: string }
+  | { type: 'submitReview' }
+  | { type: 'getBlock'; ls: number; le: number }
+  | { type: 'saveBlock'; ls: number; le: number; original: string; newText: string }
+  | { type: 'saveInline'; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
+  | { type: 'openLink'; href: string };
+
+export interface HostContext {
+  mdPath: string;
+  author(): string;
+  showResolved(): boolean;
+  post(msg: ToWebview): void;
+  resolveImage: ResolveImage;
+  /** Current text to render (the editor buffer in VS Code, disk in the harness). */
+  getText(): string;
+  /** True if the document has unsaved changes in an editor. */
+  isDirty(): boolean;
+  openLink(href: string): void;
+}
+
+export class ReviewSession {
+  private lastSidecarWrite: string | undefined;
+  private lastRendered = '';
+
+  constructor(private ctx: HostContext) {}
+
+  render(): void {
+    const text = this.ctx.getText();
+    this.lastRendered = text;
+    let html: string;
+    try {
+      html = renderMarkdown(text, this.ctx.resolveImage);
+    } catch (e: any) {
+      html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
+    }
+    this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath) });
+  }
+
+  sendComments(): void {
+    let data: store.Sidecar;
+    try {
+      data = store.readSidecar(this.ctx.mdPath);
+    } catch (e: any) {
+      this.ctx.post({ type: 'error', message: `Could not parse ${path.basename(store.sidecarPath(this.ctx.mdPath))}: ${e.message}` });
+      return;
+    }
+    this.ctx.post({ type: 'comments', data, author: this.ctx.author(), showResolved: this.ctx.showResolved() });
+  }
+
+  /** Called by a file watcher when the sidecar changes on disk. */
+  onSidecarChanged(): void {
+    let current: string | undefined;
+    try {
+      current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
+    } catch {
+      current = undefined;
+    }
+    if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
+    this.sendComments();
+  }
+
+  private mutate(fn: (d: store.Sidecar) => void): void {
+    const { written } = store.mutate(this.ctx.mdPath, fn);
+    this.lastSidecarWrite = written;
+    this.sendComments();
+  }
+
+  handle(msg: FromWebview): void {
+    try {
+      this.handleInner(msg);
+    } catch (e: any) {
+      if (e instanceof BlockEditError) this.render();
+      this.ctx.post({ type: 'error', message: String(e?.message || e) });
+    }
+  }
+
+  private handleInner(msg: FromWebview): void {
+    const author = this.ctx.author();
+    switch (msg.type) {
+      case 'ready':
+        this.render();
+        this.sendComments();
+        return;
+      case 'addComment':
+        return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body));
+      case 'reply':
+        return this.mutate((d) => void store.addReply(d, msg.id, author, msg.body));
+      case 'setStatus':
+        return this.mutate((d) => store.setStatus(d, msg.id, msg.status));
+      case 'editBody':
+        return this.mutate((d) => store.editBody(d, msg.id, msg.body));
+      case 'deleteComment':
+        return this.mutate((d) => store.deleteComment(d, msg.id));
+      case 'submitReview':
+        return this.mutate((d) => void store.submitDrafts(d));
+      case 'getBlock': {
+        this.assertEditable();
+        const text = readBlock(fs.readFileSync(this.ctx.mdPath), msg.ls, msg.le);
+        this.ctx.post({ type: 'block', ls: msg.ls, le: msg.le, text });
+        return;
+      }
+      case 'saveBlock':
+        this.assertEditable();
+        applyBlockEdit(this.ctx.mdPath, msg.ls, msg.le, msg.original, msg.newText);
+        this.ctx.post({ type: 'blockSaved', ls: msg.ls });
+        this.render();
+        return;
+      case 'saveInline':
+        this.assertEditable();
+        try {
+          applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText);
+        } catch (e) {
+          if (e instanceof InlineMapError) {
+            this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: e.message });
+            return;
+          }
+          throw e;
+        }
+        this.ctx.post({ type: 'blockSaved', ls: msg.ls });
+        this.render();
+        return;
+      case 'openLink':
+        this.ctx.openLink(msg.href);
+        return;
+    }
+  }
+
+  /** Block editing works on disk bytes, so the view must reflect the disk. */
+  private assertEditable(): void {
+    if (this.ctx.isDirty()) {
+      throw new Error('This file has unsaved changes in another editor. Save or revert them before editing blocks here.');
+    }
+    const disk = fs.readFileSync(this.ctx.mdPath, 'utf8').replace(/^﻿/, '');
+    const norm = (s: string) => s.replace(/\r\n/g, '\n');
+    if (norm(disk) !== norm(this.lastRendered)) {
+      this.render();
+      throw new BlockEditError('The file changed on disk; the view was refreshed. Double-click the block again.');
+    }
+  }
+}
