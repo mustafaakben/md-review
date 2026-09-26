@@ -77,6 +77,13 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
+      // The panel shows the summary itself; only reach out when it's out of sight.
+      notify: (message) => {
+        if (panel.visible) return; // the banner already says it
+        void vscode.window.showInformationMessage(message, 'Open').then((pick) => {
+          if (pick === 'Open') panel.reveal();
+        });
+      },
     });
     MdReviewEditorProvider.panels.add(panel);
 
@@ -88,6 +95,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     subs.push(
       webview.onDidReceiveMessage((m: FromWebview) => {
+        // Alt+1/2/3 are VS Code's "open editor N"; bind them only while a comment box has focus.
+        if (m.type === 'composing') return void vscode.commands.executeCommand('setContext', 'mdReview.composing', m.on);
         session.handle(m);
         if (m.type === 'saveBlock' || m.type === 'undo' || m.type === 'redo') setTimeout(() => void refreshFromDisk(document, session), 400);
       }),
@@ -113,6 +122,11 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     );
     subs.push(mdWatcher, mdWatcher.onDidChange(() => setTimeout(() => void refreshFromDisk(document, session), 300)));
 
+    subs.push(
+      panel.onDidChangeViewState((e) => {
+        if (!e.webviewPanel.active) void vscode.commands.executeCommand('setContext', 'mdReview.composing', false);
+      }),
+    );
     panel.onDidDispose(() => {
       MdReviewEditorProvider.panels.delete(panel);
       subs.forEach((d) => d.dispose());

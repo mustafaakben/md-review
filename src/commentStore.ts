@@ -6,6 +6,14 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 
 export type Status = 'draft' | 'submitted' | 'resolved';
+/** What the reviewer wants: a change (the default), an answer only, or nothing. */
+export type Kind = 'comment' | 'question' | 'praise';
+export type Severity = 'major' | 'minor' | 'nit';
+/** A thread about a whole section (anchored on its heading) or the whole document (no quote). */
+export type Scope = 'section' | 'document';
+
+export const KINDS: Kind[] = ['comment', 'question', 'praise'];
+export const SEVERITIES: Severity[] = ['major', 'minor', 'nit'];
 
 export interface Reply {
   id: string;
@@ -33,7 +41,36 @@ export interface Comment {
   resolvedAt: string | null;
   /** Set when a resolved thread is reopened; replies older than this are history. */
   reopenedAt?: string | null;
+  /** Absent means a plain comment. */
+  kind?: Kind;
+  severity?: Severity;
+  scope?: Scope;
+  /** Set by the CLI while an agent works on this thread; cleared when it replies or resolves. */
+  workingAt?: string;
+  workingBy?: string;
   replies: Reply[];
+}
+
+export interface CommentMeta {
+  kind?: Kind | null;
+  severity?: Severity | null;
+  scope?: Scope | null;
+}
+
+/** Set or clear kind/severity/scope; unknown values and the defaults are dropped. */
+function applyMeta(c: Comment, meta: CommentMeta) {
+  if ('kind' in meta) {
+    if (meta.kind && meta.kind !== 'comment' && KINDS.includes(meta.kind)) c.kind = meta.kind;
+    else delete c.kind;
+  }
+  if ('severity' in meta) {
+    if (meta.severity && SEVERITIES.includes(meta.severity)) c.severity = meta.severity;
+    else delete c.severity;
+  }
+  if ('scope' in meta) {
+    if (meta.scope === 'section' || meta.scope === 'document') c.scope = meta.scope;
+    else delete c.scope;
+  }
 }
 
 export interface Sidecar {
@@ -144,7 +181,7 @@ export function find(data: Sidecar, id: string): Comment {
   return c;
 }
 
-export function addComment(data: Sidecar, author: string, anchor: Anchor, body: string): Comment {
+export function addComment(data: Sidecar, author: string, anchor: Anchor, body: string, meta: CommentMeta = {}): Comment {
   const c: Comment = {
     id: newId('c'),
     author,
@@ -156,6 +193,7 @@ export function addComment(data: Sidecar, author: string, anchor: Anchor, body: 
     resolvedAt: null,
     replies: [],
   };
+  applyMeta(c, meta);
   data.comments.push(c);
   return c;
 }
@@ -170,6 +208,8 @@ export function setStatus(data: Sidecar, id: string, status: Status): void {
   const c = find(data, id);
   if (c.status === 'resolved' && status !== 'resolved') c.reopenedAt = now();
   c.status = status;
+  delete c.workingAt; // a status change ends any claim on the thread
+  delete c.workingBy;
   if (status === 'resolved') c.resolvedAt = now();
   else c.resolvedAt = null;
   if (status === 'submitted' && !c.submittedAt) c.submittedAt = now();
@@ -204,4 +244,8 @@ export function awaitsAgent(c: Comment, agent = 'Claude'): boolean {
 
 export function editBody(data: Sidecar, id: string, body: string): void {
   find(data, id).body = body;
+}
+
+export function setMeta(data: Sidecar, id: string, meta: CommentMeta): void {
+  applyMeta(find(data, id), meta);
 }

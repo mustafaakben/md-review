@@ -91,6 +91,21 @@
         "category": "MD Review"
       },
       {
+        "command": "mdReview.severity1",
+        "title": "Mark Comment Major",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.severity2",
+        "title": "Mark Comment Minor",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.severity3",
+        "title": "Mark Comment Nit",
+        "category": "MD Review"
+      },
+      {
         "command": "mdReview.sendToClaude",
         "title": "Send Review to Claude",
         "category": "MD Review",
@@ -226,6 +241,18 @@
         {
           "command": "mdReview.showShortcuts",
           "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.severity1",
+          "when": "false"
+        },
+        {
+          "command": "mdReview.severity2",
+          "when": "false"
+        },
+        {
+          "command": "mdReview.severity3",
+          "when": "false"
         }
       ]
     },
@@ -264,6 +291,21 @@
       }
     },
     "keybindings": [
+      {
+        "command": "mdReview.severity1",
+        "key": "alt+1",
+        "when": "activeCustomEditorId == 'mdReview.editor' && mdReview.composing"
+      },
+      {
+        "command": "mdReview.severity2",
+        "key": "alt+2",
+        "when": "activeCustomEditorId == 'mdReview.editor' && mdReview.composing"
+      },
+      {
+        "command": "mdReview.severity3",
+        "key": "alt+3",
+        "when": "activeCustomEditorId == 'mdReview.editor' && mdReview.composing"
+      },
       {
         "command": "mdReview.undo",
         "key": "ctrl+z",

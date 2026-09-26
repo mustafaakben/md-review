@@ -41,7 +41,21 @@ function steps(where: string): string[] {
     '3. Set its status to "resolved". If the request is unclear, leave it "submitted" and ask your question in the reply instead.',
     '',
     'Re-read the sidecar right before each write, change only the comments you touch, and never change ids.',
+    '',
+    'Some comments carry a "kind", "severity" or "scope":',
+    '- kind "question": answer it in a reply and leave the document alone; resolve it only if the answer needs no change.',
+    '- kind "praise": nothing to change; reply briefly if useful and resolve it.',
+    '- severity "major", "minor" or "nit": work major first; nits are optional polish.',
+    '- scope "section": the quote is a heading and the comment is about that whole section. Scope "document": no quote; it is about the whole file.',
   ];
+}
+
+const SEVERITY_RANK: Record<string, number> = { major: 0, minor: 1, nit: 2 };
+const rank = (c: Comment) => SEVERITY_RANK[c.severity || ''] ?? 3;
+
+function tags(c: Comment): string {
+  const t = [c.scope === 'document' ? 'whole document' : c.scope === 'section' ? 'whole section' : '', c.kind && c.kind !== 'comment' ? c.kind : '', c.severity || ''].filter(Boolean);
+  return t.length ? ` [${t.join(', ')}]` : '';
 }
 
 export function buildAgentPrompt(o: PromptOptions): string {
@@ -61,9 +75,11 @@ export function buildAgentPrompt(o: PromptOptions): string {
     );
   }
   lines.push('', one ? 'The comment:' : 'The comments:');
-  for (const c of o.comments) {
+  // Major first; otherwise the order they came in (document order).
+  for (const c of [...o.comments].sort((a, b) => rank(a) - rank(b))) {
     const where = c.anchor.lineStart ? ` (lines ${c.anchor.lineStart}-${c.anchor.lineEnd || c.anchor.lineStart})` : '';
-    lines.push(`- ${c.id}${where}: "${c.anchor.quote.replace(/\s+/g, ' ').slice(0, 200)}" -> ${c.body.replace(/\s+/g, ' ')}`);
+    const what = c.scope === 'document' ? 'the whole document' : `"${c.anchor.quote.replace(/\s+/g, ' ').slice(0, 200)}"`;
+    lines.push(`- ${c.id}${tags(c)}${c.scope === 'document' ? '' : where}: ${what} -> ${c.body.replace(/\s+/g, ' ')}`);
     for (const r of c.replies) lines.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}`);
   }
   return lines.join('\n');

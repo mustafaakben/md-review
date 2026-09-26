@@ -227,3 +227,70 @@ button[data-act="close-keys"]::before { --ico: var(--i-close); }
   .mdr-keys-card { border-color: CanvasText; }
   .mdr-keys-card:focus-visible { outline: 2px solid Highlight; }
 }
+
+/* ---------- comment kinds, severity, section and document threads ---------- */
+.mdr-meta-pick { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin: 0 2px 8px; }
+.mdr-meta-pick button.mdr-chip { padding: 1px 9px; }
+button.mdr-chip.mdr-sev-major.on { color: var(--sev-major); border-color: color-mix(in srgb, var(--sev-major) 50%, transparent); background: color-mix(in srgb, var(--sev-major) 10%, transparent); }
+button.mdr-chip.mdr-sev-minor.on { color: var(--sev-minor); border-color: color-mix(in srgb, var(--sev-minor) 50%, transparent); background: color-mix(in srgb, var(--sev-minor) 10%, transparent); }
+:root { --sev-major: var(--vscode-editorError-foreground, #d1242f); --sev-minor: var(--vscode-editorWarning-foreground, #bf8700); }
+.mdr-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
+.mdr-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; line-height: 16px; padding: 0 7px; border-radius: 999px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.mdr-tag.mdr-sev-major { color: var(--sev-major); background: color-mix(in srgb, var(--sev-major) 12%, transparent); }
+.mdr-tag.mdr-sev-minor { color: var(--sev-minor); background: color-mix(in srgb, var(--sev-minor) 12%, transparent); }
+.mdr-tag-question, .mdr-tag-praise { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mdr-tag-question::before, .mdr-tag-praise::before, .mdr-kind-question::before, .mdr-kind-praise::before, button.mdr-doc-comment::before, .mdr-sec-btn::before {
+  content: ''; flex: none; width: 12px; height: 12px; background: currentColor;
+  -webkit-mask: var(--ico) center / contain no-repeat; mask: var(--ico) center / contain no-repeat;
+}
+.mdr-tag-question::before, .mdr-kind-question::before { --ico: var(--i-question); }
+.mdr-tag-praise::before, .mdr-kind-praise::before { --ico: var(--i-heart); }
+.mdr-meta-pick .mdr-kind-question, .mdr-meta-pick .mdr-kind-praise { display: inline-flex; align-items: center; gap: 4px; }
+.mdr-scope-note { font-style: italic; }
+button.mdr-doc-comment { align-self: stretch; display: inline-flex; justify-content: center; align-items: center; gap: 6px; padding: 3px 10px; font-size: 12px; color: var(--muted); background: transparent; }
+button.mdr-doc-comment:hover { color: var(--accent); }
+button.mdr-doc-comment::before { width: 14px; height: 14px; --ico: var(--i-discussion); }
+.mdr-sec-btn {
+  position: absolute; z-index: 5; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0;
+  border-radius: 6px; color: var(--muted); background: var(--bg); border: 1px solid var(--border);
+}
+.mdr-sec-btn[hidden] { display: none; }
+.mdr-sec-btn:hover { color: var(--accent); background: var(--hover); }
+.mdr-sec-btn::before { width: 14px; height: 14px; --ico: var(--i-comment); }
+@media (forced-colors: active) {
+  .mdr-tag-question::before, .mdr-tag-praise::before, .mdr-kind-question::before, .mdr-kind-praise::before, button.mdr-doc-comment::before, .mdr-sec-btn::before { forced-color-adjust: none; background: CanvasText; }
+  .mdr-tag { border: 1px solid CanvasText; }
+}
+
+/* Live agent status: progress over the threads, a pulse on what Claude is on. */
+.mdr-round { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); font-size: 12px; }
+.mdr-round[hidden] { display: none; }
+.mdr-round-row { display: flex; align-items: center; gap: 8px; }
+.mdr-round-text { flex: 1; min-width: 0; }
+.mdr-round-actions { justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.mdr-round-actions button { font-size: 12px; }
+.mdr-round-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.mdr-round-dot.live { background: var(--accent); animation: mdr-blink 1.4s ease-in-out infinite; }
+.mdr-round-icon { flex: none; width: 14px; height: 14px; background: var(--accent); -webkit-mask: var(--i-check) center / contain no-repeat; mask: var(--i-check) center / contain no-repeat; }
+.mdr-round-x { flex: none; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.mdr-round-x:hover { color: var(--fg); }
+.mdr-round-x::before { content: ''; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--i-close) center / contain no-repeat; mask: var(--i-close) center / contain no-repeat; }
+.mdr-round-bar { height: 3px; margin-top: 6px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.mdr-round-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.mdr-working-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--accent); }
+.mdr-card.mdr-working { border-color: var(--accent); }
+mark.mdr-hl.mdr-working { animation: mdr-glow 1.4s ease-in-out infinite; }
+@keyframes mdr-blink { 50% { opacity: 0.3; } }
+@keyframes mdr-glow { 50% { box-shadow: inset 0 -2px 0 var(--c, var(--accent)), 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .mdr-round-dot.live, mark.mdr-hl.mdr-working { animation: none; }
+  .mdr-round-bar > span { transition: none; }
+}
+@media (forced-colors: active) {
+  .mdr-round { border-color: CanvasText; }
+  .mdr-round-dot, .mdr-round-dot.live, .mdr-round-icon, .mdr-round-x::before, .mdr-round-bar > span { forced-color-adjust: none; background: Highlight; }
+  .mdr-round-bar { border: 1px solid CanvasText; }
+  /* Box shadows are dropped in forced colors: mark working threads with an outline instead. */
+  .mdr-card.mdr-working { border: 2px solid Highlight; }
+  mark.mdr-hl.mdr-working { animation: none; outline: 2px solid Highlight; }
+}
