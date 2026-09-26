@@ -24,8 +24,8 @@ export type ToWebview =
 
 /**
  * The threads handed to the agent by the last Send, and how far it has got. A
- * thread is done once it's resolved or the agent has the last word (a question
- * back to the reviewer).
+ * thread is done once it's resolved, the agent has the last word (a question
+ * back to the reviewer), or the reviewer took it back to a draft.
  */
 export interface Round {
   total: number;

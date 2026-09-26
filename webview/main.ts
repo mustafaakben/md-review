@@ -301,10 +301,11 @@ function renderSidebar() {
   } else if (!visible.length) {
     out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
-  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c)).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
-  out += anchored.map((c) => card(c)).join('');
+  const now = Date.now(); // one clock for every card's working state
+  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c, now)).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
+  out += anchored.map((c) => card(c, now)).join('');
   if (orphaned.length) {
-    out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map((c) => card(c)).join('');
+    out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map((c) => card(c, now)).join('');
   }
   // Keep what's being typed in a card (a reply, an edit) when the list repaints under it.
   const typed = Array.from(sidebar.querySelectorAll<HTMLTextAreaElement>('.mdr-card textarea')).map((t) => ({
