@@ -335,6 +335,22 @@ test('comment quotes indented code as written, and text after a non-BMP entity k
   }
 });
 
+test('a draft written after review-done, in the same change, is not counted', () => {
+  const md = setup();
+  const prompts = [];
+  const { s, posted } = session(md, { runAgent: (p) => (prompts.push(p), 'started') });
+  s.handle({ type: 'startReview', preset: 'copy-edit' });
+  const id = /--run ([0-9a-f]+)/.exec(prompts[0])[1];
+  run('comment', 'paper.md', '--run', id, '--quote', 'Main St', 'in time');
+  run('review-done', 'paper.md', '--run', id);
+  const t = Date.now();
+  while (Date.now() - t < 5); // a later timestamp
+  run('comment', 'paper.md', '--run', id, '--quote', 'Numbered step one', 'too late');
+  s.onSidecarChanged();
+  const review = posted.filter((m) => m.type === 'review').at(-1).review;
+  assert.deepEqual([review.total, review.finished], [1, true]);
+});
+
 test('a review with no comments that Claude marks done says so', () => {
   const md = setup();
   const notes = [];

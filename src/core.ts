@@ -238,16 +238,17 @@ export class ReviewSession {
     const r = this.review;
     if (!r) return;
     const by = new Map(data.comments.map((c) => [c.id, c]));
-    // Drafts past the cap, or after the run finished, aren't this run's.
+    // An earlier review still running can finish after this one started; only this run's review-done counts.
+    const done = typeof data.reviewDoneAt === 'string' && (data.reviewDoneRun ? data.reviewDoneRun === r.run : data.reviewDoneAt >= r.since);
+    // Drafts past the cap, or after the run finished (even in the same write), aren't this run's.
     for (const c of data.comments) {
       if (r.finished || r.ids.size >= r.max) break;
+      if (done && c.createdAt > data.reviewDoneAt!) continue;
       if (c.origin === 'agent' && (c.reviewRun ? c.reviewRun === r.run : c.createdAt >= r.since)) r.ids.add(c.id);
     }
     const n = r.ids.size;
     let untriaged = 0;
     for (const id of r.ids) if (by.get(id) && store.isAgentDraft(by.get(id)!)) untriaged++;
-    // An earlier review still running can finish after this one started; only this run's review-done counts.
-    const done = typeof data.reviewDoneAt === 'string' && (data.reviewDoneRun ? data.reviewDoneRun === r.run : data.reviewDoneAt >= r.since);
     const finished = r.finished || n >= r.max || done;
     if (finished && !r.finished) {
       const file = path.basename(this.ctx.mdPath);
