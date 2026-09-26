@@ -53,7 +53,7 @@ app.innerHTML = `
       <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="${tip('Undo edit', 'Mod+Z')}" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="${tip('Redo edit', isMac ? 'Mod+Shift+Z' : 'Mod+Y')}" aria-label="Redo edit" disabled></button></span>
       <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
-      <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog"></button>
+      <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-edit-mode" class="mdr-mode" title="${tip('Edit mode: click any paragraph, heading, list item, or table row and type', 'E')}">Edit</button>
       <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
@@ -288,7 +288,7 @@ function card(c: Comment): string {
     c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
   ].join('');
   const replyBox = openReplies.has(c.id)
-    ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (Ctrl+Enter to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
+    ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
   return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}" data-id="${c.id}">
@@ -379,7 +379,11 @@ function openCommentBox(top: number) {
 
 /** Keyboard route to a new comment: open the comment box on the current selection. */
 function commentOnSelection() {
-  if (pop.querySelector('textarea')) return (pop.querySelector('textarea') as HTMLTextAreaElement).focus();
+  const box = pop.querySelector('textarea') as HTMLTextAreaElement | null;
+  if (box) return box.focus();
+  // AltGr is Ctrl+Alt on Windows, so AltGr+M (µ) typed in a text box can arrive here: stay quiet.
+  if (isTyping(document.activeElement) || editing || inline) return;
+  if (editMode) return toast('Turn off edit mode to comment.');
   const range = selectionRange();
   if (!range) return toast('Select some text first, then press ' + keyLabel('Mod+Alt+M') + ' to comment on it.');
   pop.innerHTML = '';
@@ -550,7 +554,19 @@ function undoRedo(which: 'undo' | 'redo') {
   else post({ type: which });
 }
 
+/** Save a half-typed new comment or reply, so Submit and Send don't leave it behind. */
+function flushTyping() {
+  if ((pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim()) saveComment();
+  const ta = document.activeElement as HTMLElement | null;
+  const cardEl = ta?.closest('.mdr-card') as HTMLElement | null;
+  if (cardEl && ta!.tagName === 'TEXTAREA' && !ta!.classList.contains('mdr-body-edit') && (ta as HTMLTextAreaElement).value.trim()) {
+    sendReply(cardEl.dataset.id!, cardEl);
+  }
+}
+
 function runCommand(cmd: string) {
+  // The shortcuts sheet is modal: any other command closes it first.
+  if (cmd !== 'shortcuts' && keySheet.isOpen()) keySheet.toggle();
   switch (cmd) {
     case 'undo':
     case 'redo':
@@ -566,6 +582,7 @@ function runCommand(cmd: string) {
       // Never pull focus out of a text box or editor: that would commit a half-typed edit.
       return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
     case 'send':
+      flushTyping();
       return post({ type: 'sendToAgent' });
     case 'zoomIn':
       return reading.zoomBy(1);
@@ -577,9 +594,12 @@ function runCommand(cmd: string) {
       return reading.togglePanel(!isTyping(document.activeElement) && !editing && !inline);
     case 'comment':
       return commentOnSelection();
-    case 'submit':
-      if (submitBtn.disabled) return toast('No drafts to submit.');
+    case 'submit': {
+      const typed = !!(pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim();
+      flushTyping();
+      if (submitBtn.disabled && !typed) return toast('No drafts to submit.');
       return post({ type: 'submitReview' });
+    }
     case 'comments':
       return setSidebarOpen(document.body.classList.contains('mdr-side-collapsed'));
     case 'shortcuts':
@@ -594,8 +614,8 @@ document.addEventListener('keydown', (e) => {
   if (standalone) {
     // In VS Code these arrive as commands via package.json keybindings.
     const cmd =
-      mod && e.altKey && code === 'KeyM' ? 'comment'
-      : mod && e.altKey && code === 'KeyP' ? 'comments'
+      mod && e.altKey && code === 'KeyM' && !e.getModifierState('AltGraph') ? 'comment'
+      : mod && e.altKey && code === 'KeyP' && !e.getModifierState('AltGraph') ? 'comments'
       : mod && e.altKey && e.key === 'Enter' ? 'send'
       : mod && e.shiftKey && e.key === 'Enter' ? 'submit'
       : mod && !e.shiftKey && k === 'z' ? 'undo'
@@ -621,7 +641,8 @@ document.addEventListener('keydown', (e) => {
     keySheet.toggle();
   } else if (keySheet.isOpen()) return;
   else if (k === 'c' && !e.shiftKey) {
-    if (window.getSelection()?.isCollapsed === false) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount && doc.contains(sel.getRangeAt(0).commonAncestorContainer)) {
       e.preventDefault();
       commentOnSelection();
     }
@@ -814,7 +835,7 @@ function openEditor(ls: number, le: number, text: string) {
   docStale = true;
   const box: HTMLElement = document.createElement(el.tagName === 'TR' ? 'tr' : 'div');
   box.className = 'mdr-block-editor';
-  const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · Ctrl+Enter to save · Esc to cancel</div>
+  const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · ${keyLabel('Mod+Enter')} to save · Esc to cancel</div>
     <textarea spellcheck="true"></textarea>
     <div class="mdr-row"><button class="mdr-primary" data-act="save-block">Save</button><button data-act="cancel-block">Cancel</button></div>`;
   box.innerHTML = el.tagName === 'TR' ? `<td colspan="99">${inner}</td>` : inner;
@@ -836,7 +857,7 @@ function openEditor(ls: number, le: number, text: string) {
     if (act === 'cancel-block') closeEditor();
   });
   box.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       saveBlock();
     }

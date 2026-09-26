@@ -95,7 +95,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send a whole folder.** Right-click a folder in the Explorer → **Send Open Reviews in Folder to Claude** (or run it from the Command Palette for the workspace). Claude gets the list of files with open threads and works through them one at a time with the CLI's `next` command, which shows each comment with the source lines its quote is on.
 - **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
-**Keyboard.** Press `?` in the view (or the keyboard icon in the toolbar) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind any of them under **Keyboard Shortcuts** in VS Code (search for "MD Review").
+**Keyboard.** Press `?` in the view (or the keyboard icon in the toolbar) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind the Ctrl/⌘ shortcuts under **Keyboard Shortcuts** in VS Code (search for "MD Review"); the single-letter keys are fixed.
 
 | Action | Windows / Linux | macOS |
 | --- | --- | --- |

@@ -59,6 +59,7 @@ const SHEET: { title: string; rows: Row[] }[] = [
     rows: [
       { label: 'Edit mode on / off', keys: [['E']] },
       { label: 'Save an edit / cancel it', keys: [['Enter', 'Escape']] },
+      { label: 'Save raw Markdown (' + (isMac ? 'Option' : 'Alt') + '+double-click)', keys: [['Mod+Enter']] },
       { label: 'Undo edit', keys: [['Mod+Z']] },
       { label: 'Redo edit', keys: isMac ? [['Mod+Shift+Z']] : [['Mod+Y'], ['Mod+Shift+Z']] },
     ],
@@ -94,8 +95,10 @@ export function createShortcutSheet(el: HTMLElement): ShortcutSheet {
   </div>`;
   const card = el.firstElementChild as HTMLElement;
 
+  const setExpanded = (open: boolean) => document.getElementById('mdr-keys-btn')?.setAttribute('aria-expanded', String(open));
   function close() {
     el.hidden = true;
+    setExpanded(false);
     returnFocus?.focus();
     returnFocus = null;
   }
@@ -118,6 +121,7 @@ export function createShortcutSheet(el: HTMLElement): ShortcutSheet {
       if (!el.hidden) return close();
       returnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
       el.hidden = false;
+      setExpanded(true);
       card.focus();
     },
     isOpen: () => !el.hidden,

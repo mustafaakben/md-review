@@ -291,14 +291,12 @@
       {
         "command": "mdReview.nextComment",
         "key": "alt+down",
-        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus",
-        "mac": "alt+down"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.previousComment",
         "key": "alt+up",
-        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus",
-        "mac": "alt+up"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.toggleOutline",
