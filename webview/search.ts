@@ -3,7 +3,7 @@
 // editing) and a repaint only has to recompute ranges. Matches are
 // StaticRanges: thousands of live Ranges would each be updated by the browser
 // on every later DOM change, which made one repaint after a find take seconds.
-import { buildTextMap, TextMap } from './anchor';
+import { textMap, TextMap } from './anchor';
 import { tip } from './keys';
 import { reveal as revealTarget } from './reveal';
 
@@ -93,7 +93,7 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
     ranges = [];
     index = -1;
     if (q) {
-      const map = buildTextMap(doc);
+      const map = textMap(doc);
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'), 'gi');
       for (let m = re.exec(map.text); m && ranges.length < MAX_MATCHES; m = re.exec(map.text)) {
         if (!m[0].length) {
