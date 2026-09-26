@@ -19,6 +19,9 @@ const TYPES: Record<string, string> = {
 const MAX_INLINE_BYTES = 8 * 1024 * 1024;
 
 const cache = new Map<string, { stamp: string; url: string }>();
+/** Keep at most this much encoded image text around between renders. */
+const MAX_CACHE_CHARS = 64 * 1024 * 1024;
+let cached = 0;
 
 /**
  * `file` as a data: URL, so the webview can show it without widening the
@@ -46,8 +49,13 @@ export function inlineImage(file: string, platform: NodeJS.Platform = process.pl
   } catch {
     return null;
   }
-  if (cache.size > 64) cache.clear();
+  if (hit) cached -= hit.url.length;
+  if (cached + url.length > MAX_CACHE_CHARS) {
+    cache.clear();
+    cached = 0;
+  }
   cache.set(file, { stamp, url });
+  cached += url.length;
   return url;
 }
 
