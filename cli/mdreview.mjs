@@ -176,17 +176,25 @@ function lineIndex(src) {
   };
 }
 
-function locate(src, anchor) {
-  const q = keyed(anchor?.quote || '').key;
-  if (!q) return null;
+// The masked search key for one source, kept while the same file is searched
+// again (next locates every open comment in a file).
+let prepared = null;
+function prepare(src) {
+  if (prepared?.src === src) return prepared;
   const masked = src
     .replace(/\]\([^)\n]*\)/g, (m) => ']' + blank(m.slice(1)))
     .replace(/\[\^[^\]\n]*\]/g, blank)
     // Never across $…$ math, where `<`, `>`, and `{k=v}` are LaTeX, not markup.
     .replace(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, (m) => (m.includes('$') ? m : blank(m)))
     .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m) => (m.includes('$') ? m : blank(m)));
-  const { key, at } = keyed(masked);
-  const lineAt = lineIndex(src);
+  prepared = { src, ...keyed(masked), lineAt: lineIndex(src) };
+  return prepared;
+}
+
+function locate(src, anchor) {
+  const q = keyed(anchor?.quote || '').key;
+  if (!q) return null;
+  const { key, at, lineAt } = prepare(src);
   const pre = keyed(anchor.prefix || '').key.slice(-12);
   const suf = keyed(anchor.suffix || '').key.slice(0, 12);
   let best = null;
