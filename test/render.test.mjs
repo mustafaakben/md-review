@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { renderMarkdown } = require('../dist/lib.cjs');
+const { renderMarkdown, hasUrlScheme } = require('../dist/lib.cjs');
 const render = (s) => renderMarkdown(s, (x) => x);
 
 test('front matter becomes a title card with its source range', () => {
@@ -126,4 +126,48 @@ test('the per-block HTML joins to exactly the whole document, footnotes as one b
     assert.ok(notes.length <= 1 && (!notes.length || notes[0] === blocks.at(-1)));
   }
   assert.equal(renderBlocks('# A\n\nB\n\n- c\n- d\n', (x) => x).length, 3);
+});
+
+test('images on a Windows drive are local paths, not URLs with a one-letter scheme', () => {
+  const seen = [];
+  const html = renderMarkdown('![a](C:\\figs\\a.png) ![b](C:/figs/b.png) ![c](<D:\\my figs\\c.png>)\n', (src) => {
+    seen.push(src);
+    return `vscode-resource:${seen.length}`;
+  });
+  assert.deepEqual(seen, ['C:\\figs\\a.png', 'C:/figs/b.png', 'D:\\my figs\\c.png']);
+  assert.match(html, /<img src="vscode-resource:1" alt="a"> <img src="vscode-resource:2" alt="b"> <img src="vscode-resource:3" alt="c">/);
+  // Real schemes, protocol-relative URLs and anchors are left alone.
+  const other = renderMarkdown('![x](https://e.org/x.png) ![y](data:image/png;base64,AA) ![z](//e.org/z.png) ![w](file:///tmp/w.png)\n', () => 'RESOLVED');
+  assert.doesNotMatch(other, /RESOLVED/);
+});
+
+test('URL schemes need two or more characters', () => {
+  assert.equal(hasUrlScheme('C:/notes/other.md'), false);
+  assert.equal(hasUrlScheme('c:\\x.md'), false);
+  assert.equal(hasUrlScheme('https://e.org'), true);
+  assert.equal(hasUrlScheme('vscode://file/x'), true);
+  assert.equal(hasUrlScheme('mailto:a@b.c'), true);
+  assert.equal(hasUrlScheme('notes/other.md'), false);
+});
+
+test('network paths are never resolved as local images', () => {
+  // After Markdown's escapes these are \\srv\share\a.png and /\srv\share\b.png: network paths on Windows.
+  const html = renderMarkdown(String.raw`![a](<\\\\srv\\share\\a.png>) ![b](/\\srv\\share\\b.png)` + '\n', () => 'RESOLVED');
+  assert.doesNotMatch(html, /RESOLVED/);
+  assert.match(renderMarkdown(String.raw`![c](\\figs\\c.png)` + '\n', () => 'RESOLVED'), /RESOLVED/, 'one backslash: a path on the current drive');
+});
+
+test('images outside the allowed folders go inline: image files only, never network paths', () => {
+  const { inlineImage } = require('../dist/lib.cjs');
+  const dir = fs.mkdtempSync(path.join(here, 'tmp', 'img-'));
+  const png = path.join(dir, 'a.png');
+  fs.writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  assert.equal(inlineImage(png), 'data:image/png;base64,iVBORw==');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'secret');
+  assert.equal(inlineImage(path.join(dir, 'notes.txt')), null, 'not an image type');
+  fs.mkdirSync(path.join(dir, 'd.png'));
+  assert.equal(inlineImage(path.join(dir, 'd.png')), null, 'a folder');
+  assert.equal(inlineImage(path.join(dir, 'missing.png')), null);
+  assert.equal(inlineImage('\\\\srv\\share\\a.png', 'win32'), null);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
