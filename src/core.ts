@@ -8,6 +8,7 @@ import { renderMarkdown, RenderEnv, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
+import { allPresets, buildReviewPrompt } from './reviewPresets';
 
 export type ToWebview =
   | { type: 'render'; html: string; fileName: string }
@@ -17,7 +18,8 @@ export type ToWebview =
   | { type: 'inlineFailed'; ls: number; le: number; text: string; message: string }
   | { type: 'history'; canUndo: boolean; canRedo: boolean }
   | { type: 'toast'; message: string }
-  | { type: 'agentPrompt'; prompt: string; count: number }
+  | { type: 'agentPrompt'; prompt: string; count: number; review?: string }
+  | { type: 'reviewers'; presets: { id: string; label: string }[] }
   | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'round'; round: Round | null }
   | { type: 'error'; message: string };
@@ -37,6 +39,9 @@ export interface Round {
   /** The sent threads now waiting on the reviewer (questions and suggested edits). */
   questionIds: string[];
   finished: boolean;
+  /** A Review with Claude run: total counts the drafts Claude has left so far. */
+  review?: boolean;
+  startedAt?: string;
 }
 
 export type FromWebview =
@@ -61,7 +66,12 @@ export type FromWebview =
   | { type: 'sendToAgent'; id?: string }
   | { type: 'setPrefs'; prefs: Record<string, unknown> }
   | { type: 'composing'; on: boolean }
-  | { type: 'dismissRound' };
+  | { type: 'dismissRound' }
+  | { type: 'listReviewers' }
+  /** preset: a reviewer id from listReviewers, or 'custom' with the instruction typed in. */
+  | { type: 'startReview'; preset: string; instruction?: string }
+  /** An agent's draft: keep it as yours, or keep it and send it to the agent now. */
+  | { type: 'triage'; id: string; action: 'keep' | 'do' };
 
 export interface HostContext {
   mdPath: string;
@@ -93,6 +103,8 @@ export interface HostContext {
   cliPath?: string;
   /** Tell the user something happened while they may be looking elsewhere (the view isn't focused). */
   notify?(message: string): void;
+  /** The most comments Review with Claude asks for (default 12). */
+  reviewComments?(): number;
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -112,6 +124,8 @@ export class ReviewSession {
   private lastApply: { id: string; from?: string; status: store.Status } | null = null;
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
+  /** A Review with Claude run: when it started, its cap, and the drafts seen so far. */
+  private review: { since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -159,6 +173,7 @@ export class ReviewSession {
   }
 
   private updateRound(data: store.Sidecar): void {
+    if (this.review) return this.updateReview(data);
     if (!this.round) return;
     if (this.round.summary) return this.ctx.post({ type: 'round', round: this.round.summary });
     const by = new Map(data.comments.map((c) => [c.id, c]));
@@ -182,6 +197,17 @@ export class ReviewSession {
       this.round.summary = round;
     }
     this.ctx.post({ type: 'round', round: round.total ? round : null });
+  }
+
+  /** Count the drafts Claude has left since the review started; done at the cap. */
+  private updateReview(data: store.Sidecar): void {
+    const r = this.review!;
+    for (const c of data.comments) if (c.origin === 'agent' && c.createdAt >= r.since) r.ids.add(c.id);
+    const n = r.ids.size;
+    const finished = n >= r.max;
+    if (finished && !r.finished) this.ctx.notify?.(`Claude left ${n} comments on ${path.basename(this.ctx.mdPath)}.`);
+    r.finished = finished;
+    this.ctx.post({ type: 'round', round: { total: n, done: n, resolved: 0, questions: 0, suggestions: 0, questionIds: [], finished, review: true, startedAt: r.since } });
   }
 
   /** Called by a file watcher when the sidecar changes on disk. */
@@ -239,6 +265,7 @@ export class ReviewSession {
         // Applied is done: the thread resolves, like accepting a suggestion in Docs.
         this.mutate((d) => {
           const c = store.find(d, msg.id);
+          store.keepAgentDraft(d, msg.id, author);
           const s = store.suggestionOf(c, msg.from);
           this.lastApply = { id: msg.id, from: msg.from, status: c.status };
           if (s) s.appliedAt = store.now();
@@ -308,12 +335,21 @@ export class ReviewSession {
         return this.sendToAgent(msg.id);
       case 'dismissRound':
         this.round = null;
+        this.review = null;
         return this.ctx.post({ type: 'round', round: null });
       case 'setPrefs':
         this.ctx.setPrefs?.(msg.prefs);
         return;
       case 'composing': // a VS Code context key for Alt+1/2/3; set by the extension
         return;
+      case 'listReviewers':
+        // Read on demand: the menu is the only thing that needs the workspace reviewers.
+        return this.ctx.post({ type: 'reviewers', presets: allPresets(this.agentCwd()).map(({ id, label }) => ({ id, label })) });
+      case 'startReview':
+        return this.startReview(msg.preset, msg.instruction);
+      case 'triage':
+        if (msg.action === 'do') return this.sendToAgent(msg.id);
+        return this.mutate((d) => store.keepAgentDraft(d, msg.id, author));
     }
   }
 
@@ -375,6 +411,7 @@ export class ReviewSession {
     const { data, written } = store.mutate(this.ctx.mdPath, (d) => {
       if (id) {
         const c = store.find(d, id);
+        store.keepAgentDraft(d, id, this.ctx.author()); // acting on Claude's draft makes it yours
         if (c.status === 'draft') store.setStatus(d, id, 'submitted');
       } else store.submitDrafts(d);
     });
@@ -387,6 +424,7 @@ export class ReviewSession {
     }
     // Only threads that are actually waiting on the agent count toward the round.
     const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
+    this.review = null;
     // Ask Claude on one thread while a round is still running adds to that round.
     if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
     else this.round = ids.length ? { ids } : null;
@@ -401,6 +439,34 @@ export class ReviewSession {
     });
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+  }
+
+  private agentCwd(): string {
+    return this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath);
+  }
+
+  /** Start Claude as first reviewer: it reads the file and leaves drafts for you to triage. */
+  private startReview(id: string, instruction?: string): void {
+    const cwd = this.agentCwd();
+    const preset =
+      id === 'custom'
+        ? { label: 'Custom', instructions: (instruction || '').trim().slice(0, 2000) }
+        : allPresets(cwd).find((p) => p.id === id);
+    if (!preset || !preset.instructions) {
+      this.ctx.post({ type: 'toast', message: id === 'custom' ? 'Type what Claude should look for first.' : 'That reviewer is no longer available.' });
+      return;
+    }
+    let existing = 0;
+    try {
+      existing = store.readSidecar(this.ctx.mdPath).comments.filter((c) => c.status !== 'resolved').length;
+    } catch {} // a broken sidecar is reported by sendComments
+    const max = Math.max(1, Math.min(50, Math.round(this.ctx.reviewComments?.() ?? 12)));
+    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing });
+    this.round = null;
+    this.review = { since: store.now(), max, ids: new Set(), finished: false };
+    this.sendComments();
+    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
+    else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
   }
 
   /** Block editing works on disk bytes, so the view must reflect the disk. */

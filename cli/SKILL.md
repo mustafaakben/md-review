@@ -38,6 +38,22 @@ node .claude/skills/md-review/mdreview.mjs list    [paths…] --status submitted
 4. Repeat until `next` says there are no open comments, then summarize what
    you changed and which threads you left open.
 
+## Reviewing a document first
+
+When the user asks you to review a document rather than work through its
+comments, don't edit it. Leave draft comments for the author to keep, act on,
+or dismiss, most important first:
+
+```bash
+node .claude/skills/md-review/mdreview.mjs comment <file.md> --quote "<text as it reads>" --severity major "what and why"
+node .claude/skills/md-review/mdreview.mjs comment <file.md> --document "a note about the whole file"
+```
+
+The quote is the rendered text, without `**`, `_` or link syntax. Add
+`--line <n>` when the words appear more than once, `--kind question` for a
+question, and `--suggest "<replacement>"` for a concrete fix. If the command
+says the quote wasn't found or is ambiguous, fix it and run it again.
+
 Always use the default author (`Claude`); `next` recognizes your own replies
 by that name, and a different one makes it hand you the same thread again.
 

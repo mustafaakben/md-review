@@ -10,12 +10,17 @@
 //   node mdreview.mjs resolve <file.md> <id> ["<closing reply>"] [--author Claude]
 //   node mdreview.mjs suggest <file.md> <id> "<replacement for the quote>" ["<note>"]
 //   node mdreview.mjs reopen  <file.md> <id>
+//   node mdreview.mjs comment <file.md> --quote "<text as it reads>" [--line N] [--kind question|praise]
+//                             [--severity major|minor|nit] [--suggest "<replacement>"] "<body>"
+//   node mdreview.mjs comment <file.md> --document "<body>"
 //   node mdreview.mjs init-claude [folder] [--force]
 //
 // paths can be .md files or folders (searched recursively; default: the current
 // folder). `next` prints the first open comment with the source lines its quote
 // is on, so an agent can loop: next -> edit -> reply/resolve -> next. It skips
 // threads whose last reply is from --author (waiting on the reviewer) unless --all.
+// `comment` is for an agent reviewing first: it adds a draft from --author,
+// marked origin "agent", for the reviewer to keep, act on, or dismiss.
 //
 // Every write re-reads the sidecar, applies the change, and writes it back, so
 // it never clobbers comments the viewer added in the meantime.
@@ -45,6 +50,12 @@ const around = Math.max(0, Number(flag('lines', 2)) || 0);
 const asJson = bool('json');
 const force = bool('force');
 const includeAll = bool('all');
+const quoteArg = flag('quote');
+const lineArg = flag('line');
+const kindArg = flag('kind');
+const severityArg = flag('severity');
+const suggestArg = flag('suggest');
+const wholeDoc = bool('document');
 const [cmd, ...rest] = args;
 
 function usage(code = 1) {
@@ -196,18 +207,41 @@ function lineIndex(src) {
   };
 }
 
+const ENTITY = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+/** The character an HTML entity (`amp`, `#233`, `#xE9`) stands for, if it's one we know. */
+function entity(k) {
+  k = k.toLowerCase();
+  if (k[0] !== '#') return ENTITY[k];
+  const n = k[1] === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
+  return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : undefined;
+}
+
 // The masked search key for one source, kept while the same file is searched
 // again (next locates every open comment in a file).
 let prepared = null;
 function prepare(src) {
   if (prepared?.src === src) return prepared;
+  // Code shows as written, so markup-looking text in it stays.
+  const code = [...src.matchAll(CODE)].map((m) => [m.index, m.index + m[0].length]);
+  const text = (fn) => (m, ...a) => {
+    const at = a[a.length - 2];
+    return code.some(([s, e]) => at < e && at + m.length > s) ? m : fn(m, ...a);
+  };
   // Citations first, while `[x](url)` still shows it's a link, not a citation.
   const masked = maskCitations(src)
-    .replace(/\]\([^)\n]*\)/g, (m) => ']' + blank(m.slice(1)))
-    .replace(/\[\^[^\]\n]*\]/g, blank)
+    .replace(/\]\([^)\n]*\)/g, text((m) => ']' + blank(m.slice(1))))
+    .replace(/\[\^[^\]\n]*\]/g, text(blank))
     // Never across $…$ math, where `<`, `>`, and `{k=v}` are LaTeX, not markup.
-    .replace(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, (m) => (m.includes('$') ? m : blank(m)))
-    .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m) => (m.includes('$') ? m : blank(m)));
+    .replace(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, text((m) => (m.includes('$') ? m : blank(m))))
+    .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, text((m) => (m.includes('$') ? m : blank(m))))
+    // An entity shows as its character: `AT&amp;T` reads "AT&T".
+    .replace(
+      /&(#\d+|#x[0-9a-f]+|[a-z]+);/gi,
+      text((m, k) => {
+        const ch = entity(k);
+        return ch && ch.length === 1 ? ch + ' '.repeat(m.length - 1) : m;
+      }),
+    );
   prepared = { src, ...keyed(masked), lineAt: lineIndex(src) };
   return prepared;
 }
@@ -340,6 +374,244 @@ function contextOf(md, c) {
   const source = [];
   for (let n = from; n && n <= to; n++) source.push({ line: n, text: lines[n - 1], quoted: n >= ls && n <= le });
   return { file: shown(md), found: !!hit, lineStart: ls, lineEnd: le, source };
+}
+
+// ---- building an anchor for a new comment (the agent as first reviewer) ----
+//
+// The viewer anchors on rendered text: the quote, plus up to 32 characters of
+// context each side. Without a renderer, approximate that text from the source:
+// drop markup, keep what shows. Where the source renders as text we can't
+// reproduce (footnote markers, math, the front matter card) the context stops,
+// since the viewer trusts a match by how much of its context agrees.
+const DROP = '\0';
+const STOP = '\u0001';
+function plainText(src) {
+  const n = src.length;
+  const out = src.split('');
+  const lit = new Uint8Array(n); // code and escaped characters: shown as written
+  const fill = (a, b, ch, force = false) => {
+    for (let k = a; k < b; k++) if (force || (!lit[k] && out[k] !== STOP)) out[k] = ch;
+  };
+  const each = (re, fn) => {
+    for (const m of src.matchAll(re)) {
+      let busy = false;
+      for (let k = m.index; k < m.index + m[0].length && !busy; k++) busy = !!lit[k];
+      if (!busy) fn(m, m.index);
+    }
+  };
+  const lines = [];
+  for (let i = 0, s = 0; i <= n; i++) if (i === n || src[i] === '\n') lines.push([s, (s = i + 1) - 1]);
+  const lineAt = (s, e) => src.slice(s, e).replace(/\r$/, '');
+  // Front matter shows as a title card.
+  const fm = /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?=\r?\n|$)/.exec(src);
+  if (fm) {
+    fill(0, fm[0].length, STOP, true);
+    lit.fill(1, 0, fm[0].length);
+  }
+  // Fences: the fence lines go, the code shows as written.
+  let fence = null;
+  for (const [s, e] of lines) {
+    if (lit[s]) continue;
+    const t = lineAt(s, e);
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(t);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !t.slice(f[0].length).trim()) {
+        fill(s, e, DROP, true);
+        fence = null;
+      }
+      lit.fill(1, s, e + 1);
+    } else if (f) {
+      fence = f[1];
+      fill(s, e, DROP, true);
+      lit.fill(1, s, e + 1);
+    }
+  }
+  each(/(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g, (m, i) => {
+    fill(i, i + m[1].length, DROP);
+    fill(i + m[0].length - m[1].length, i + m[0].length, DROP);
+    lit.fill(1, i, i + m[0].length);
+  });
+  each(/\\([!-/:-@[-`{-~])/g, (m, i) => {
+    out[i] = DROP;
+    lit[i] = lit[i + 1] = 1;
+  });
+  each(/\\\r?\n/g, (m, i) => void (out[i] = DROP));
+  each(/\$\$[\s\S]*?\$\$|\$(?=\S)[^$\n]*?\S\$(?!\d)|\$[^\s$]\$/g, (m, i) => fill(i, i + m[0].length, STOP));
+  each(/<!--[\s\S]*?-->/g, (m, i) => fill(i, i + m[0].length, DROP));
+  // Citations and cross-refs render as UI the viewer leaves out of the text.
+  const cited = maskCitations(src);
+  for (let k = 0; k < n; k++) if (cited[k] !== src[k] && !lit[k]) out[k] = DROP;
+  each(/!\[[^\]\n]*\]\([^)\n]*\)/g, (m, i) => fill(i, i + m[0].length, DROP));
+  each(/^ {0,3}\[\^[^\]\n]*\]:[ \t]*/gm, (m, i) => fill(i, i + m[0].length, STOP));
+  each(/\[\^[^\]\n]*\]/g, (m, i) => fill(i, i + m[0].length, STOP));
+  each(/^ {0,3}\[(?!\^)[^\]\n]+\]:[ \t]+\S.*$/gm, (m, i) => fill(i, i + m[0].length, DROP)); // link definitions
+  each(/\[([^\]\n]*)\](\([^)\n]*\)|\[[^\]\n]*\])/g, (m, i) => {
+    out[i] = DROP;
+    fill(i + 1 + m[1].length, i + m[0].length, DROP);
+  });
+  each(/<(?:https?:|mailto:)[^>\s]*>/g, (m, i) => {
+    out[i] = DROP;
+    out[i + m[0].length - 1] = DROP;
+  });
+  each(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, (m, i) => fill(i, i + m[0].length, DROP));
+  each(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m, i) => fill(i, i + m[0].length, DROP));
+  each(/\{(?:\+\+|--|~~|==|>>)|(?:\+\+|--|~~|==|<<)\}|~>/g, (m, i) => fill(i, i + m[0].length, DROP));
+  each(/&(#\d+|#x[0-9a-f]+|[a-z]+);/gi, (m, i) => {
+    const ch = entity(m[1]);
+    if (!ch) return;
+    fill(i, i + m[0].length, DROP);
+    out[i] = ch;
+  });
+  // Block markers at the start of a line, rules, and table syntax.
+  const isSep = (t) => /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(t) || /^\s*\|\s*:?-+:?\s*\|\s*$/.test(t);
+  let table = false;
+  for (let li = 0; li < lines.length; li++) {
+    const [s, e] = lines[li];
+    if (lit[s]) continue;
+    const t = lineAt(s, e);
+    const next = lines[li + 1] ? lineAt(...lines[li + 1]) : '';
+    if (!t.trim()) table = false;
+    else if (t.includes('|') && isSep(next)) table = true;
+    if (/^ {0,3}([-=*_])(?:[ \t]*\1){2,}[ \t]*$/.test(t) || (table && isSep(t))) {
+      fill(s, e, DROP);
+      continue;
+    }
+    if (table) for (let k = s; k < e; k++) if (src[k] === '|' && src[k - 1] !== '\\' && !lit[k]) out[k] = ' ';
+    const lead = /^(?:[ \t]*>[ \t]?)*[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|#{1,6}(?=[ \t]|$)|\[!\w+\][ \t]*$)?/.exec(t)[0];
+    fill(s, s + lead.length, DROP);
+    const close = /[ \t]#+[ \t]*$/.exec(t);
+    if (/^ {0,3}#{1,6}[ \t]/.test(t) && close) fill(s + close.index, e, DROP);
+  }
+  // Emphasis: doubled delimiters always; a single * unless spaced on both sides; a single _ at a word edge.
+  each(/\*\*|__|~~|==/g, (m, i) => fill(i, i + 2, DROP));
+  // Subscript and superscript: H~2~O, 2^10^.
+  each(/(?<![~\\])~(?!~)[^~\s]+~(?!~)|(?<!\\)\^[^^\s\]]+\^/g, (m, i) => {
+    fill(i, i + 1, DROP);
+    fill(i + m[0].length - 1, i + m[0].length, DROP);
+  });
+  const word = (c) => !!c && /[\p{L}\p{N}]/u.test(c);
+  for (let k = 0; k < n; k++) {
+    if (lit[k] || out[k] !== src[k]) continue;
+    const a = src[k - 1];
+    const b = src[k + 1];
+    if (src[k] === '*' && !(/\s/.test(a || ' ') && /\s/.test(b || ' '))) out[k] = DROP;
+    if (src[k] === '_' && word(a) !== word(b)) out[k] = DROP;
+  }
+  // Collapse whitespace; remember where a STOP fell between two characters.
+  let text = '';
+  const at = [];
+  const stop = [];
+  let pending = false;
+  for (let k = 0; k < n; k++) {
+    const ch = out[k];
+    if (ch === DROP) continue;
+    if (ch === STOP) {
+      pending = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (!text || text.endsWith(' ')) continue;
+      text += ' ';
+    } else text += ch;
+    at.push(k);
+    stop.push(pending);
+    pending = false;
+  }
+  return { text, at, stop };
+}
+
+/** 1-based first and last line of the block(s) covering source lines a..b. */
+function blockLines(lines, a, b) {
+  const starts = (t) => /^ {0,3}(#{1,6}[ \t]|[-*+][ \t]|\d{1,9}[.)][ \t]|>|`{3,}|~{3,}|\|)/.test(t);
+  const single = (t) => /^ {0,3}(#{1,6}[ \t]|\|)/.test(t);
+  let fence = null;
+  const inFence = [];
+  for (let i = 0; i < lines.length; i++) {
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(lines[i]);
+    if (fence) {
+      inFence[i] = fence;
+      if (f && f[1][0] === fence.ch) fence = null;
+    } else if (f) inFence[i] = fence = { ch: f[1][0], start: i };
+  }
+  let ls = a;
+  if (inFence[a - 1]) ls = inFence[a - 1].start + 1;
+  else while (ls > 1 && lines[ls - 2].trim() && !starts(lines[ls - 1]) && !single(lines[ls - 2]) && !inFence[ls - 2]) ls--;
+  let le = b;
+  if (inFence[b - 1]) {
+    while (le < lines.length && inFence[le]) le++;
+  } else if (!single(lines[b - 1])) while (le < lines.length && lines[le].trim() && !starts(lines[le]) && !inFence[le]) le++;
+  return [ls, le];
+}
+
+const collapse = (s) => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * Anchor `quote` (rendered text) in the source: every place its letters and
+ * digits occur, narrowed to exact matches of the rendered text when there
+ * are some, then to the one nearest `line`. Exits 2 when that isn't one place.
+ */
+function anchorFor(md, src, quote, line) {
+  const q = keyed(quote).key;
+  if (!q) fail('The quote needs some letters or digits.');
+  const { key, at } = prepare(src);
+  const plain = plainText(src);
+  const lines = src.split(/\r?\n/);
+  const lineOf = lineIndex(src);
+  // First plain-text index at or after source offset o.
+  const toPlain = (o) => {
+    let lo = 0;
+    let hi = plain.at.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (plain.at[mid] < o) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const lead = /^[^\p{L}\p{N}]*/u.exec(quote.trim())[0];
+  const trail = /[^\p{L}\p{N}]*$/u.exec(quote.trim())[0];
+  const found = [];
+  for (let i = key.indexOf(q); i >= 0; i = key.indexOf(q, i + 1)) {
+    const s = at[i];
+    const e = at[i + q.length - 1];
+    let pa = toPlain(s);
+    let pb = toPlain(e + 1) - 1;
+    const clean = plain.at[pa] === s && plain.at[pb] === e && !plain.stop.slice(pa + 1, pb + 1).some(Boolean);
+    // Punctuation at the ends of the quote isn't in the key: take it when the text has it there.
+    if (lead && plain.text.slice(pa - lead.length, pa) === lead && !plain.stop.slice(pa - lead.length + 1, pa + 1).some(Boolean)) pa -= lead.length;
+    if (trail && plain.text.slice(pb + 1, pb + 1 + trail.length) === trail && !plain.stop.slice(pb + 1, pb + 1 + trail.length).some(Boolean)) pb += trail.length;
+    found.push({ pa, pb, clean, line: lineOf(s), lastLine: lineOf(e), text: plain.text.slice(pa, pb + 1) });
+  }
+  if (!found.length) fail(`Quote not found in ${shown(md)}: "${quote}". Quote the text exactly as it reads in the document.`);
+  const exact = found.filter((f) => collapse(f.text) === collapse(quote));
+  let pool = exact.length ? exact : found;
+  if (pool.length > 1 && line) {
+    const d = (f) => (line < f.line ? f.line - line : line > f.lastLine ? line - f.lastLine : 0);
+    const best = Math.min(...pool.map(d));
+    pool = pool.filter((f) => d(f) === best);
+  }
+  if (pool.length > 1) {
+    const where = [...new Set(pool.map((f) => f.line))].join(', ');
+    fail(
+      line
+        ? `The quote appears ${pool.length} times on line ${where}. Quote more of the passage so it is unique.`
+        : `The quote appears ${pool.length} times (lines ${where}). Add --line <n> for the one you mean, or quote more of the passage.`,
+    );
+  }
+  const hit = pool[0];
+  if (!hit.clean) fail(`The quote runs into a footnote marker, math, an image or the front matter, which the viewer can't anchor on. Quote a passage of plain text.`);
+  // Context: up to 32 characters each side, stopping where the rendered text is unknown.
+  let s = hit.pa;
+  while (s > 0 && hit.pa - s < 32 && !plain.stop[s]) s--;
+  let e = hit.pb + 1;
+  while (e < plain.text.length && e - hit.pb - 1 < 32 && !plain.stop[e]) e++;
+  const [lineStart, lineEnd] = blockLines(lines, hit.line, hit.lastLine);
+  return { anchor: { quote: hit.text, prefix: plain.text.slice(s, hit.pa), suffix: plain.text.slice(hit.pb + 1, e), lineStart, lineEnd }, asGiven: collapse(hit.text) === collapse(quote) };
+}
+
+function fail(msg) {
+  console.error(msg);
+  process.exit(2);
 }
 
 const sugState = (s) => (s.appliedAt ? ' (applied)' : s.dismissedAt ? ' (dismissed)' : '');
@@ -546,6 +818,41 @@ switch (cmd) {
       c.resolvedAt = null;
     });
     console.log(`Reopened ${id}`);
+    break;
+  }
+  case 'comment': {
+    const [mdArg, body] = rest;
+    if (!mdArg || !body?.trim() || rest.length > 2) usage();
+    if (wholeDoc === (quoteArg !== undefined)) fail('Pass either --quote "<text>" or --document.');
+    if (kindArg && !['comment', 'question', 'praise'].includes(kindArg)) fail('--kind is question or praise.');
+    if (severityArg && !(severityArg in SEVERITY_RANK)) fail('--severity is major, minor or nit.');
+    if (wholeDoc && suggestArg !== undefined) fail('--suggest replaces a quote; a whole-document comment has none.');
+    const line = lineArg === undefined ? 0 : Number(lineArg);
+    if (!Number.isInteger(line) || line < 0) fail('--line is a 1-based line number.');
+    const md = mdOf(mdArg);
+    const src = readSource(md);
+    if (src == null) fail(`Not found: ${mdArg}`);
+    const hit = wholeDoc ? null : anchorFor(md, src, quoteArg, line);
+    const c = {
+      id: newId('c'),
+      author,
+      createdAt: now(),
+      anchor: hit ? hit.anchor : { quote: '', prefix: '', suffix: '', lineStart: 0, lineEnd: 0 },
+      body: body.trim(),
+      status: 'draft',
+      submittedAt: null,
+      resolvedAt: null,
+      ...(wholeDoc ? { scope: 'document' } : {}),
+      ...(kindArg && kindArg !== 'comment' ? { kind: kindArg } : {}),
+      ...(severityArg ? { severity: severityArg } : {}),
+      ...(suggestArg !== undefined ? { suggestion: { text: suggestArg } } : {}),
+      origin: 'agent',
+      replies: [],
+    };
+    mutate(md, (d) => void d.comments.push(c));
+    const where = hit ? ` on L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? `-${c.anchor.lineEnd}` : ''}` : ' on the whole document';
+    console.log(`Added ${c.id}${where}, a draft for the reviewer.`);
+    if (hit && !hit.asGiven) console.log(`Quoted as it reads: "${c.anchor.quote}"`);
     break;
   }
   case 'init-claude':

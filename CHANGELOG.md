@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Review with Claude**: a toolbar menu of reviewers (Copy edit, Clarity and flow, Methods reviewer, Claims need citations, Reviewer 2, or a custom one-liner, plus your own in `.mdreview/reviewers/*.md`) starts Claude as first reviewer. Claude leaves up to 12 draft comments with the CLI's new `comment` command, which anchors a quote through the source's markup. They wait under **From Claude** with **Keep**, **Do it** and **Dismiss**, and Submit review and Send to Claude skip them until you've triaged them.
 - Suggested edits: **Suggest edit** in the comment box proposes replacement text for the selection, and the card shows it as a redline with **Apply** (a checked, byte-exact rewrite of just that text, with Undo) that resolves the thread. With `mdReview.agent.editMode` set to `suggest`, Claude proposes changes with the CLI's new `suggest` command instead of editing, and you apply or dismiss each one.
 - The last item of a list followed by a blank line can be edited in the view again (it used to fail with "The file changed on disk").
 - Live agent status: after **Send to Claude**, the comments pane shows "Claude is working · 2 of 5" with a progress bar, and the thread Claude is on pulses. When it's done you get one summary (resolved, and questions for you) with **Show questions**; a background panel shows it as a notification. The CLI's `next` and `context` mark the thread they hand out, and `reply` and `resolve` clear the mark.
