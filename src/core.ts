@@ -90,7 +90,7 @@ export interface HostContext {
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
-  private lastRendered = '';
+  private lastRendered: string | undefined;
   private watched = '';
   private history = new EditHistory();
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
@@ -98,8 +98,14 @@ export class ReviewSession {
 
   constructor(private ctx: HostContext) {}
 
-  render(): void {
+  /**
+   * Render the current text and send it to the view. One file change reaches
+   * the host several ways (the edit itself, the file watcher, VS Code reloading
+   * the buffer), so text that was already rendered is skipped unless `force`.
+   */
+  render(force = false): void {
     const text = this.ctx.getText();
+    if (!force && text === this.lastRendered) return this.syncHistory();
     this.lastRendered = text;
     let html: string;
     const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
@@ -187,7 +193,7 @@ export class ReviewSession {
     try {
       this.handleInner(msg);
     } catch (e: any) {
-      if (e instanceof BlockEditError) this.render();
+      if (e instanceof BlockEditError) this.render(true);
       this.ctx.post({ type: 'error', message: String(e?.message || e) });
     }
   }
@@ -196,7 +202,7 @@ export class ReviewSession {
     const author = this.ctx.author();
     switch (msg.type) {
       case 'ready':
-        this.render();
+        this.render(true);
         this.sendComments();
         this.postHistory();
         if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
@@ -225,7 +231,7 @@ export class ReviewSession {
         this.assertEditable();
         this.recorded(() => applyBlockEdit(this.ctx.mdPath, msg.ls, msg.le, msg.original, msg.newText));
         this.ctx.post({ type: 'blockSaved', ls: msg.ls });
-        this.render();
+        this.render(true); // the view changed the DOM; always repaint it
         return;
       case 'saveInline':
         this.assertEditable();
@@ -239,7 +245,7 @@ export class ReviewSession {
           throw e;
         }
         this.ctx.post({ type: 'blockSaved', ls: msg.ls });
-        this.render();
+        this.render(true);
         return;
       case 'openLink':
         this.ctx.openLink(msg.href);
@@ -249,7 +255,7 @@ export class ReviewSession {
           this.assertEditable();
           this.recorded(() => toggleTask(this.ctx.mdPath, msg.line, msg.checked, msg.key));
         } finally {
-          this.render(); // the webview repaints even if the HTML is unchanged, so a refused click is undone
+          this.render(true); // repaint even if the text is unchanged, so a refused click is undone
         }
         return;
       case 'undo':
@@ -299,7 +305,7 @@ export class ReviewSession {
     fs.writeFileSync(this.ctx.mdPath, next);
     this.postHistory();
     this.ctx.post({ type: 'toast', message: which === 'undo' ? 'Undid the last edit.' : 'Redid the edit.' });
-    this.render();
+    this.render(true);
   }
 
   /**
@@ -344,8 +350,8 @@ export class ReviewSession {
     }
     const disk = fs.readFileSync(this.ctx.mdPath, 'utf8').replace(/^﻿/, '');
     const norm = (s: string) => s.replace(/\r\n/g, '\n');
-    if (norm(disk) !== norm(this.lastRendered)) {
-      this.render();
+    if (norm(disk) !== norm(this.lastRendered ?? '')) {
+      // handle() repaints from disk when it catches this
       throw new BlockEditError('The file changed on disk; the view was refreshed. Double-click the block again.');
     }
   }
