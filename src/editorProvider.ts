@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import { runAgent } from './agentRun';
-import { sameName, shouldPoll, folderKey, StampTracker, POLL_MS } from './fileWatch';
+import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
 import { hasUrlScheme } from './render';
 import { inlineImage, isInside } from './localImage';
 
@@ -293,9 +293,9 @@ interface PanelState {
   focus?: string;
 }
 
-/** Compare files by path; Windows paths are case-insensitive. */
+/** Compare files by path; Windows and macOS paths are case-insensitive. */
 function fileKey(uri: vscode.Uri): string {
-  return process.platform === 'win32' ? uri.fsPath.toLowerCase() : uri.fsPath;
+  return nameKey(uri.fsPath, process.platform);
 }
 
 /**
