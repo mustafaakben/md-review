@@ -520,7 +520,11 @@ doc.addEventListener('click', (e) => {
     if (editMode || inline) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#')) {
-      document.getElementById(decodeURIComponent(href.slice(1)))?.scrollIntoView({ block: 'center' });
+      let id = href.slice(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch {} // a citation key may hold a bare %
+      document.getElementById(id)?.scrollIntoView({ block: 'center' });
     } else if (href) post({ type: 'openLink', href });
     return;
   }

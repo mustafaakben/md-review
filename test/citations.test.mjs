@@ -152,3 +152,69 @@ test('the CLI finds quotes that run across citations and cross-refs', () => {
   assert.deepEqual([at('most variance  across').found, at('most variance  across').lineStart], [true, 6]);
   assert.deepEqual([at('As  argue, see  for the').found, at('As  argue, see  for the').lineStart], [true, 8]);
 });
+
+test('citations inside link text, next to HTML tags, "and others", and tidy punctuation', () => {
+  const bib = BIB + `@book{zed, author = {Zed, Zoe and others}, title = {Why?}, year = 2003}
+@misc{nob, author = {Nobody, N.}, title = {Undated}}
+`;
+  const html = setup(FM + '[see [@rivera2021]](http://q) and [a [@fig:x] b](http://z)\n\n<span>@who2019</span> [@zed; @nob]\n', bib);
+  assert.match(html, /<a href="http:\/\/q">see <span class="mdr-cite-group mdr-ui">\(<span class="mdr-cite"[^>]*>Rivera and Chen 2021<\/span>\)<\/span><\/a>/);
+  assert.match(html, /<a href="http:\/\/z">a <span class="mdr-xref-group/);
+  assert.match(html, /<span><span class="mdr-cite-group mdr-ui"><a [^>]*>World Health Organization<\/a> \(2019\)<\/span><\/span>/);
+  assert.match(html, />Zed et al\. 2003</);
+  assert.match(html, /id="ref-zed">Zed, Zoe, et al\. 2003\. “Why\?”</);
+  assert.match(html, /id="ref-nob">Nobody, N\. n\.d\. “Undated\.”</);
+});
+
+test('the list goes under a closing References heading, before footnotes, but not after body text', () => {
+  const foot = setup(FM + 'A [@rivera2021].[^1]\n\n[^1]: note\n\n# References\n');
+  assert.match(foot, /References<\/h1>\n<section class="mdr-refs mdr-ui"[^>]*><p class="mdr-ref"[\s\S]*<hr class="footnotes-sep">/);
+  const after = setup(FM + 'A [@rivera2021].\n\n# References\n\nSome closing text.\n');
+  assert.match(after, /Some closing text\.<\/p>\n<section class="mdr-refs mdr-ui"[^>]*><h2 class="mdr-refs-title">References<\/h2>/);
+});
+
+// The quote a comment on `text` would store, and whether the CLI finds it.
+function cliFinds(quote) {
+  fs.writeFileSync(
+    path.join(tmp, 'paper.md.comments.json'),
+    JSON.stringify({ schemaVersion: 1, file: 'paper.md', comments: [{ id: 'c1', author: 'R', createdAt: '2026-09-26T10:00:00.000Z', anchor: { quote, prefix: '', suffix: '', lineStart: 1, lineEnd: 1 }, body: 'b', status: 'submitted', replies: [] }] }),
+  );
+  return JSON.parse(execFileSync(process.execPath, [cli, 'context', 'paper.md', 'c1', '--json'], { cwd: tmp, encoding: 'utf8' })).found;
+}
+
+test('the CLI masks only real citations: not across paragraphs, link text, or code', () => {
+  setup(FM + 'The interval [0, 1) is open.\n\nWe thank @bob.\n\nAnd (0, 1] too.\n\nRead [the survey by @a](http://x) now.\n\n```\n@property x\n```\n\nIn `f(@x)` code.\n');
+  assert.equal(cliFinds('interval [0, 1) is open'), true);
+  assert.equal(cliFinds('And (0, 1] too'), true);
+  assert.equal(cliFinds('Read the survey by'), true);
+  assert.equal(cliFinds('@property x'), true);
+  assert.equal(cliFinds('In f(@x) code'), true);
+  // An empty `bibliography:` is no bibliography, in the CLI as in the viewer.
+  setup('---\nbibliography:\n---\n\nPing @bob now.\n', null);
+  assert.equal(cliFinds('Ping @bob now'), true);
+});
+
+test('escaped or code @ is not a citation; bib text is escaped; edits to the .bib show', () => {
+  const html = setup(FM + 'A [\\@rivera2021] and [`@rivera2021`] and [*see* @rivera2021].\n');
+  assert.match(html, /A \[@rivera2021\] and \[<code>@rivera2021<\/code>\]/);
+  assert.match(html, /\(<em>see<\/em> <a class="mdr-cite"/);
+  const evil = setup(FM + 'X [@e].\n', '@misc{e, author = {<script>x</script>}, title = {"quoted" & <b>}, year = 2001}');
+  assert.doesNotMatch(evil, /<script>|<b>/);
+  assert.match(evil, /title="&lt;script&gt;x&lt;\/script&gt;\. 2001\. “&quot;quoted&quot; &amp; &lt;b&gt;\.”"/);
+  // The cache keys on mtime and size, so a changed file is read again.
+  const bibPath = path.join(tmp, 'refs.bib');
+  fs.writeFileSync(bibPath, '@misc{e, author = {Later, Lee}, year = 2002}');
+  fs.utimesSync(bibPath, new Date(), new Date(Date.now() + 5000));
+  assert.match(renderMarkdown(FM + 'X [@e].\n', (x) => x, { docDir: tmp }), />Later 2002</);
+});
+
+test('CRLF front matter, absolute bibliography paths, and the files a render read', () => {
+  setup('x', BIB);
+  const abs = path.join(tmp, 'refs.bib');
+  const env = { docDir: path.join(tmp, 'elsewhere') };
+  const html = renderMarkdown(`---\r\nbibliography: ${JSON.stringify(abs)}\r\n---\r\n\r\nSee [@rivera2021].\r\n`, (x) => x, env);
+  assert.match(html, />Rivera and Chen 2021</);
+  assert.deepEqual(env.bibFiles, [abs]);
+  const eq = renderMarkdown('$$ x $$ {#eq:a$\'}\n\nSee @eq:a$\'.\n', (x) => x);
+  assert.match(eq, /<section id="eq:a\$'"/);
+});

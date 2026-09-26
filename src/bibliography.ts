@@ -9,6 +9,8 @@ export interface BibEntry {
   names: string[];
   /** "Family, Given" for the first name, "Given Family" after, for the list. */
   fullNames: string[];
+  /** The author list ended in "and others". */
+  etal?: boolean;
   year: string;
   title?: string;
   container?: string;
@@ -131,10 +133,11 @@ export function parseBibTeX(text: string): Map<string, BibEntry> {
     i += tm[0].length;
     const closer = tm[2] === '{' ? '}' : ')';
     if (type === 'comment' || type === 'preamble') {
+      // Only the entry's own brackets nest; a stray "(" in a {…} comment doesn't.
       let depth = 1;
       for (; i < n && depth; i++) {
-        if (text[i] === '{' || text[i] === '(') depth++;
-        else if (text[i] === '}' || text[i] === ')') depth--;
+        if (text[i] === tm[2]) depth++;
+        else if (text[i] === closer) depth--;
       }
       continue;
     }
@@ -173,12 +176,15 @@ export function parseBibTeX(text: string): Map<string, BibEntry> {
       for (const [k, v] of Object.entries(fields)) strings[k] = v;
       continue;
     }
-    const people = splitNames(fields.author || fields.editor || '').map(bibName);
+    const raw = splitNames(fields.author || fields.editor || '');
+    const etal = raw.length > 0 && /^others$/i.test(raw[raw.length - 1].trim());
+    const people = (etal ? raw.slice(0, -1) : raw).map(bibName);
     const year = /\d{4}/.exec(fields.year || fields.date || '')?.[0] || '';
     entries.set(key, {
       key,
       names: people.map(([f]) => f),
       fullNames: people.map(([f, g], k) => (g ? (k === 0 ? `${f}, ${g}` : `${g} ${f}`) : f)),
+      ...(etal && people.length ? { etal } : {}),
       year,
       title: fields.title && delatex(fields.title),
       container: delatex(fields.journal || fields.journaltitle || fields.booktitle || '') || undefined,
@@ -256,7 +262,7 @@ export function loadBibliography(file: string): Bibliography {
 export function citeNames(e: BibEntry): string {
   const n = e.names;
   if (!n.length) return e.title ? `“${e.title}”` : e.key;
-  if (n.length === 1) return n[0];
+  if (n.length === 1 || e.etal) return e.etal ? `${n[0]} et al.` : n[0];
   if (n.length === 2) return `${n[0]} and ${n[1]}`;
   if (n.length === 3) return `${n[0]}, ${n[1]}, and ${n[2]}`;
   return `${n[0]} et al.`;
@@ -267,8 +273,11 @@ export const citeYear = (e: BibEntry) => e.year || 'n.d.';
 /** One reference-list entry as plain text parts: [lead, title, rest]. */
 export function referenceParts(e: BibEntry): { lead: string; title?: string; container?: string; rest: string } {
   const f = e.fullNames;
-  const names = f.length <= 1 ? f.join('') : f.length === 2 ? `${f[0]}, and ${f[1]}` : `${f.slice(0, -1).join(', ')}, and ${f[f.length - 1]}`;
-  const lead = `${names || citeNames(e)}. ${citeYear(e)}.`;
+  let names = f.length <= 1 ? f.join('') : f.length === 2 ? `${f[0]}, and ${f[1]}` : `${f.slice(0, -1).join(', ')}, and ${f[f.length - 1]}`;
+  if (names && e.etal) names += ', et al';
+  // With no author the title leads, as in pandoc's default style.
+  const lead = `${dot(names || e.title || e.key)} ${dot(citeYear(e))}`;
+  const title = names ? e.title : undefined;
   let rest = '';
   if (e.volume) rest += ` ${e.volume}`;
   if (e.issue) rest += ` (${e.issue})`;
@@ -277,10 +286,13 @@ export function referenceParts(e: BibEntry): { lead: string; title?: string; con
   if (e.publisher) rest += ` ${e.publisher}.`;
   if (e.doi) rest += ` https://doi.org/${e.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')}.`;
   else if (e.url) rest += ` ${e.url}.`;
-  return { lead, title: e.title, container: e.container, rest };
+  return { lead, title: title && dot(title), container: e.container, rest };
 }
+
+/** End a sentence once: "N." stays "N.", "n.d." stays "n.d.". */
+const dot = (s: string) => (/[.?!]$/.test(s) ? s : s + '.');
 
 export function referenceText(e: BibEntry): string {
   const p = referenceParts(e);
-  return [p.lead, p.title ? `“${p.title}.”` : '', p.container ? p.container : ''].filter(Boolean).join(' ') + p.rest;
+  return [p.lead, p.title ? `“${p.title}”` : '', p.container ? p.container : ''].filter(Boolean).join(' ') + p.rest;
 }

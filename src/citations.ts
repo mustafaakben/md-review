@@ -15,7 +15,8 @@ import type Token from 'markdown-it/lib/token.mjs';
 import { parseFrontMatter } from './frontMatter';
 import { BibEntry, citeNames, citeYear, loadBibliography, referenceParts, referenceText } from './bibliography';
 
-const KEY = /^[\p{L}\p{N}_]+(?:[:.#$%&\-+?<>~/]+[\p{L}\p{N}_]+)*/u;
+// Pandoc's key punctuation, minus < and > so `@key</span>` stops at the tag.
+const KEY = /^[\p{L}\p{N}_]+(?:[:.#$%&\-+?~/]+[\p{L}\p{N}_]+)*/u;
 const KEY_AT = new RegExp(KEY.source.slice(1), 'uy');
 const XREF = /^(fig|tbl|eq|sec):/i;
 const PREFIX: Record<string, [string, string]> = { fig: ['fig.', 'figs.'], tbl: ['tbl.', 'tbls.'], eq: ['eq.', 'eqns.'], sec: ['sec.', 'secs.'] };
@@ -40,6 +41,8 @@ interface Target {
 interface CiteEnv {
   /** A bibliography was declared, so `@key` is a citation. */
   active: boolean;
+  /** The text has `@fig:`-style references, so those are parsed even without one. */
+  xref: boolean;
   entries: Map<string, BibEntry>;
   files: string[];
   problems: string[];
@@ -52,7 +55,7 @@ interface CiteEnv {
 function parseItems(body: string): Item[] | null {
   const items: Item[] = [];
   for (const part of body.split(';')) {
-    const at = part.search(/(?:^|[^\p{L}\p{N}_@])-?@/u);
+    const at = part.search(/(?:^|[^\p{L}\p{N}_@\\])-?@/u);
     if (at < 0) return null;
     const i = part.indexOf('@', at);
     const suppress = part[i - 1] === '-';
@@ -64,8 +67,8 @@ function parseItems(body: string): Item[] | null {
 }
 
 function setup(state: StateCore) {
-  const env = state.env as { docDir?: string; mdrCite?: CiteEnv };
-  const cite: CiteEnv = { active: false, entries: new Map(), files: [], problems: [], suppress: false, cited: [], targets: new Map() };
+  const env = state.env as { docDir?: string; bibFiles?: string[]; mdrCite?: CiteEnv };
+  const cite: CiteEnv = { active: false, xref: /@(?:fig|tbl|eq|sec):/i.test(state.src), entries: new Map(), files: [], problems: [], suppress: false, cited: [], targets: new Map() };
   env.mdrCite = cite;
   const first = state.tokens[0];
   if (first?.type !== 'mdr_front_matter') return;
@@ -76,7 +79,9 @@ function setup(state: StateCore) {
   for (const f of fm.bibliography) {
     cite.files.push(path.basename(f));
     if (!env.docDir && !path.isAbsolute(f)) continue;
-    const bib = loadBibliography(path.resolve(env.docDir || '', f));
+    const file = path.resolve(env.docDir || '', f);
+    (env.bibFiles ||= []).push(file);
+    const bib = loadBibliography(file);
     if (bib.error) cite.problems.push(`${f}: ${bib.error}`);
     for (const [k, e] of bib.entries) if (!cite.entries.has(k)) cite.entries.set(k, e);
   }
@@ -87,7 +92,7 @@ export function citationsPlugin(md: MarkdownIt): void {
 
   md.inline.ruler.before('link', 'mdr_cite', (state, silent) => {
     const cite = (state.env as { mdrCite?: CiteEnv }).mdrCite;
-    if (!cite) return false;
+    if (!cite || !(cite.active || cite.xref)) return false;
     const src = state.src;
     const pos = state.pos;
     const ch = src.charCodeAt(pos);
@@ -96,9 +101,13 @@ export function citationsPlugin(md: MarkdownIt): void {
     let bracket = false;
     let locator = '';
     if (ch === 0x5b /* [ */) {
+      // A link's label is measured in silent mode: leave the brackets to it,
+      // so `[see [@a]](url)` stays a link (the citation renders inside it).
+      if (silent) return false;
       const close = src.indexOf(']', pos + 1);
       if (close < 0 || src.lastIndexOf('[', close - 1) !== pos) return false;
       if (src[close + 1] === '(' || src[close + 1] === '[') return false; // a link
+      if (src.slice(pos, close).includes('`')) return false; // `[`@a`]` is code
       items = parseItems(src.slice(pos + 1, close));
       if (!items) return false;
       bracket = true;
@@ -133,13 +142,18 @@ export function citationsPlugin(md: MarkdownIt): void {
   md.core.ruler.push('mdr_crossref', (state) => {
     const cite = (state.env as { mdrCite?: CiteEnv }).mdrCite;
     if (!cite) return;
-    number(state, cite);
+    if (/\{#(?:fig|tbl|eq|sec):/i.test(state.src)) number(state, cite);
     if (cite.active && !cite.suppress && (cite.cited.length || cite.problems.length)) {
       const t = new state.Token('html_block', '', 0);
       t.content = references(state.tokens, cite);
-      state.tokens.push(t);
+      // Before the footnotes, so the list sits right under a closing References heading.
+      const foot = state.tokens.findIndex((x) => x.type === 'footnote_block_open');
+      state.tokens.splice(foot < 0 ? state.tokens.length : foot, 0, t);
     }
   });
+
+  // `[*see* @a, ch. 2]`: prefixes and suffixes are Markdown too.
+  const inl = (s: string) => (/[*_`\\<&[]/.test(s) ? md.renderInline(s) : esc(s));
 
   md.renderer.rules.mdr_cite = (tokens, idx, _o, env) => {
     const cite = (env as { mdrCite?: CiteEnv }).mdrCite!;
@@ -148,10 +162,10 @@ export function citationsPlugin(md: MarkdownIt): void {
     const one = (it: Item, inText: boolean) => {
       if (XREF.test(it.key)) return xrefs([it], cite, plain);
       const e = cite.entries.get(it.key);
-      const pre = it.prefix ? esc(it.prefix) : '';
-      const suf = esc(it.suffix);
+      const pre = inl(it.prefix);
+      const suf = inl(it.suffix);
       if (!e) {
-        const why = cite.problems.length ? `Couldn't read ${cite.problems.join('; ')}` : `No entry "${it.key}" in ${cite.files.join(', ')}`;
+        const why = `No entry "${it.key}" in ${cite.files.join(', ')}` + (cite.problems.length ? ` (couldn't read ${cite.problems.join('; ')})` : '');
         return `${pre}<span class="mdr-cite-missing" title="${esc(why)}">${esc(it.key)}?</span>${suf}`;
       }
       const link = (text: string) =>
@@ -170,7 +184,7 @@ export function citationsPlugin(md: MarkdownIt): void {
     md.renderer.rules.math_block_eqno = (tokens, idx, opts, env, self) => {
       const html = eqno(tokens, idx, opts, env, self);
       const id = tokens[idx].meta?.mdrId;
-      return id ? html.replace(/^<section/, `<section id="${esc(id)}"`) : html;
+      return id ? html.replace(/^<section/, () => `<section id="${esc(id)}"`) : html;
     };
   }
 }
@@ -238,7 +252,8 @@ function number(state: StateCore, cite: CiteEnv) {
         if (!fid || !/^fig:/.test(fid) || cite.targets.has(fid)) continue;
         add(fid, 'fig', String(++count.fig));
         const cap = new state.Token('html_inline', '', 0);
-        cap.content = `<span class="mdr-fig-cap"><span class="mdr-xref-label mdr-ui">Figure ${count.fig}:</span> ${esc(img.content)}</span>`;
+        const alt = (img.children || []).map((x) => (x.type === 'softbreak' ? ' ' : x.content)).join('') || img.content;
+        cap.content = `<span class="mdr-fig-cap"><span class="mdr-xref-label mdr-ui">Figure ${count.fig}:</span> ${esc(alt)}</span>`;
         t.children.splice(++c, 0, cap);
       }
     } else if (t.type === 'math_block' && t.map) {
@@ -258,12 +273,16 @@ function references(tokens: Token[], cite: CiteEnv): string {
   const missing = cite.cited.filter((k) => !cite.entries.has(k));
   found.sort((a, b) => citeNames(a).localeCompare(citeNames(b)) || citeYear(a).localeCompare(citeYear(b)));
   // Pandoc puts the list after a closing "References" heading if there is one.
+  // Only when nothing but footnotes follows it; otherwise the list gets its own title.
   let last = '';
-  for (let i = tokens.length - 1; i >= 0; i--) {
-    if (tokens[i].type === 'heading_open') {
+  const foot = tokens.findIndex((x) => x.type === 'footnote_block_open');
+  for (let i = (foot < 0 ? tokens.length : foot) - 1; i >= 0; i--) {
+    const t = tokens[i];
+    if (t.type === 'heading_open') {
       last = tokens[i + 1]?.content || '';
       break;
     }
+    if (t.level === 0 && t.nesting !== -1) break;
   }
   const named = /^(references|bibliography|works cited|literature cited|sources)\s*(\{[^}]*\})?$/i.test(last.trim());
   const parts: string[] = [];
@@ -274,7 +293,7 @@ function references(tokens: Token[], cite: CiteEnv): string {
   }
   for (const e of found) {
     const p = referenceParts(e);
-    const title = p.title ? ` “${esc(p.title)}.”` : '';
+    const title = p.title ? ` “${esc(p.title)}”` : '';
     const box = p.container ? ` <em>${esc(p.container)}</em>` : '';
     parts.push(`<p class="mdr-ref" id="ref-${esc(e.key)}">${esc(p.lead)}${title}${box}${esc(p.rest)}</p>`);
   }

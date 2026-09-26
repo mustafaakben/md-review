@@ -81,8 +81,10 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
 /** `docDir`: the file's folder, for reading its `bibliography:`. */
 export interface RenderEnv {
   docDir?: string;
+  /** Filled in by the render: the bibliography files it read, to watch. */
+  bibFiles?: string[];
 }
 
 export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
-  return createRenderer(resolveImage).render(text, { ...env });
+  return createRenderer(resolveImage).render(text, env);
 }
