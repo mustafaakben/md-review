@@ -3,6 +3,7 @@ import { createSearch } from './search';
 import { createOutline } from './outline';
 import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
+import { createHealth, orphanRows, WordTargets } from './health';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter, isAgentDraft } from './filters';
 import { Round, ReviewRun, roundBanner, reviewBanner, isWorking, nextExpiry, reviewLeft } from './round';
 import { createReviewMenu } from './review';
@@ -54,6 +55,7 @@ let round: Round | null = null;
 let review: ReviewRun | null = null;
 /** After Keep, Do it or Discard on Claude's draft `from`: the card to focus next (null: none left). */
 let triageFocus: { from: string; to: string | null } | null = null;
+let targets: WordTargets | null = null;
 let workingTimer: ReturnType<typeof setTimeout> | undefined;
 let lastBanner = '';
 const touched = new Set<Element>();
@@ -78,10 +80,11 @@ const standalone = !!(window as any).__mdrStandalone;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="${tip('Outline', 'Mod+Shift+O')}" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="${tip('Outline', 'Mod+Shift+O')}" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span><span class="mdr-words" hidden></span></div>
     <div class="mdr-tools">
       <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="${tip('Undo edit', 'Mod+Z')}" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="${tip('Redo edit', isMac ? 'Mod+Shift+Z' : 'Mod+Y')}" aria-label="Redo edit" disabled></button></span>
       <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
+      <button id="mdr-health-btn" class="mdr-icon-btn" title="Document health" aria-label="Document health" aria-haspopup="dialog" aria-controls="mdr-health" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
       <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
@@ -95,6 +98,7 @@ app.innerHTML = `
   <div id="mdr-find" class="mdr-find mdr-ui" hidden></div>
   <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
   <div id="mdr-review" class="mdr-review-panel mdr-ui" hidden></div>
+  <div id="mdr-health" class="mdr-reading-panel mdr-health-panel mdr-ui" role="dialog" aria-label="Document health" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
     <main id="mdr-doc" class="mdr-doc"></main>
@@ -147,12 +151,26 @@ try {
 } catch {
   /* keep the defaults */
 }
+const health = createHealth({
+  doc,
+  button: document.getElementById('mdr-health-btn')!,
+  panel: document.getElementById('mdr-health')!,
+  wordsEl: document.querySelector('.mdr-words') as HTMLElement,
+  post: (m) => post(m),
+  onCounted: () => outline.refreshWords(),
+  reanchor: (id) => reanchorTo(id),
+  showThread: (id) => {
+    setSidebarOpen(true);
+    activate(id, false, true);
+  },
+});
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;
 const outline = createOutline(
   doc,
   document.getElementById('mdr-outline')!,
   (open) => vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open }),
   outlineBtn,
+  (h) => health.sectionWords(h),
 );
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -203,6 +221,7 @@ function paint() {
   wrapRanges(doc, specs, map);
   renderSidebar();
   afterPaint();
+  health.painted(targets); // word counts and checks, when idle
   restorePosition(at);
   if (focusTask !== null) {
     (doc.querySelector(`input.mdr-task[data-task-line="${focusTask}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
@@ -540,6 +559,7 @@ function renderSidebar() {
       t.setSelectionRange(d.focus[0], d.focus[1]);
     }
   }
+  health.setOrphans(orphanRows(comments, (id) => orphans.has(id)));
   showWorking();
   applyTriageFocus();
 }
@@ -823,6 +843,17 @@ pop.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) saveComment();
   if (e.key === 'Escape') closeBox();
 });
+
+/** Health panel: move an orphaned thread onto the selected passage, captured as for a new comment. */
+function reanchorTo(id: string) {
+  // The open comment box owns pendingAnchor: don't take it from a comment being written.
+  if (composing()) return toast('Save or cancel the comment you are writing first.');
+  if (!selectionRange() || !pendingAnchor || !pendingAnchor.lineStart) return toast('Select the passage this comment is about, then press Re-anchor to selection.');
+  const { quote, prefix, suffix, lineStart, lineEnd } = pendingAnchor;
+  post({ type: 'reanchor', id, anchor: { quote, prefix, suffix, lineStart, lineEnd } });
+  hidePop(); // the Comment button, or an empty comment box
+  window.getSelection()?.removeAllRanges();
+}
 
 function saveComment() {
   const ta = pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null;
@@ -1476,6 +1507,7 @@ window.addEventListener('message', (ev) => {
   const m = ev.data;
   switch (m?.type) {
     case 'render':
+      targets = m.targets || null;
       // The host re-sends identical HTML often (e.g. twice after a block save);
       // skip the re-render when the view already shows it.
       if (sameBlocks(m.blocks, blocks) && painted && !docStale && !deferredPaint) {
@@ -1523,6 +1555,9 @@ window.addEventListener('message', (ev) => {
       break;
     case 'toast':
       toast(m.message);
+      break;
+    case 'linkCheck':
+      health.linkResult(m.missing || [], m.seq);
       break;
     case 'round':
       round = m.round;

@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ReviewSession, FromWebview } from './core';
+import { ReviewSession, FromWebview, linkPath } from './core';
 import { runAgent } from './agentRun';
 import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
 import { hasUrlScheme } from './render';
@@ -333,7 +333,6 @@ function openLink(href: string, dir: string) {
     else void vscode.window.showInformationMessage(`Trust this folder to open ${uri.scheme}: links.`);
     return;
   }
-  const [p] = href.split('#');
-  if (!p) return;
-  void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.resolve(dir, decodeURIComponent(p))));
+  const p = linkPath(href);
+  if (p) void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.resolve(dir, p)));
 }

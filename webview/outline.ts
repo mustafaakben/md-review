@@ -1,5 +1,5 @@
 // Outline pane: the document's headings, with the current section tracked
-// while scrolling and a count of open threads in each section.
+// while scrolling, a count of open threads in each section, and its word count.
 
 import { tip } from './keys';
 import { reveal } from './reveal';
@@ -7,6 +7,8 @@ import { reveal } from './reveal';
 export interface Outline {
   /** Rebuild from the freshly painted document. */
   rebuild(): void;
+  /** Redraw just the word counts, which arrive after the paint. */
+  refreshWords(): void;
   /** `focus`: move keyboard focus into the pane (open) or back to its toggle (close). */
   setOpen(open: boolean, focus?: boolean): void;
   isOpen(): boolean;
@@ -17,6 +19,8 @@ export function createOutline(
   pane: HTMLElement,
   onToggle: (open: boolean) => void,
   toggleBtn?: HTMLElement,
+  /** Word count markup for a heading's section. */
+  words: (h: HTMLElement) => string = () => '',
 ): Outline {
   let heads: HTMLElement[] = [];
   let current = -1;
@@ -134,7 +138,7 @@ export function createOutline(
           const lvl = Number(h.tagName[1]) - min;
           const text = (h.textContent || '').trim() || '(untitled)';
           const n = counts[i] ? `<span class="mdr-toc-count" title="${counts[i]} open thread${counts[i] > 1 ? 's' : ''}">${counts[i]}</span>` : '';
-          return `<div class="mdr-toc-item lvl${lvl}" data-i="${i}" role="link" tabindex="${i === 0 ? 0 : -1}" title="${esc(text)}"><span class="mdr-toc-text">${esc(text)}</span>${n}</div>`;
+          return `<div class="mdr-toc-item lvl${lvl}" data-i="${i}" role="link" tabindex="${i === 0 ? 0 : -1}" title="${esc(text)}"><span class="mdr-toc-text">${esc(text)}</span>${words(h)}${n}</div>`;
         })
         .join('');
       const focused = (document.activeElement as HTMLElement | null)?.closest?.('.mdr-toc-item') as HTMLElement | null;
@@ -144,6 +148,14 @@ export function createOutline(
       current = -1;
       track();
       if (refocus !== null) focusItem(pane.querySelector(`.mdr-toc-item[data-i="${refocus}"]`) as HTMLElement | null);
+    },
+    refreshWords() {
+      pane.querySelectorAll<HTMLElement>('.mdr-toc-item').forEach((item) => {
+        const h = heads[Number(item.dataset.i)];
+        if (!h) return;
+        item.querySelector('.mdr-toc-words')?.remove();
+        item.querySelector('.mdr-toc-text')!.insertAdjacentHTML('afterend', words(h));
+      });
     },
     setOpen(open, focus = false) {
       const wasInside = pane.contains(document.activeElement);

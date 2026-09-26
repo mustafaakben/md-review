@@ -14,6 +14,14 @@ export interface FrontMatter {
   /** `bibliography:` file(s), as written. */
   bibliography: string[];
   suppressBibliography?: boolean;
+  /** `mdreview: { words: {…} }`: word targets for the document and its sections. */
+  targets?: WordTargets;
+}
+
+export interface WordTargets {
+  total?: number;
+  /** Heading text as written (single spaces) -> words. */
+  sections: Record<string, number>;
 }
 
 const unquote = (s: string) => {
@@ -71,6 +79,94 @@ function uncomment(s: string): string {
   return s;
 }
 
+/** Split at top-level `sep`: not inside quotes, braces or brackets. A quote opens a string only at the start of a key or a value. */
+function splitTop(s: string, sep: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quote = '';
+  let depth = 0;
+  for (const ch of s) {
+    if (quote) {
+      if (ch === quote) quote = '';
+    } else if ((ch === '"' || ch === "'") && /(^|[:{\[,])\s*$/.test(cur)) quote = ch;
+    else if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+    else if (ch === sep && depth === 0) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+// Without a prototype, so a key like `__proto__` or `constructor` is just a key.
+type YMap = { [k: string]: string | YMap };
+const newMap = (): YMap => Object.create(null);
+
+/** `{a: 1, "b c": {d: 2}}` -> a nested map of strings. */
+function flowMap(s: string): YMap | null {
+  s = s.trim();
+  if (!s.startsWith('{') || !s.endsWith('}')) return null;
+  const out = newMap();
+  for (const item of splitTop(s.slice(1, -1), ',')) {
+    const [k, ...v] = splitTop(item, ':');
+    if (!k.trim() || !v.length) continue;
+    const value = v.join(':').trim();
+    out[unquote(k)] = flowMap(value) ?? unquote(value);
+  }
+  return out;
+}
+
+/**
+ * Indented `key: value` lines (a block map, possibly nested) -> a nested map
+ * of strings. A list item holding one pair (`- Intro: 500`) is read as that pair.
+ */
+function blockMap(lines: string[]): YMap {
+  const root = newMap();
+  const stack: { indent: number; map: YMap }[] = [{ indent: -1, map: root }];
+  for (const line of lines) {
+    const m = /^(\s*(?:-\s+)?)("[^"]*"|'[^']*'|[^\s:#"'-][^:#]*?)\s*:(?:\s+(.*))?$/.exec(line);
+    if (!m) continue;
+    const indent = m[1].length;
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) stack.pop();
+    const value = uncomment(m[3] || '').trim();
+    const into = stack[stack.length - 1].map;
+    if (!value) stack.push({ indent, map: (into[unquote(m[2])] = newMap()) });
+    else into[unquote(m[2])] = flowMap(value) ?? unquote(value);
+  }
+  return root;
+}
+
+/** A positive whole number of words, up to a billion ("8,000" and "8_000" too). */
+const wordCount = (v: unknown): number | undefined => {
+  const n = typeof v === 'string' && /^\d[\d,_]*$/.test(v.trim()) ? Number(v.replace(/[,_]/g, '')) : NaN;
+  return n > 0 && n <= 1e9 ? n : undefined;
+};
+
+/**
+ * `mdreview: { words: { total: 8000, Abstract: 250 } }`, or the flat
+ * `mdreview: { total: 8000, abstract: 250 }`, in flow or block style. Section
+ * keys keep their spelling; the view matches them to headings ignoring case.
+ */
+export function parseTargets(value: string, block: string[]): WordTargets | undefined {
+  const map = flowMap(value) ?? blockMap(block);
+  const words = map.words;
+  const src = typeof words === 'object' ? words : map;
+  const sections: [string, number][] = [];
+  for (const [k, v] of Object.entries(src)) {
+    const n = wordCount(v);
+    const name = k.trim().replace(/\s+/g, ' ');
+    if (n && name && name !== 'total' && name !== 'words') sections.push([name, n]);
+  }
+  // fromEntries defines keys as own properties, so `__proto__` stays a key here too.
+  const t: WordTargets = { total: wordCount(src.total) ?? wordCount(words), sections: Object.fromEntries(sections) };
+  if (!t.total) delete t.total;
+  return t.total || sections.length ? t : undefined;
+}
+
 /**
  * Reads the handful of keys the title card shows. Not a general YAML parser:
  * anything it doesn't understand is still visible in the raw view.
@@ -123,6 +219,9 @@ export function parseFrontMatter(raw: string): FrontMatter {
       case 'suppress-bibliography':
         fm.suppressBibliography = /^(true|yes|on)$/i.test(unquote(value));
         break;
+      case 'mdreview':
+        fm.targets = parseTargets(value, lines.slice(i + 1, j));
+        break;
       case 'keywords':
       case 'tags':
         if (!fm.keywords.length) fm.keywords = list;
@@ -168,9 +267,10 @@ export function frontMatterPlugin(md: MarkdownIt): void {
     { alt: [] },
   );
 
-  md.renderer.rules.mdr_front_matter = (tokens, idx) => {
+  md.renderer.rules.mdr_front_matter = (tokens, idx, _opts, env) => {
     const t = tokens[idx];
     const fm = parseFrontMatter(t.content);
+    (env as { front?: FrontMatter }).front = fm; // handed back in the render env
     const range = t.map ? ` data-ls="${t.map[0]}" data-le="${t.map[1]}"` : '';
     const parts: string[] = [];
     if (fm.title) parts.push(`<div class="mdr-front-title">${md.renderInline(fm.title)}</div>`);

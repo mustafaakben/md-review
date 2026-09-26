@@ -296,6 +296,30 @@ export function editBody(data: Sidecar, id: string, body: string): void {
   find(data, id).body = body;
 }
 
+/** Longest quote, and prefix or suffix, a re-anchor accepts. */
+const MAX_QUOTE = 100_000;
+const MAX_CONTEXT = 1_000;
+
+/**
+ * Move a thread onto a new passage (an orphan whose quoted text was rewritten).
+ * The anchor comes from the view, so it is checked field by field. Anchor
+ * fields this version doesn't know are kept.
+ */
+export function reanchor(data: Sidecar, id: string, anchor: Anchor): void {
+  const c = find(data, id);
+  if (c.scope === 'document') throw new Error('A whole-document thread has no passage to move.');
+  const a = (anchor && typeof anchor === 'object' ? anchor : {}) as Partial<Record<keyof Anchor, unknown>>;
+  const { quote, prefix = '', suffix = '', lineStart, lineEnd } = a;
+  if (typeof quote !== 'string' || !quote.trim()) throw new Error('Select the passage to move the thread to.');
+  if (quote.length > MAX_QUOTE) throw new Error('That passage is too long to anchor a comment to.');
+  if (typeof prefix !== 'string' || typeof suffix !== 'string' || prefix.length > MAX_CONTEXT || suffix.length > MAX_CONTEXT) {
+    throw new Error('Could not move the thread: the text around the passage is invalid.');
+  }
+  const line = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+  if (!line(lineStart) || !line(lineEnd) || lineEnd < lineStart) throw new Error('Could not move the thread: the passage has no valid lines.');
+  c.anchor = { ...c.anchor, quote, prefix, suffix, lineStart, lineEnd };
+}
+
 export function setMeta(data: Sidecar, id: string, meta: CommentMeta): void {
   applyMeta(find(data, id), meta);
 }
