@@ -19,7 +19,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), Add Claude Code Skill is off, and the review inbox lists threads without Send All.",
+      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), Add Claude Code Skill is off, the review inbox lists threads without Send All, and Export to Word reads images only from the document's folder and the workspace.",
       "restrictedConfigurations": [
         "mdReview.agent.command",
         "mdReview.agent.launch"
@@ -158,6 +158,16 @@
         "category": "MD Review"
       },
       {
+        "command": "mdReview.exportWord",
+        "title": "Export to Word (with comments)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.importWord",
+        "title": "Import Comments from Word…",
+        "category": "MD Review"
+      },
+      {
         "command": "mdReview.zoomIn",
         "title": "Zoom In (Document)",
         "category": "MD Review"
@@ -211,6 +221,16 @@
           "command": "mdReview.sendToClaude",
           "when": "activeCustomEditorId == 'mdReview.editor'",
           "group": "navigation@1"
+        },
+        {
+          "command": "mdReview.exportWord",
+          "when": "activeCustomEditorId == 'mdReview.editor'",
+          "group": "mdReviewWord@1"
+        },
+        {
+          "command": "mdReview.importWord",
+          "when": "activeCustomEditorId == 'mdReview.editor'",
+          "group": "mdReviewWord@2"
         }
       ],
       "explorer/context": [
@@ -281,6 +301,14 @@
         {
           "command": "mdReview.addClaudeSkill",
           "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "mdReview.exportWord",
+          "when": "activeCustomEditorId == 'mdReview.editor' || editorLangId == markdown"
+        },
+        {
+          "command": "mdReview.importWord",
+          "when": "activeCustomEditorId == 'mdReview.editor' || editorLangId == markdown"
         },
         {
           "command": "mdReview.addComment",

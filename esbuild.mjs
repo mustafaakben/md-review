@@ -25,9 +25,23 @@ cpSync('node_modules/mermaid/dist/chunks/mermaid.esm.min', 'media/mermaid/chunks
   filter: (src) => !src.endsWith('.map'),
 });
 
+// The Word export/import commands: a file of their own that the extension
+// requires when one first runs, so start-up never reads it. The modules it
+// shares with the extension (the renderer above all) come from the loaded
+// extension bundle's `shared` export instead of a second copy.
+const SHARED = ['render', 'commentStore', 'bibliography', 'localImage'];
+const fromExtension = {
+  name: 'from-extension',
+  setup(b) {
+    b.onResolve({ filter: new RegExp(`^\\./(${SHARED.join('|')})$`) }, (a) => ({ path: a.path.slice(2), namespace: 'extension' }));
+    b.onLoad({ filter: /.*/, namespace: 'extension' }, (a) => ({ contents: `module.exports = require('./extension.js').shared.${a.path};`, loader: 'js' }));
+  },
+};
+
 const builds = [
   // Extension host. Minified: less to read from disk (and scan, on Windows) at start-up.
-  { entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', platform: 'node', format: 'cjs', external: ['vscode'], minify: true, keepNames: true },
+  { entryPoints: ['src/extension.ts'], outfile: 'dist/extension.js', platform: 'node', format: 'cjs', external: ['vscode', './word.js'], minify: true, keepNames: true },
+  { entryPoints: ['src/wordCommands.ts'], outfile: 'dist/word.js', platform: 'node', format: 'cjs', external: ['vscode', './extension.js'], plugins: [fromExtension], minify: true, keepNames: true },
   // Host core for tests / harness / CLI (no vscode dependency).
   { entryPoints: ['src/lib.ts'], outfile: 'dist/lib.cjs', platform: 'node', format: 'cjs' },
   // Webview.
