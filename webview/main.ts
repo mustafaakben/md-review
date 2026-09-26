@@ -1,4 +1,4 @@
-import { buildTextMap, capture, locate, wrapRange, Captured } from './anchor';
+import { buildTextMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -21,6 +21,14 @@ let activeId: string | null = null;
 let pendingAnchor: (Captured & { lineStart: number; lineEnd: number }) | null = null;
 let editing: { ls: number; le: number; original: string; el: HTMLElement; box: HTMLElement } | null = null;
 let deferredPaint = false;
+// What the document currently shows, so comment changes can patch highlights
+// instead of re-rendering: the text of the painted HTML, and the highlighted
+// comments in wrap order with their status. `docStale` means the DOM may no
+// longer match `html` (an in-view edit touched it); the next paint is full.
+let painted: Map<string, { status: Status; start: number; end: number }> | null = null;
+let paintedText = '';
+let docStale = false;
+const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
 const openReplies = new Set<string>();
@@ -78,34 +86,101 @@ function paint() {
     return;
   }
   deferredPaint = false;
+  docStale = false;
   editBtn.hidden = true;
   hoverEl = null;
   const y = window.scrollY;
   doc.innerHTML = html;
-  const map = buildTextMap(doc);
+  const text = buildTextMap(doc).text;
+  if (text !== paintedText) anchorCache.clear();
+  paintedText = text;
+  const located = layout();
+  painted = new Map();
+  const specs = [];
+  for (const [c, s, e] of located) {
+    painted.set(c.id, { status: c.status, start: s, end: e });
+    specs.push({ start: s, end: e, make: () => mark(c) });
+  }
+  wrapRanges(doc, specs);
+  renderSidebar();
+  window.scrollTo(0, y);
+}
+
+/**
+ * Comments changed but the document didn't: unwrap highlights that went away,
+ * restyle ones whose status changed, and wrap new ones. The result is the same
+ * DOM a full paint() would produce; when it can't be, fall back to paint().
+ */
+function paintComments() {
+  if (editing || inline) {
+    deferredPaint = true;
+    return;
+  }
+  if (!painted || deferredPaint || docStale) return paint();
+  const want = layout();
+  const wanted = new Set(want.map(([c]) => c.id));
+  const was = [...painted];
+  const kept = was.filter(([id]) => wanted.has(id));
+  // Wrap order decides nesting where highlights overlap, so new highlights can
+  // only go on top of the ones already there, which must not have moved.
+  if (kept.some(([id, r], i) => want[i][0].id !== id || want[i][1] !== r.start || want[i][2] !== r.end)) return paint();
+  // A highlight wrapped after (inside) one that is now removed was split at the
+  // removed one's edges; only a full paint gives it one clean mark again.
+  for (let i = 0; i < was.length; i++) {
+    const [id, r] = was[i];
+    if (wanted.has(id)) continue;
+    for (let j = i + 1; j < was.length; j++) {
+      const [kid, k] = was[j];
+      if (wanted.has(kid) && k.start < r.end && r.start < k.end) return paint();
+    }
+  }
+  const marks = new Map<string, HTMLElement[]>();
+  doc.querySelectorAll<HTMLElement>('mark.mdr-hl').forEach((m) => {
+    const id = m.dataset.cid!;
+    if (!marks.has(id)) marks.set(id, []);
+    marks.get(id)!.push(m);
+  });
+  const gone: HTMLElement[] = [];
+  for (const [id] of was) if (!wanted.has(id)) gone.push(...(marks.get(id) || []));
+  unwrap(gone);
+  const next: typeof painted = new Map();
+  for (const [c, start, end] of want.slice(0, kept.length)) {
+    if (painted.get(c.id)!.status !== c.status) for (const m of marks.get(c.id) || []) m.className = markClass(c);
+    next.set(c.id, { status: c.status, start, end });
+  }
+  const added = want.slice(kept.length);
+  for (const [c, start, end] of added) next.set(c.id, { status: c.status, start, end });
+  wrapRanges(doc, added.map(([c, s, e]) => ({ start: s, end: e, make: () => mark(c) })));
+  painted = next;
+  renderSidebar();
+}
+
+/** Locate every comment in the painted text; returns the visible highlights in wrap order. */
+function layout(): [Comment, number, number][] {
   positions.clear();
   orphans.clear();
-  const located: [Comment, number, number][] = [];
+  const out: [Comment, number, number][] = [];
   for (const c of comments) {
-    const r = locate(map.text, c.anchor);
+    const key = `${c.anchor.quote}\u0000${c.anchor.prefix}\u0000${c.anchor.suffix}`;
+    let r = anchorCache.get(key);
+    if (r === undefined) anchorCache.set(key, (r = locate(paintedText, c.anchor)));
     if (!r) {
       orphans.add(c.id);
       continue;
     }
     positions.set(c.id, r[0]);
-    located.push([c, r[0], r[1]]);
-  }
-  for (const [c, s, e] of located) {
     if (c.status === 'resolved' && !showResolved) continue;
-    wrapRange(doc, s, e, () => {
-      const m = document.createElement('mark');
-      m.className = `mdr-hl mdr-${c.status}` + (c.id === activeId ? ' active' : '');
-      m.dataset.cid = c.id;
-      return m;
-    });
+    out.push([c, r[0], r[1]]);
   }
-  renderSidebar();
-  window.scrollTo(0, y);
+  return out;
+}
+
+const markClass = (c: Comment) => `mdr-hl mdr-${c.status}` + (c.id === activeId ? ' active' : '');
+function mark(c: Comment): HTMLElement {
+  const m = document.createElement('mark');
+  m.className = markClass(c);
+  m.dataset.cid = c.id;
+  return m;
 }
 
 function counts() {
@@ -340,7 +415,7 @@ submitBtn.addEventListener('click', () => post({ type: 'submitReview' }));
 showResolvedBox.addEventListener('change', () => {
   showResolved = showResolvedBox.checked;
   vscode.setState({ ...(vscode.getState() || {}), showResolved });
-  paint();
+  paintComments();
 });
 
 // Collapsible comments pane; the choice is remembered per editor.
@@ -393,6 +468,7 @@ function startEdit(el: HTMLElement, raw = false) {
 }
 
 function startInline(el: HTMLElement, caretAtEnd = false) {
+  docStale = true;
   inline = { el, ls: Number(el.dataset.ls), le: Number(el.dataset.le), kind: INLINE_KIND[el.tagName], oldText: el.textContent || '', oldHtml: el.innerHTML, saving: false };
   el.contentEditable = 'true';
   el.spellcheck = true;
@@ -505,6 +581,7 @@ function openEditor(ls: number, le: number, text: string) {
     || (doc.querySelector(`[data-ls="${ls}"][data-le="${le}"]`) as HTMLElement | null);
   doc.querySelectorAll('.mdr-pending').forEach((x) => x.classList.remove('mdr-pending'));
   if (!el) return;
+  docStale = true;
   const box: HTMLElement = document.createElement(el.tagName === 'TR' ? 'tr' : 'div');
   box.className = 'mdr-block-editor';
   const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · Ctrl+Enter to save · Esc to cancel</div>
@@ -557,9 +634,18 @@ window.addEventListener('message', (ev) => {
   const m = ev.data;
   switch (m?.type) {
     case 'render':
-      html = m.html;
-      fileName = m.fileName;
-      paint();
+      // The host re-sends identical HTML often (e.g. twice after a block save);
+      // skip the re-render when the view already shows it.
+      if (m.html === html && painted && !docStale && !deferredPaint) {
+        if (m.fileName !== fileName) {
+          fileName = m.fileName;
+          renderSidebar();
+        }
+      } else {
+        html = m.html;
+        fileName = m.fileName;
+        paint();
+      }
       if (saved.scrollY && !(saved as any)._restored) {
         (saved as any)._restored = true;
         window.scrollTo(0, saved.scrollY);
@@ -569,7 +655,7 @@ window.addEventListener('message', (ev) => {
       comments = m.data.comments || [];
       author = m.author;
       showResolved = (vscode.getState() || {}).showResolved ?? m.showResolved;
-      paint();
+      paintComments();
       break;
     case 'block':
       openEditor(m.ls, m.le, m.text);

@@ -8,16 +8,21 @@ export interface TextMap {
   text: string;
   nodes: Text[];
   starts: number[];
+  /** Lazily built node -> index lookup (see offsetOf). */
+  index?: Map<Text, number>;
 }
 
 export function buildTextMap(root: Element): TextMap {
   const nodes: Text[] = [];
   const starts: number[] = [];
   let text = '';
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+  if (root.closest(SKIP)) return { text, nodes, starts };
+  // Reject skipped elements once (and their whole subtree) instead of calling
+  // closest() for every text node.
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode(n) {
-      const p = n.parentElement;
-      return p && p.closest(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      if (n.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
+      return (n as Element).matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
     },
   });
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
@@ -31,15 +36,25 @@ export function buildTextMap(root: Element): TextMap {
 /** Global text offset of a DOM boundary point. */
 export function offsetOf(map: TextMap, container: Node, offset: number): number {
   if (container.nodeType === Node.TEXT_NODE) {
-    const i = map.nodes.indexOf(container as Text);
-    if (i >= 0) return map.starts[i] + Math.min(offset, (container as Text).length);
+    if (!map.index) {
+      map.index = new Map();
+      map.nodes.forEach((n, i) => map.index!.set(n, i));
+    }
+    const i = map.index.get(container as Text);
+    if (i !== undefined) return map.starts[i] + Math.min(offset, (container as Text).length);
   }
   const r = document.createRange();
   r.setStart(container, offset);
-  for (let i = 0; i < map.nodes.length; i++) {
-    if (r.comparePoint(map.nodes[i], 0) >= 0) return map.starts[i];
+  // Nodes are in document order, so "starts at or after the point" flips from
+  // false to true exactly once: binary search for the first such node.
+  let lo = 0;
+  let hi = map.nodes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (r.comparePoint(map.nodes[mid], 0) >= 0) hi = mid;
+    else lo = mid + 1;
   }
-  return map.text.length;
+  return lo < map.nodes.length ? map.starts[lo] : map.text.length;
 }
 
 export interface Captured {
@@ -114,6 +129,14 @@ function collapse(s: string): { out: string; map: number[] } {
   return { out, map };
 }
 
+// The whitespace fallback collapses the whole document text; when several
+// comments fall back during one paint, collapse it once.
+let lastDoc: { src: string; res: { out: string; map: number[] } } | null = null;
+function collapseDoc(text: string) {
+  if (lastDoc?.src !== text) lastDoc = { src: text, res: collapse(text) };
+  return lastDoc.res;
+}
+
 /**
  * A match is trusted if the quote is long enough to be distinctive on its own,
  * or if enough of the surrounding context still agrees. Otherwise a short quote
@@ -130,7 +153,7 @@ function trusted(quote: string, prefix: string, suffix: string, score: number): 
 export function locate(text: string, a: { quote: string; prefix: string; suffix: string }): [number, number] | null {
   const exact = bestMatch(text, a.quote, a.prefix, a.suffix);
   if (exact && trusted(a.quote, a.prefix, a.suffix, exact[2])) return [exact[0], exact[1]];
-  const t = collapse(text);
+  const t = collapseDoc(text);
   const q = collapse(a.quote.trim()).out;
   const pre = collapse(a.prefix).out;
   const suf = collapse(a.suffix).out;
@@ -141,24 +164,71 @@ export function locate(text: string, a: { quote: string; prefix: string; suffix:
 
 /** Wrap [start, end) in elements produced by make(); returns the created elements. */
 export function wrapRange(root: Element, start: number, end: number, make: () => HTMLElement): HTMLElement[] {
+  return wrapRanges(root, [{ start, end, make }])[0];
+}
+
+export interface WrapSpec {
+  start: number;
+  end: number;
+  make: () => HTMLElement;
+}
+
+/**
+ * Wrap several ranges, in order, with a single text walk. Equivalent to calling
+ * wrapRange() for each spec in turn: the text map is patched in place as nodes
+ * split, instead of being rebuilt per range.
+ */
+export function wrapRanges(root: Element, specs: WrapSpec[]): HTMLElement[][] {
   const map = buildTextMap(root);
+  return specs.map((sp) => wrapInMap(map, sp.start, sp.end, sp.make));
+}
+
+function wrapInMap(map: TextMap, start: number, end: number, make: () => HTMLElement): HTMLElement[] {
+  const { nodes, starts } = map;
+  map.index = undefined;
   const out: HTMLElement[] = [];
-  for (let i = 0; i < map.nodes.length; i++) {
-    const node = map.nodes[i];
-    const ns = map.starts[i];
-    const ne = ns + node.length;
-    if (ne <= start || ns >= end) continue;
+  // First node that ends after `start` (node ends are non-decreasing).
+  let lo = 0;
+  let hi = nodes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (starts[mid] + nodes[mid].length <= start) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = lo; i < nodes.length && starts[i] < end; i++) {
+    const node = nodes[i];
+    const ns = starts[i];
     const s = Math.max(start, ns) - ns;
-    const e = Math.min(end, ne) - ns;
+    const e = Math.min(end, ns + node.length) - ns;
     const seg = node.data.slice(s, e);
     if (!seg.trim()) continue; // don't wrap structural whitespace (e.g. between table rows)
     let target = node;
-    if (s > 0) target = target.splitText(s);
-    if (e - s < target.length) target.splitText(e - s);
+    if (s > 0) {
+      target = target.splitText(s);
+      nodes.splice(++i, 0, target);
+      starts.splice(i, 0, ns + s);
+    }
+    if (e - s < target.length) {
+      nodes.splice(i + 1, 0, target.splitText(e - s));
+      starts.splice(i + 1, 0, ns + e);
+    }
     const el = make();
     target.parentNode!.insertBefore(el, target);
     el.appendChild(target);
     out.push(el);
   }
   return out;
+}
+
+/** Remove wrapper elements, keeping their contents, and re-merge split text nodes. */
+export function unwrap(els: Iterable<Element>): void {
+  const parents = new Set<Node>();
+  for (const el of els) {
+    const p = el.parentNode;
+    if (!p) continue;
+    while (el.firstChild) p.insertBefore(el.firstChild, el);
+    p.removeChild(el);
+    parents.add(p);
+  }
+  for (const p of parents) if (p.isConnected) p.normalize();
 }
