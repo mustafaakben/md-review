@@ -413,6 +413,8 @@ test('insideRealRoots follows links, but not a link to a network path', { skip: 
   fs.symlinkSync(path.join(dir, 'out'), path.join(dir, 'in', 'outdir'));
   assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'outdir', 'missing.md'), roots), false);
   assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'sub', 'missing.md'), roots), true);
+  // A network root is kept as written, never resolved.
+  assert.deepEqual(lib.realRoots(['\\\\server\\share\\docs'], 'win32'), ['\\\\server\\share\\docs']);
 });
 
 test('checkLinks in Restricted Mode looks only inside the readable folders', async () => {

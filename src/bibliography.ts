@@ -315,8 +315,9 @@ function linksToNetwork(abs: string, p: typeof path, platform: NodeJS.Platform):
 }
 
 /** Folders for insideRoots, with links followed. Resolve them once when checking many files. */
-export function realRoots(roots: string[]): string[] {
-  return roots.map((r) => realOr(r));
+export function realRoots(roots: string[], platform: NodeJS.Platform = process.platform): string[] {
+  // A network root is never resolved (that would touch the share); files under it are refused anyway.
+  return roots.map((r) => (isNetworkPath(r, platform) ? r : realOr(r)));
 }
 
 /**
