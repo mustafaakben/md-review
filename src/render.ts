@@ -13,6 +13,37 @@ import { frontMatterPlugin } from './frontMatter';
 import { criticPlugin } from './critic';
 import { gfmPlugin } from './gfm';
 import { citationsPlugin } from './citations';
+import { linearFootnoteTail } from './footnoteTail';
+
+/**
+ * KaTeX, memoized. Between two renders the reader changes a paragraph or two,
+ * so nearly every formula is the same as last time, and KaTeX is 40-45% of a
+ * math-heavy render. KaTeX output depends only on the source and the options,
+ * which are fixed here apart from displayMode. markdown-it-texmath keeps the
+ * engine from its first use, so every renderer has to share this one.
+ */
+const MATH_CACHE_LIMIT = 5000;
+// Two generations: a full one is kept as the older one while a new one fills,
+// and a hit in the older one moves up. A render walks its formulas in the same
+// order each time, so a plain oldest-first cache would evict each formula just
+// before it is needed again once a file has more formulas than the limit.
+let mathCache = new Map<string, string>();
+let olderMath = new Map<string, string>();
+const mathEngine = {
+  renderToString(tex: string, options: { displayMode?: boolean }): string {
+    const key = (options.displayMode ? 'D' : 'I') + tex;
+    let html = mathCache.get(key) ?? olderMath.get(key);
+    if (html === undefined) html = katex.renderToString(tex, options) as string; // throws are handled by texmath; nothing is cached
+    if (!mathCache.has(key)) {
+      if (mathCache.size >= MATH_CACHE_LIMIT) {
+        olderMath = mathCache;
+        mathCache = new Map();
+      }
+      mathCache.set(key, html!);
+    }
+    return html!;
+  },
+};
 
 export type ResolveImage = (src: string) => string;
 
@@ -29,8 +60,8 @@ function cssLength(v: string): string {
 export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   const md = new MarkdownIt({ html: true, linkify: true, typographer: false });
   md.use(frontMatterPlugin).use(criticPlugin);
-  md.use(footnote).use(sup).use(sub).use(gfmPlugin);
-  md.use(texmath, { engine: katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } });
+  md.use(footnote).use(linearFootnoteTail).use(sup).use(sub).use(gfmPlugin);
+  md.use(texmath, { engine: mathEngine, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } });
   md.use(attrs, { allowedAttributes: ['id', 'class', 'width', 'height', 'style'] });
   md.use(citationsPlugin);
 
@@ -85,6 +116,16 @@ export interface RenderEnv {
   bibFiles?: string[];
 }
 
+// One renderer per image resolver (a session keeps the same one), so plugin
+// setup happens once rather than on every render.
+const renderers = new WeakMap<ResolveImage, MarkdownIt>();
+
+export function rendererFor(resolveImage: ResolveImage): MarkdownIt {
+  let md = renderers.get(resolveImage);
+  if (!md) renderers.set(resolveImage, (md = createRenderer(resolveImage)));
+  return md;
+}
+
 export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
-  return createRenderer(resolveImage).render(text, env);
+  return rendererFor(resolveImage).render(text, env);
 }
