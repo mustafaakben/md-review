@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import type MarkdownIt from 'markdown-it';
 import { readBlock, spliceBlock, BlockEditError } from './blockEdit';
-import { rendererFor, renderedParse, Parse } from './render';
+import { rendererFor, Parse } from './render';
 
 type Token = Parse['tokens'][number];
 
@@ -71,12 +71,16 @@ interface Local {
   tail: string;
   env: Parse['env'];
   notes: string;
+  /** The file has a bibliography, so `@key` depends on its front matter. */
+  cites: boolean;
 }
 
 const indentOf = (s: string) => /^[ \t]*/.exec(s)![0];
-// An inline footnote renumbers every note after it, and a block-math opener
-// can match a closing delimiter far below: neither shows in the block alone.
-const needsWholeFile = (s: string) => /\^\[|\$\$|\\\[/.test(s);
+// An inline footnote renumbers every note after it, and block-math delimiters
+// can pair with ones far above or below: none of that shows in the block alone.
+const needsWholeFile = (s: string) => /\^\[|\$\$|\\[[\]]/.test(s);
+// A footnote definition in the lines that come along would be defined twice.
+const noteDefinition = /^ {0,3}\[\^[^\]]+\]:/m;
 
 /** Labels of the footnote references in the block at toks[i], in order. */
 function noteLabels(toks: Token[], i: number): string {
@@ -110,13 +114,20 @@ function localContext(toks: Token[], i: number, env: Parse['env'], lines: string
   if (kind !== 'paragraph' && kind !== 'heading') return undefined;
   const open = toks[i];
   if (open.level !== 0 || !open.map || open.map[1] !== le || needsWholeFile(src)) return undefined;
+  // A block that ends on its own line must end right above: definitions in
+  // between leave no tokens, but they are part of the parser's state.
   const prev = toks[i - 1];
+  const prevOpen = prev?.type === 'heading_close' ? toks[i - 3] : prev;
   const freshStart =
     ls === 0 ||
     !lines[ls - 1].trim() ||
-    (prev && prev.level === 0 && ['heading_close', 'hr', 'fence'].includes(prev.type));
+    (prev?.level === 0 && ['heading_close', 'hr', 'fence'].includes(prev.type) && prevOpen?.map?.[1] === ls);
   if (!freshStart) return undefined;
-  return { indent: indentOf(src), tail: lines.slice(le, le + 2).join('\n'), env, notes: noteLabels(toks, i) };
+  const tail = lines.slice(le, le + 2).join('\n');
+  if (noteDefinition.test(tail)) return undefined;
+  const cites = !!env.mdrCite?.active;
+  if (cites && src.includes('@')) return undefined;
+  return { indent: indentOf(src), tail, env, notes: noteLabels(toks, i), cites };
 }
 
 /**
@@ -124,7 +135,7 @@ function localContext(toks: Token[], i: number, env: Parse['env'], lines: string
  * undefined when only a whole-file parse can tell.
  */
 function localPlain(md: MarkdownIt, local: Local, block: string, kind: BlockKind): string | undefined {
-  if (indentOf(block) !== local.indent || needsWholeFile(block)) return undefined;
+  if (indentOf(block) !== local.indent || needsWholeFile(block) || (local.cites && block.includes('@'))) return undefined;
   const body = block.replace(/\r\n/g, '\n').replace(/\n$/, '');
   const n = body.split('\n').length;
   const toks = md.parse(local.tail ? `${body}\n${local.tail}` : body, definitions(local.env));
@@ -195,20 +206,23 @@ export function candidates(src: string, oldText: string, newText: string): strin
   return out;
 }
 
+/** A parse of the file's text, from the render on screen. */
+export type RenderedParse = Parse & { text: string };
+
 /**
  * Apply a rendered-text edit to lines [ls, le) of the file. Returns the new
  * block source. Throws BlockEditError if the view is stale, InlineMapError if
  * the edit can't be mapped to Markdown with certainty.
  */
-export function applyInlineEdit(filePath: string, ls: number, le: number, kind: BlockKind, oldText: string, newText: string): string {
+export function applyInlineEdit(filePath: string, ls: number, le: number, kind: BlockKind, oldText: string, newText: string, rendered?: RenderedParse): string {
   const md = rendererFor(plain);
   const buf = fs.readFileSync(filePath);
   const src = readBlock(buf, ls, le);
   const bom = buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf ? 3 : 0;
   const docText = buf.subarray(bom).toString('utf8');
-  // The file matches the render on screen (the session checks), so its tokens
-  // are usually still at hand.
-  const { tokens, env } = renderedParse(docText) ?? (() => {
+  // The file matches the render on screen (the session checks), so the
+  // session's tokens of that render usually still apply.
+  const { tokens, env } = rendered?.text === docText ? rendered : (() => {
     const env = {};
     return { tokens: md.parse(docText, env), env };
   })();
