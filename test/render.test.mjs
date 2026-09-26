@@ -2,8 +2,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
+const here = path.dirname(fileURLToPath(import.meta.url));
 const { renderMarkdown } = require('../dist/lib.cjs');
 const render = (s) => renderMarkdown(s, (x) => x);
 
@@ -100,4 +104,26 @@ test('repeated formulas render the same, inline and display apart', () => {
   const both = render('Inline $x^2$.\n\n$$\nx^2\n$$\n');
   assert.equal((both.match(/katex-display/g) || []).length, 1);
   assert.equal((both.match(/class="katex"/g) || []).length, 2);
+});
+
+test('the per-block HTML joins to exactly the whole document, footnotes as one block', () => {
+  const { renderParsed, createRenderer } = require('../dist/lib.cjs');
+  const renderBlocks = (d, r) => renderParsed(d, r).blocks;
+  const whole = createRenderer((x) => x);
+  const docs = [
+    '---\ntitle: T\n---\n\n# H\n\nPara[^a] with $x$.\n\n- a\n  - b\n\n> q\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n$$\ny\n$$\n\n<div>\nraw\n</div>\n\n    code\n\n```js\nf()\n```\n\n---\n\nText^[inline] {++add++}\n\n[^a]: Note.\n',
+    '',
+    'just text',
+    '<details>\n<summary>s</summary>\n\ninside\n\n</details>\n',
+    '- [ ] task\n- [x] done\n\n> [!NOTE]\n> An alert.\n\nSome ==marked== text.\n\n```mermaid\ngraph TD; A-->B\n```\n\n```ts\nconst x = 1;\n```\n',
+    '# Intro {#sec:intro}\n\n![Cap](a.png){#fig:a}\n\nSee @fig:a and @sec:intro and a note[^n].\n\n[^n]: Note.\n',
+    ...fs.readdirSync(path.join(here, 'fixtures')).filter((f) => f.endsWith('.md')).map((f) => fs.readFileSync(path.join(here, 'fixtures', f), 'utf8')),
+  ];
+  for (const d of docs) {
+    const blocks = renderBlocks(d, (x) => x);
+    assert.equal(blocks.join(''), whole.render(d));
+    const notes = blocks.filter((b) => b.includes('class="footnotes"'));
+    assert.ok(notes.length <= 1 && (!notes.length || notes[0] === blocks.at(-1)));
+  }
+  assert.equal(renderBlocks('# A\n\nB\n\n- c\n- d\n', (x) => x).length, 3);
 });

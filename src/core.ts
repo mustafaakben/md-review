@@ -12,7 +12,7 @@ import { buildAgentPrompt } from './agentPrompt';
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 
 export type ToWebview =
-  | { type: 'render'; html: string; fileName: string }
+  | { type: 'render'; blocks: string[]; fileName: string }
   | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
   | { type: 'block'; ls: number; le: number; text: string }
   | { type: 'blockSaved'; ls: number }
@@ -162,22 +162,22 @@ export class ReviewSession {
     const text = this.ctx.getText();
     if (!force && text === this.lastRendered) return this.syncHistory();
     this.lastRendered = text;
-    let html: string;
+    let blocks: string[];
     const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath), bibRoots: this.ctx.readableRoots?.() };
     this.lastParse = undefined;
     try {
       const r = renderParsed(text, this.ctx.resolveImage, env);
-      html = r.html;
+      blocks = r.blocks;
       this.lastParse = { text, ...r.parse };
     } catch (e: any) {
-      html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
+      blocks = [`<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`];
     }
     const bibs = (env.bibFiles || []).join('\n');
     if (bibs !== this.watched) {
       this.watched = bibs;
       this.ctx.watchFiles?.(env.bibFiles || []);
     }
-    this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath) });
+    this.ctx.post({ type: 'render', blocks, fileName: path.basename(this.ctx.mdPath) });
     this.syncHistory();
   }
 

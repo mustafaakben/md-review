@@ -28,7 +28,7 @@ interface Comment extends Meta {
 }
 
 // ---------------------------------------------------------------- state
-let html = '';
+let blocks: string[] = []; // the document's HTML, one string per top-level block (see renderBlocks)
 let fileName = '';
 let comments: Comment[] = [];
 let author = '';
@@ -40,7 +40,8 @@ let deferredPaint = false;
 // What the document currently shows, so comment changes can patch highlights
 // instead of re-rendering: the text of the painted HTML, and the highlighted
 // comments in wrap order with their status. `docStale` means the DOM may no
-// longer match `html` (an in-view edit touched it); the next paint is full.
+// longer match `blocks` (an in-view edit touched it); `touched` holds the
+// top-level blocks such an edit changed, which the next paint replaces.
 let painted: Map<string, { cls: string; start: number; end: number }> | null = null;
 let paintedText = '';
 let docStale = false;
@@ -53,6 +54,11 @@ let review: ReviewRun | null = null;
 let triageFocus: { from: string; to: string | null } | null = null;
 let workingTimer: ReturnType<typeof setTimeout> | undefined;
 let lastBanner = '';
+const touched = new Set<Element>();
+// The blocks on screen, when each is exactly one element of #mdr-doc (the
+// footnotes are two), so a repaint can replace only the ones that changed.
+let paintedBlocks: string[] | null = null;
+let paintedKeys: (string | undefined)[] = [];
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
@@ -175,10 +181,15 @@ function paint() {
   secBtn.hidden = true;
   hoverEl = null;
   const at = readingPosition();
-  doc.innerHTML = html;
-  const text = buildTextMap(doc).text;
-  if (text !== paintedText) anchorCache.clear();
-  paintedText = text;
+  if (!patchDoc()) {
+    doc.innerHTML = blocks.join('');
+    paintedBlocks = doc.children.length === elementCount(blocks, 0, blocks.length) ? blocks : null;
+    paintedKeys = [];
+  }
+  touched.clear();
+  const map = buildTextMap(doc);
+  if (map.text !== paintedText) anchorCache.clear();
+  paintedText = map.text;
   const located = layout();
   painted = new Map();
   const specs = [];
@@ -186,7 +197,7 @@ function paint() {
     painted.set(c.id, { cls: markClass(c), start: s, end: e });
     specs.push({ start: s, end: e, make: () => mark(c) });
   }
-  wrapRanges(doc, specs);
+  wrapRanges(doc, specs, map);
   renderSidebar();
   afterPaint();
   restorePosition(at);
@@ -194,6 +205,93 @@ function paint() {
     (doc.querySelector(`input.mdr-task[data-task-line="${focusTask}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
     focusTask = null;
   }
+}
+
+const isFootnotes = (b: string) => b.startsWith('<hr class="footnotes-sep"');
+/** Elements that blocks [from, to) make: one each, two for the footnotes (a rule and the list). */
+const elementCount = (bs: string[], from: number, to: number) => {
+  let n = to - from;
+  for (let i = from; i < to; i++) if (isFootnotes(bs[i])) n++;
+  return n;
+};
+const firstLine = (b: string) => Number(/data-ls="(\d+)"/.exec(b)?.[1] ?? NaN);
+/** A block's HTML with its line numbers made relative to its first line: equal keys differ only by a move. */
+const moveKey = (b: string) => {
+  const base = firstLine(b);
+  return b.replace(/data-l([se])="(\d+)"/g, (_, k, v) => `data-l${k}="${Number(v) - base}"`);
+};
+
+/**
+ * Replace only the blocks that changed since the last paint. Blocks after the
+ * change that only moved keep their elements, with their line numbers shifted.
+ * The result is the DOM a full paint would build, apart from highlights, which
+ * the caller wraps again. Returns false when it can't be sure of that.
+ */
+function patchDoc(): boolean {
+  const prev = paintedBlocks;
+  if (!prev || doc.querySelector('.mdr-block-editor')) return false;
+  const next = blocks;
+  const n = prev.length;
+  const m = next.length;
+  if (doc.children.length !== elementCount(prev, 0, n)) return false;
+  // Blocks an in-view edit touched no longer show `prev`: they must be replaced.
+  let lo = n;
+  let hi = -1;
+  for (const el of touched) {
+    const e = Array.prototype.indexOf.call(doc.children, el);
+    if (e < 0) continue;
+    const i = Math.min(e, n - 1); // the footnotes, last, are two elements
+    lo = Math.min(lo, i);
+    hi = Math.max(hi, i);
+  }
+  let p = 0;
+  while (p < n && p < m && p < lo && prev[p] === next[p]) p++;
+  const keyOf = (i: number) => (paintedKeys[i] ??= moveKey(prev[i]));
+  let s = 0;
+  while (s < n - p && s < m - p && n - 1 - s > hi) {
+    const a = prev[n - 1 - s];
+    const b = next[m - 1 - s];
+    // The footnotes hold lines from all over the file, so they must match exactly.
+    if (a === b || (!isFootnotes(a) && keyOf(n - 1 - s) === moveKey(b))) s++;
+    else break;
+  }
+  const oldCount = elementCount(prev, p, n - s);
+  const tpl = document.createElement('template');
+  tpl.innerHTML = next.slice(p, m - s).join('');
+  if (tpl.content.children.length !== elementCount(next, p, m - s)) return false;
+  // Unwrap highlights first: a highlight can span blocks, and a full paint
+  // starts from bare HTML too.
+  unwrap(Array.from(doc.querySelectorAll('mark.mdr-hl')));
+  doc.querySelectorAll('.mdr-pending').forEach((x) => x.classList.remove('mdr-pending'));
+  const kids = doc.children;
+  const after = kids[p + oldCount] ?? null;
+  // Each block is its element(s) plus the newline after them.
+  for (let k = 0; k < oldCount; k++) {
+    const el = kids[p];
+    while (el.nextSibling && el.nextSibling !== after && el.nextSibling.nodeType !== Node.ELEMENT_NODE) el.nextSibling.remove();
+    el.remove();
+  }
+  doc.insertBefore(tpl.content, after);
+  // Moved blocks: shift their line numbers.
+  const firstKept = p + elementCount(next, p, m - s);
+  for (let k = 0; k < s; k++) {
+    const a = prev[n - s + k];
+    const b = next[m - s + k];
+    if (a === b) continue;
+    const d = firstLine(b) - firstLine(a);
+    if (!d) continue;
+    const el = kids[firstKept + k];
+    for (const x of [...(el.hasAttribute('data-ls') ? [el] : []), ...Array.from(el.querySelectorAll('[data-ls]'))]) {
+      x.setAttribute('data-ls', String(Number(x.getAttribute('data-ls')) + d));
+      x.setAttribute('data-le', String(Number(x.getAttribute('data-le')) + d));
+    }
+  }
+  // Moved blocks keep their keys: those don't depend on where the block is.
+  const keys = Array.from({ length: n }, (_, i) => paintedKeys[i]);
+  keys.splice(p, n - s - p, ...new Array<undefined>(m - s - p));
+  paintedKeys = keys;
+  paintedBlocks = next;
+  return true;
 }
 
 // Off-screen blocks use an estimated height until they are first shown (see
@@ -1095,9 +1193,18 @@ function startEdit(el: HTMLElement, raw = false) {
   el.classList.add('mdr-pending');
 }
 
+/** The top-level block holding `el`. */
+function topBlock(el: Element): Element {
+  while (el.parentElement && el.parentElement !== doc) el = el.parentElement;
+  return el;
+}
+
+const sameBlocks = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
 function startInline(el: HTMLElement, caretAtEnd = false) {
   if (editing || inline) return;
   docStale = true;
+  touched.add(topBlock(el));
   inline = { el, ls: Number(el.dataset.ls), le: Number(el.dataset.le), kind: INLINE_KIND[el.tagName], oldText: el.textContent || '', oldHtml: el.innerHTML, saving: false };
   el.contentEditable = 'true';
   el.spellcheck = true;
@@ -1261,6 +1368,7 @@ function openEditor(ls: number, le: number, text: string) {
   doc.querySelectorAll('.mdr-pending').forEach((x) => x.classList.remove('mdr-pending'));
   if (!el) return;
   docStale = true;
+  touched.add(topBlock(el));
   const box: HTMLElement = document.createElement(el.tagName === 'TR' ? 'tr' : 'div');
   box.className = 'mdr-block-editor';
   const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · ${keyLabel('Mod+Enter')} to save · Esc to cancel</div>
@@ -1315,13 +1423,13 @@ window.addEventListener('message', (ev) => {
     case 'render':
       // The host re-sends identical HTML often (e.g. twice after a block save);
       // skip the re-render when the view already shows it.
-      if (m.html === html && painted && !docStale && !deferredPaint) {
+      if (sameBlocks(m.blocks, blocks) && painted && !docStale && !deferredPaint) {
         if (m.fileName !== fileName) {
           fileName = m.fileName;
           renderSidebar();
         }
       } else {
-        html = m.html;
+        blocks = m.blocks;
         fileName = m.fileName;
         paint();
       }
