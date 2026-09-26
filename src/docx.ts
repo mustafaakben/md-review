@@ -123,8 +123,23 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
  * path outside the document's own folder (reading it would connect there).
  */
 function mayRead(file: string, opts: ExportOptions): boolean {
-  if (opts.readableRoots && !opts.readableRoots.some((r) => isInside(r, file))) return false;
+  if (opts.readableRoots) {
+    if (!opts.readableRoots.some((r) => isInside(r, file))) return false;
+    // A link inside a root can point anywhere: its target must be inside one too.
+    const real = realPath(file);
+    if (!real || !opts.readableRoots.some((r) => isInside(realPath(r) ?? r, real))) return false;
+  }
   return !isNetworkPath(file) || (!!opts.docDir && isInside(opts.docDir, file));
+}
+
+function realPath(p: string): string | undefined {
+  // Network paths are left alone here: resolving them would connect.
+  if (isNetworkPath(p)) return p;
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return undefined;
+  }
 }
 
 /** A regular file up to the size limit (never a device or a pipe, which would not finish). */

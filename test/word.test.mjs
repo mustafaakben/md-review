@@ -502,6 +502,18 @@ test('export: which images are read (Restricted Mode, network paths, devices)', 
     assert.equal(media({ readableRoots: [docDir] }).length, 1, 'Restricted Mode: only inside the readable roots');
     const doc = lib.readZip(lib.exportDocx({ markdown: md, comments: [], docDir, readableRoots: [docDir] }).docx).get('word/document.xml').toString();
     assert.match(doc, /\[outside\]/);
+    let linked = true;
+    try {
+      fs.symlinkSync(path.join(tmp, 'out.png'), path.join(docDir, 'link.png'));
+    } catch (e) {
+      if (e.code !== 'EPERM') throw e;
+      linked = false; // Windows without Developer Mode
+    }
+    if (linked) {
+      const viaLink = (opts) => [...lib.readZip(lib.exportDocx({ markdown: '![link](link.png)\n', comments: [], docDir, ...opts }).docx).keys()].filter((n) => n.startsWith('word/media/'));
+      assert.equal(viaLink({}).length, 1, 'trusted: a link is followed');
+      assert.equal(viaLink({ readableRoots: [docDir] }).length, 0, 'Restricted Mode: a link inside pointing outside is not read');
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -612,6 +624,13 @@ test('import: the same words on the same text elsewhere, or a longer comment, is
   // Nor does a placed thread match a whole-document one with the same body.
   assert.equal(lib.importDocx(md, docx, { existing: [{ ...see, body: 'Cite.' }] }).imported, 2);
 
+  // Two occurrences on one line are told apart by the words around them.
+  const one = 'Prior work and more prior work too.\n';
+  const both = miniDocx([[[1], 'Prior work', [1, 'end'], ' and more ', [2], 'prior work', [2, 'end'], ' too.']], [[1, 'Cite.'], [2, 'Cite.']]);
+  const r1 = lib.importDocx(one, both);
+  assert.equal(r1.imported, 2);
+  assert.equal(lib.importDocx(one, both, { existing: r1.comments }).imported, 0);
+
   // A hundred comments on one quote, c1 … c100: every one is new, and a re-import adds none.
   const many = Array.from({ length: 100 }, (_, i) => i + 1);
   const hundred = miniDocx([['We extend ', ...many.map((i) => [i]), 'prior work', ...many.map((i) => [i, 'end']), ' on bikes.']], many.map((i) => [i, `c${i}`]));
@@ -680,6 +699,9 @@ test('import: a megabyte-long tag and a comment full of suggested-edit lines rea
   assert.ok(performance.now() - t < 1000, `comment split in ${(performance.now() - t).toFixed(0)} ms`);
   assert.deepEqual(lib.splitMeta('Tighten.\n[minor]\nSuggested edit: replace with “new “words””'), { body: 'Tighten.', meta: { severity: 'minor', suggestion: { text: 'new “words”' } } });
   assert.deepEqual(lib.splitMeta('Cut.\nSuggested edit: delete this text').meta, { suggestion: { text: '' } });
+  // Only the line the export writes last is metadata; one of the body's own is text.
+  assert.deepEqual(lib.splitMeta('Grade this:\n[minor]\nor worse.'), { body: 'Grade this:\n[minor]\nor worse.', meta: {} });
+  assert.deepEqual(lib.splitMeta('Grade this:\n[minor]\nok\n[question · major]'), { body: 'Grade this:\n[minor]\nok', meta: { kind: 'question', severity: 'major' } });
 });
 
 test('word.js finds everything it takes from extension.js', () => {

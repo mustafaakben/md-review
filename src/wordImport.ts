@@ -444,7 +444,9 @@ function sameAnchor(a: Comment, b: Comment): boolean {
   const x = a.anchor;
   const y = b.anchor;
   if (norm(x.quote) !== norm(y.quote)) return false;
-  return x.lineStart === y.lineStart || (norm(x.prefix) === norm(y.prefix) && norm(x.suffix) === norm(y.suffix));
+  // The words around it tell apart two occurrences on one line; the line alone only when they're missing.
+  if (x.prefix || x.suffix || y.prefix || y.suffix) return norm(x.prefix) === norm(y.prefix) && norm(x.suffix) === norm(y.suffix);
+  return x.lineStart === y.lineStart;
 }
 
 /** The thread a Word comment repeats: same author, same body, same place. */
@@ -475,9 +477,10 @@ export function splitMeta(text: string): { body: string; meta: Partial<Comment> 
     meta.suggestion = { text: sg[1] ?? '' };
     text = text.slice(0, at);
   }
+  // Only the last line: the export writes it there, and a body may hold a "[minor]" line of its own.
   const lines = text.split('\n');
-  const i = lines.findIndex((l) => META.test(l.trim()));
-  if (i < 1) return { body: text, meta };
+  const i = lines.length - 1;
+  if (i < 1 || !META.test(lines[i].trim())) return { body: text, meta };
   for (const w of META.exec(lines[i].trim())![1].split(' · ')) {
     if (w === 'question' || w === 'praise') meta.kind = w;
     else if (w === 'major' || w === 'minor' || w === 'nit') meta.severity = w;
