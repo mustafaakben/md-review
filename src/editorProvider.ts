@@ -113,9 +113,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       `img-src ${webview.cspSource} https: data:`,
       `style-src ${webview.cspSource} 'unsafe-inline'`,
       `font-src ${webview.cspSource} data:`,
-      // Only the Mermaid folder, for the chunks the webview imports on demand;
-      // the doc's and workspace folders are resource roots too, so not cspSource.
-      `script-src 'nonce-${nonce}' ${media('mermaid')}/`,
+      // Nonce only: the Mermaid chunks webview.js imports inherit its nonce, and
+      // allowing a host would let document HTML load scripts from the workspace.
+      `script-src 'nonce-${nonce}'`,
     ].join('; ');
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">

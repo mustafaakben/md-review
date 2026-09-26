@@ -95,11 +95,16 @@ const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
 const keySheet = createShortcutSheet(document.getElementById('mdr-keys')!);
 const search = createSearch(doc, document.getElementById('mdr-find')!);
 const diagrams = createDiagrams(doc);
+// VS Code's own theme switch changes the body class; diagrams follow it.
+new MutationObserver(() => void diagrams.refresh()).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 const reading = createReading(
   doc,
   document.getElementById('mdr-reading-btn')!,
   document.getElementById('mdr-reading')!,
-  (prefs: ReadingPrefs) => post({ type: 'setPrefs', prefs }),
+  (prefs: ReadingPrefs) => {
+    post({ type: 'setPrefs', prefs });
+    void diagrams.refresh(); // a reading theme can switch light/dark
+  },
   (msg) => toast(msg),
 );
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;

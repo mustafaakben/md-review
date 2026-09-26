@@ -129,7 +129,11 @@ export function gfmPlugin(md: MarkdownIt): void {
           // in a footnote or behind a second list marker).
           lines ||= state.src.split('\n');
           const live = TASK_LINE.test(lines[t.map[0]] || '');
-          const label = inline.content.split('\n')[0].trim().slice(0, 80);
+          const label = (inline.children || [])
+            .map((c) => (c.type === 'text' || c.type === 'code_inline' ? c.content : c.type === 'softbreak' ? ' ' : ''))
+            .join('')
+            .trim()
+            .slice(0, 80);
           box.content = `<input type="checkbox" class="mdr-task" data-task-line="${t.map[0]}"${checked ? ' checked' : ''}${live ? '' : ' disabled'} aria-label="${esc(label || (checked ? 'Done' : 'To do'))}">`;
           (inline.children ||= []).unshift(box);
           addClass(t, 'mdr-task-item');

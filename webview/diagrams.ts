@@ -32,7 +32,8 @@ function theme(doc: HTMLElement): 'dark' | 'default' {
 export function createDiagrams(doc: HTMLElement) {
   let pass = 0;
 
-  function place(wrap: HTMLElement, out: { svg?: string; error?: string }) {
+  function place(wrap: HTMLElement, out: { svg?: string; error?: string }, key = '') {
+    wrap.dataset.drawn = key;
     let holder = wrap.querySelector<HTMLElement>(':scope > .mdr-mermaid-out');
     if (!holder) {
       holder = document.createElement('div');
@@ -59,8 +60,9 @@ export function createDiagrams(doc: HTMLElement) {
     for (const w of wraps) {
       const src = w.querySelector('.mdr-mermaid-src')?.textContent || '';
       const key = `${t}\u0000${src}`;
+      if (w.dataset.drawn === key) continue; // already showing this
       const hit = cache.get(key);
-      if (hit) place(w, hit);
+      if (hit) place(w, hit, key);
       else todo.push([w, src, key]);
     }
     if (!todo.length) return;
@@ -73,21 +75,24 @@ export function createDiagrams(doc: HTMLElement) {
       return;
     }
     if (themeInUse !== t) {
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: t, fontFamily: 'inherit' });
+      // suppressErrorRendering: no error graphic left in <body> for a bad diagram.
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, theme: t, fontFamily: 'inherit' });
       themeInUse = t;
     }
     for (const [w, src, key] of todo) {
       if (my !== pass) return; // a newer paint took over
       let out: { svg?: string; error?: string };
+      const id = `mdr-mermaid-${++seq}`;
       try {
-        const { svg } = await mermaid.render(`mdr-mermaid-${++seq}`, src);
+        const { svg } = await mermaid.render(id, src);
         out = { svg };
       } catch (e: any) {
         out = { error: String(e?.message || e).split('\n')[0] };
+        document.getElementById('d' + id)?.remove(); // Mermaid's scratch node
       }
       cache.set(key, out);
       if (cache.size > 200) cache.delete(cache.keys().next().value!);
-      if (w.isConnected) place(w, out);
+      if (w.isConnected) place(w, out, key);
     }
   }
 
