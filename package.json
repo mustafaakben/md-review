@@ -184,6 +184,7 @@
         },
         "mdReview.agent.command": {
           "type": "string",
+          "scope": "machine",
           "default": "claude",
           "markdownDescription": "Program started by **Send to Claude**, followed by the review prompt as its last argument. Extra arguments are allowed, e.g. `claude --permission-mode acceptEdits`."
         },
@@ -207,82 +208,82 @@
         "command": "mdReview.undo",
         "key": "ctrl+z",
         "mac": "cmd+z",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.redo",
         "key": "ctrl+y",
         "mac": "cmd+shift+z",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.redo",
         "key": "ctrl+shift+z",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.find",
         "key": "ctrl+f",
         "mac": "cmd+f",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.nextComment",
         "key": "alt+down",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.previousComment",
         "key": "alt+up",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.toggleOutline",
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomIn",
         "key": "ctrl+=",
         "mac": "cmd+=",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomIn",
         "key": "ctrl+numpad_add",
         "mac": "cmd+numpad_add",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomIn",
         "key": "ctrl+shift+=",
         "mac": "cmd+shift+=",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomOut",
         "key": "ctrl+-",
         "mac": "cmd+-",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomOut",
         "key": "ctrl+numpad_subtract",
         "mac": "cmd+numpad_subtract",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomReset",
         "key": "ctrl+0",
         "mac": "cmd+0",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.zoomReset",
         "key": "ctrl+numpad0",
         "mac": "cmd+numpad0",
-        "when": "activeCustomEditorId == 'mdReview.editor'"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       }
     ]
   },

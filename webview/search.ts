@@ -146,6 +146,7 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
       reveal();
     },
     close() {
+      clearTimeout(timer);
       bar.hidden = true;
       ranges = [];
       index = -1;

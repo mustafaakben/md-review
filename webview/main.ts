@@ -525,9 +525,10 @@ function runCommand(cmd: string) {
     case 'find':
       return search.open();
     case 'next':
-      return navigate(1);
     case 'prev':
-      return navigate(-1);
+      // Alt+Up/Down reach here even while typing a comment or editing text.
+      if (isTyping(document.activeElement)) return;
+      return navigate(cmd === 'next' ? 1 : -1);
     case 'outline':
       return outline.setOpen(!outline.isOpen());
     case 'send':

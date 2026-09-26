@@ -142,8 +142,8 @@ function openLink(href: string, dir: string) {
 }
 
 /**
- * Start the configured agent in a terminal with the review prompt. The command
- * is launched directly (no shell), so the prompt needs no quoting.
+ * Start the configured agent in a terminal. The review prompt is written to a
+ * temp file and the agent gets one short argument that points at it.
  */
 function runAgent(prompt: string, fileName: string, cwd: string): string {
   const cfg = vscode.workspace.getConfiguration('mdReview');
@@ -152,11 +152,15 @@ function runAgent(prompt: string, fileName: string, cwd: string): string {
   void vscode.env.clipboard.writeText(prompt);
   if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
   const [shellPath, ...extra] = command.split(/\s+/);
+  // Pass a short fixed argument pointing at a file instead of the prompt itself:
+  // comment text is untrusted, and on Windows a .cmd shim would run it through cmd.exe.
+  const promptFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-')), 'review-prompt.md');
+  fs.writeFileSync(promptFile, prompt, 'utf8');
   const term = vscode.window.createTerminal({
     name: `Claude · ${fileName}`,
     cwd,
     shellPath,
-    shellArgs: [...extra, prompt],
+    shellArgs: [...extra, `Read and follow the review instructions in ${promptFile}`],
     iconPath: new vscode.ThemeIcon('sparkle'),
   });
   term.show();
