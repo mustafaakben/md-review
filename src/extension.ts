@@ -1,12 +1,16 @@
 import * as vscode from 'vscode';
 import { MdReviewEditorProvider } from './editorProvider';
-import { addClaudeSkill, sendFolderToClaude } from './agentCommands';
+import { addClaudeSkill, sendFolderToClaude, sendWorkspaceToClaude } from './agentCommands';
 import { initAgentPrompts } from './agentRun';
 import type { FromWebview } from './core';
+import { InboxView } from './inboxView';
 
 export function activate(context: vscode.ExtensionContext) {
   initAgentPrompts(context);
+  // Registers the tree only; the workspace is scanned when the view is first shown.
+  const inbox = new InboxView();
   context.subscriptions.push(
+    inbox,
     vscode.window.registerCustomEditorProvider(MdReviewEditorProvider.viewType, new MdReviewEditorProvider(context), {
       webviewOptions: { retainContextWhenHidden: true },
       supportsMultipleEditorsPerDocument: true,
@@ -24,6 +28,11 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('mdReview.sendFolderToClaude', (uri?: vscode.Uri) => sendFolderToClaude(context, uri)),
     vscode.commands.registerCommand('mdReview.addClaudeSkill', () => addClaudeSkill(context)),
+    vscode.commands.registerCommand('mdReview.openThread', (mdPath: string, id: string) =>
+      MdReviewEditorProvider.focusThread(vscode.Uri.file(mdPath), id),
+    ),
+    vscode.commands.registerCommand('mdReview.inbox.refresh', () => inbox.refresh()),
+    vscode.commands.registerCommand('mdReview.inbox.sendAll', () => sendWorkspaceToClaude(context)),
     ...(
       [
         ['mdReview.undo', { type: 'command', command: 'undo' }],
