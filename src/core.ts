@@ -4,8 +4,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
 import { applyBlockEdit, readBlock, toggleTask, BlockEditError } from './blockEdit';
-import { renderMarkdown, RenderEnv, ResolveImage } from './render';
-import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
+import { renderParsed, RenderEnv, ResolveImage } from './render';
+import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
 
@@ -110,6 +110,7 @@ export class ReviewSession {
   private lastSidecarWrite: string | undefined;
   private lastRendered: string | undefined;
   private watched = '';
+  private lastParse: RenderedParse | undefined;
   private history = new EditHistory();
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
@@ -127,8 +128,11 @@ export class ReviewSession {
     this.lastRendered = text;
     let html: string;
     const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
+    this.lastParse = undefined;
     try {
-      html = renderMarkdown(text, this.ctx.resolveImage, env);
+      const r = renderParsed(text, this.ctx.resolveImage, env);
+      html = r.html;
+      this.lastParse = { text, ...r.parse };
     } catch (e: any) {
       html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
     }
@@ -237,7 +241,7 @@ export class ReviewSession {
         // Kept with the undo entry, so Undo and Redo move the thread along with the text.
         const applied: Applied = { id: msg.id, from: msg.from, status: 'submitted' };
         try {
-          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText), applied);
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText, this.lastParse), applied);
         } catch (e) {
           if (e instanceof InlineMapError) {
             this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: "Couldn't apply that suggestion to the Markdown safely, so nothing was written. Make the change in the source below." });
@@ -254,7 +258,7 @@ export class ReviewSession {
           if (c.status !== 'resolved') store.setStatus(d, msg.id, 'resolved');
         });
         this.ctx.post({ type: 'blockSaved', ls: msg.ls });
-        this.render();
+        this.render(true);
         return;
       }
       case 'dismissSuggestion':
@@ -289,7 +293,7 @@ export class ReviewSession {
       case 'saveInline':
         this.assertEditable();
         try {
-          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText));
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText, this.lastParse));
         } catch (e) {
           if (e instanceof InlineMapError) {
             this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: e.message });
