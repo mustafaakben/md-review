@@ -1,7 +1,7 @@
 // Live agent status: the "Claude is working · 2 of 5" banner over the threads,
 // the summary when the round ends, and which threads Claude is on right now.
 
-export interface Round { total: number; done: number; resolved: number; questions: number; finished: boolean }
+export interface Round { total: number; done: number; resolved: number; questions: number; questionIds: string[]; finished: boolean }
 
 /** A claim older than this is treated as abandoned (the agent crashed or was stopped). */
 const FRESH_MS = 5 * 60 * 1000;

@@ -8,9 +8,11 @@ export interface FilterState {
   status: StatusFilter;
   author: string; // '' = everyone
   severity: SeverityFilter; // '' = any
+  ids?: string[]; // only these threads (the last round's questions); not remembered
 }
 
 interface Filterable {
+  id: string;
   author: string;
   status: 'draft' | 'submitted' | 'resolved';
   severity?: string;
@@ -29,6 +31,7 @@ const LABEL: Record<StatusFilter, string> = { all: 'All', draft: 'Drafts', submi
 export function passes(c: Filterable, f: FilterState, showResolved: boolean): boolean {
   if (f.status === 'all' ? c.status === 'resolved' && !showResolved : c.status !== f.status) return false;
   if (f.severity && c.severity !== f.severity) return false;
+  if (f.ids && !f.ids.includes(c.id)) return false;
   return !f.author || c.author === f.author || c.replies.some((r) => r.author === f.author);
 }
 
@@ -46,9 +49,11 @@ export function authorsOf(comments: Filterable[]): string[] {
  * set. Severity chips show only once some thread has a severity.
  */
 export function filterBar(f: FilterState, authors: string[], counts: Record<StatusFilter, number>, severities: Record<string, number> = {}): string {
-  const chips = (Object.keys(LABEL) as StatusFilter[])
-    .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)
-    .join('');
+  const chips = f.ids
+    ? `<button class="mdr-chip on" data-filter-status="all" aria-pressed="true" title="Show all threads">Questions for you<span>${f.ids.length}</span></button>`
+    : (Object.keys(LABEL) as StatusFilter[])
+        .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)
+        .join('');
   const opts = ['<option value="">Everyone</option>']
     .concat(authors.map((a) => `<option value="${esc(a)}"${a === f.author ? ' selected' : ''}>${esc(a)}</option>`))
     .join('');
