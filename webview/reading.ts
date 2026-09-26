@@ -41,6 +41,8 @@ export function createReading(
   let saveT: any;
 
   function render() {
+    // Re-rendering replaces the buttons, so remember which one had focus.
+    const had = panel.contains(document.activeElement) ? keyOf(document.activeElement as HTMLElement) : '';
     document.body.dataset.readingTheme = prefs.theme;
     document.body.dataset.readingFont = prefs.font;
     document.documentElement.style.setProperty('--doc-zoom', String(prefs.zoom));
@@ -63,6 +65,27 @@ export function createReading(
         <button data-zoom="0" class="mdr-rp-pct" title="Reset to 100%">${pct}</button>
         <button data-zoom="1" aria-label="Zoom in" ${prefs.zoom >= MAX ? 'disabled' : ''}>+</button>
       </div>`;
+    // Roving tabindex inside each radio group: Tab reaches the checked option.
+    panel.querySelectorAll('[role="radio"]').forEach((b) => b.setAttribute('tabindex', b.getAttribute('aria-checked') === 'true' ? '0' : '-1'));
+    if (had) {
+      const again = panel.querySelector(had) as HTMLButtonElement | null;
+      (again && !again.disabled ? again : (panel.querySelector('[data-zoom="0"]') as HTMLElement))?.focus();
+    }
+  }
+
+  function keyOf(el: HTMLElement): string {
+    const b = el.closest('button');
+    if (!b) return '';
+    for (const k of ['theme', 'font', 'zoom']) if (b.dataset[k] !== undefined) return `[data-${k}="${b.dataset[k]}"]`;
+    return '';
+  }
+
+  function close(returnFocus: boolean) {
+    if (panel.hidden) return;
+    const inside = panel.contains(document.activeElement);
+    panel.hidden = true;
+    button.setAttribute('aria-expanded', 'false');
+    if (returnFocus || inside) button.focus();
   }
 
   function set(p: Partial<ReadingPrefs>, persist: boolean) {
@@ -121,6 +144,28 @@ export function createReading(
     e.stopPropagation();
     api.togglePanel();
   });
+  // Arrow keys move and select within a radio group, as native radios do.
+  panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      return close(true);
+    }
+    const t = e.target as HTMLElement;
+    const group = t.closest('[role="radiogroup"]');
+    if (!group || !/^Arrow(Up|Down|Left|Right)$/.test(e.key)) return;
+    e.preventDefault();
+    const opts = Array.from(group.querySelectorAll('[role="radio"]')) as HTMLButtonElement[];
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+    const next = opts[(opts.indexOf(t as HTMLButtonElement) + d + opts.length) % opts.length];
+    next?.focus();
+    next?.click();
+  });
+  // Tabbing out of the panel closes it, like a menu.
+  panel.addEventListener('focusout', (e) => {
+    const to = (e as FocusEvent).relatedTarget as Node | null;
+    if (to && !panel.contains(to) && to !== button) close(false);
+  });
   panel.addEventListener('click', (e) => {
     e.stopPropagation();
     const t = (e.target as Element).closest('button');
@@ -131,10 +176,12 @@ export function createReading(
     else if (t.dataset.zoom) step(Number(t.dataset.zoom) as 1 | -1);
   });
   document.addEventListener('click', (e) => {
-    if (!panel.hidden && !panel.contains(e.target as Node)) panel.hidden = true;
+    if (!panel.hidden && !panel.contains(e.target as Node)) close(false);
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !panel.hidden) panel.hidden = true;
+    // Escape in a text field belongs to that field.
+    const t = e.target as HTMLElement;
+    if (e.key === 'Escape' && !panel.hidden && !(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) close(true);
   });
 
   const api: Reading = {
@@ -146,8 +193,11 @@ export function createReading(
       zoomTo(1);
     },
     togglePanel() {
-      panel.hidden = !panel.hidden;
-      button.setAttribute('aria-expanded', String(!panel.hidden));
+      if (!panel.hidden) return close(true);
+      panel.hidden = false;
+      button.setAttribute('aria-expanded', 'true');
+      // Focus the selected theme so the panel is usable from the keyboard.
+      (panel.querySelector('.mdr-swatch[aria-checked="true"]') as HTMLElement | null)?.focus();
     },
   };
   render();

@@ -4,7 +4,7 @@
 
 MD Review is a VS Code extension that opens any `.md` file in a clean, rendered view. You select text and leave comments. When you press **Submit review**, the comments are written to a small JSON file next to your document, where Claude, Codex, or any script can read them, edit the Markdown, reply in the thread, and mark it resolved. The view updates live while the agent works.
 
-![MD Review: a rendered document with a submitted comment, Claude's reply, and a draft comment](docs/screenshot.png)
+![MD Review: the outline, a rendered document with highlighted comments, and the comments pane with filters, Send to Claude, and a thread Claude replied to](docs/screenshot.png)
 
 ```
 paper.md                   ← your document; comments never touch it
@@ -17,7 +17,11 @@ paper.md.comments.json     ← the comment threads (schema below)
 - Comments on any selection, with drafts, one-click **Submit review**, replies, and resolve/reopen.
 - An agent protocol and a zero-dependency CLI, so any agent can find submitted comments and answer them.
 - Light editing directly in the rendered view that **never re-serializes the file**. Only the bytes you changed are written, and line endings, spacing, and markup elsewhere stay exactly as they were.
-- A collapsible comments pane and a browser mode that runs without VS Code.
+- **Send to Claude**: one click hands the open threads to Claude Code in a terminal (or copies the prompt for any other agent).
+- An outline pane, find in document, `j`/`k` jumps between comments, and status and author filters.
+- Reading themes (Paper, Sepia, Dusk, Night), a serif option, and zoom for the document column.
+- Byte-exact undo and redo of edits made in the view.
+- A collapsible comments pane, full keyboard access, and a browser mode that runs without VS Code.
 
 It was built for academic manuscripts, but works for any Markdown: docs, specs, notes, or READMEs.
 
@@ -45,7 +49,7 @@ code --install-extension md-review-*.vsix
 
 **Opening a file.** MD Review never takes over `.md` files. Open it one of these ways:
 - Right-click the file → **Open in MD Review**
-- Use the 💬 icon in the editor title bar
+- Use the comment icon in the editor title bar
 - Run **Reopen Editor With… → MD Review**
 
 Once open, the title-bar icon **Open Markdown Source** shows the raw file beside it.
@@ -57,14 +61,14 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 ```
 
 **Commenting.**
-- Select text, click **💬 Comment**, type, and press **Save draft** (Ctrl+Enter).
+- Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter).
 - The sidebar lists threads in document order. Click a quote to jump to its text.
 - Each thread has Reply, Resolve/Reopen, and (for drafts) Delete.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
-- **⟩** at the right end of the toolbar hides the comments pane, and **⟨ Comments** brings it back. The choice is remembered, and clicking a highlighted comment in the text reopens the pane.
+- The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. The choice is remembered, and clicking a highlighted comment in the text reopens the pane.
 
 **Editing: seamless, no boxes.**
-- Turn on **✎ Edit** in the toolbar, then click anywhere in a paragraph, heading, list item, or table row and type. You can also double-click text, or use the ✎ that appears in the left margin on hover.
+- Turn on **Edit** in the toolbar, then click anywhere in a paragraph, heading, list item, or table row and type. You can also double-click text, or use the pencil that appears in the left margin on hover.
 - **Enter** or clicking away saves. **Esc** cancels.
 - Bold/italic/link markup around your change is kept. For example, retyping a word inside `**Station function**` keeps the `**`.
 - How it works: the host diffs the rendered text before and after your edit and maps the change onto the Markdown source. It re-renders the candidate and **writes only if the result shows exactly what you typed**. Only that block's source lines are rewritten, and every other byte (including CRLF/LF endings) is left alone.
@@ -73,21 +77,23 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - If the file changed on disk since it was rendered (say, Claude edited it), the edit is refused and the view refreshes.
 - Ctrl+B/I/U are disabled while editing, since formatting isn't a text change. Use Alt+double-click to add markup.
 
-**Undo.** Ctrl+Z undoes your last edit in the view and Ctrl+Y (or Ctrl+Shift+Z) redoes it; the ↶ ↷ buttons in the toolbar do the same. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
+**Undo.** Ctrl+Z undoes your last edit in the view and Ctrl+Y (or Ctrl+Shift+Z) redoes it; the undo and redo arrows in the toolbar do the same. They grey out as soon as there is nothing to undo, including right after another program changes the file. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
 
 **Getting around.**
-- **Outline** (☰ in the toolbar, or Ctrl+Shift+O) lists the headings, follows your reading position, and shows how many open threads each section has.
+- **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
 - **Find** (Ctrl+F, or `/`) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
 - **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
-**Reading view.** **Aa** in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0. Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
+**Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0. Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
 
 **Send to Claude.**
-- **✦ Send to Claude** submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **✦ Ask Claude** on a card sends just that thread.
+- **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
+
+**Keyboard.** Everything works without a mouse. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 
@@ -187,7 +193,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/editHistory.ts` | byte-exact undo/redo of in-view edits |
 | `src/agentPrompt.ts` | the prompt Send to Claude hands to the agent |
 | `src/render.ts` | Markdown → HTML with source-line tags |
-| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts` |
+| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts` |
 | `cli/mdreview.mjs` | agent CLI |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 

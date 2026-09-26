@@ -148,3 +148,38 @@ body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .m
 }
 .mdr-reading-panel button.mdr-swatch { justify-content: flex-start; border: 1px solid var(--hairline, var(--border)); }
 .mdr-reading-panel .mdr-rp-seg button { border: 1px solid var(--hairline, var(--border)); }
+
+/* ---------- keyboard focus ---------- */
+.mdr-toc-item:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; color: var(--fg); }
+.mdr-doc h1:focus, .mdr-doc h2:focus, .mdr-doc h3:focus, .mdr-doc h4:focus { outline: none; }
+.mdr-doc h1:focus-visible, .mdr-doc h2:focus-visible, .mdr-doc h3:focus-visible, .mdr-doc h4:focus-visible {
+  outline: 1px dashed color-mix(in srgb, var(--focus) 70%, transparent); outline-offset: 4px; border-radius: 2px;
+}
+
+/* ---------- very narrow windows ---------- */
+@media (max-width: 620px) {
+  /* One column: the comments pane stacks under the document; the outline stays a floating drawer. */
+  body:not(.mdr-outline-closed) .mdr-layout, body.mdr-side-collapsed:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: minmax(0, 1fr); }
+  .mdr-outline { width: min(260px, 85vw); }
+  .mdr-find { left: 12px; right: 12px; }
+  .mdr-find input { flex: 1; width: auto; min-width: 0; }
+  .mdr-reading-panel { right: 12px; width: min(272px, calc(100vw - 24px)); }
+}
+
+/* ---------- high contrast ---------- */
+/* In high-contrast themes shadows and tints vanish, so the active thread gets a real border. */
+body.vscode-high-contrast .mdr-card.active, body.vscode-high-contrast-light .mdr-card.active {
+  outline: 2px solid var(--vscode-contrastActiveBorder, var(--focus)); outline-offset: -2px;
+}
+body.vscode-high-contrast mark.mdr-hl.active, body.vscode-high-contrast-light mark.mdr-hl.active {
+  outline: 2px solid var(--vscode-contrastActiveBorder, var(--focus)); outline-offset: 1px;
+}
+body.vscode-high-contrast .mdr-toc-item.current, body.vscode-high-contrast-light .mdr-toc-item.current {
+  outline: 1px dashed var(--vscode-contrastActiveBorder, var(--focus)); outline-offset: -1px;
+}
+@media (forced-colors: active) {
+  .mdr-card.active { outline: 2px solid Highlight; outline-offset: -2px; }
+  mark.mdr-hl.active { outline: 2px solid Highlight; outline-offset: 1px; }
+  .mdr-toc-item.current { outline: 1px solid Highlight; outline-offset: -1px; }
+  .mdr-card::before { forced-color-adjust: none; }
+}

@@ -57,6 +57,19 @@ export class EditHistory {
     this.undone = [];
   }
 
+  /**
+   * Drop the history if `current` is not the file the history expects, i.e.
+   * something else edited it. Returns true when history was cleared, so the
+   * view can disable its undo/redo buttons without waiting for a click.
+   */
+  sync(current: Buffer): boolean {
+    const top = this.done[this.done.length - 1];
+    const expected = top ? top.afterHash : this.undone[this.undone.length - 1]?.beforeHash;
+    if (expected === undefined || hash(current) === expected) return false;
+    this.clear();
+    return true;
+  }
+
   clear(): void {
     this.done = [];
     this.undone = [];

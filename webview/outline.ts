@@ -4,11 +4,17 @@
 export interface Outline {
   /** Rebuild from the freshly painted document. */
   rebuild(): void;
-  setOpen(open: boolean): void;
+  /** `focus`: move keyboard focus into the pane (open) or back to its toggle (close). */
+  setOpen(open: boolean, focus?: boolean): void;
   isOpen(): boolean;
 }
 
-export function createOutline(doc: HTMLElement, pane: HTMLElement, onToggle: (open: boolean) => void): Outline {
+export function createOutline(
+  doc: HTMLElement,
+  pane: HTMLElement,
+  onToggle: (open: boolean) => void,
+  toggleBtn?: HTMLElement,
+): Outline {
   let heads: HTMLElement[] = [];
   let current = -1;
   let raf = 0;
@@ -31,6 +37,10 @@ export function createOutline(doc: HTMLElement, pane: HTMLElement, onToggle: (op
     pane.querySelector('.mdr-toc-item.current')?.classList.remove('current');
     const item = pane.querySelector(`.mdr-toc-item[data-i="${i}"]`) as HTMLElement | null;
     item?.classList.add('current');
+    item?.setAttribute('aria-current', 'location');
+    pane.querySelector('[aria-current]:not(.current)')?.removeAttribute('aria-current');
+    // Tab into the outline lands on the current section, unless focus is already inside.
+    if (item && !pane.contains(document.activeElement)) focusItem(item, false);
     // Keep the current item visible without scrolling the page.
     if (item) {
       const pr = pane.getBoundingClientRect();
@@ -44,14 +54,58 @@ export function createOutline(doc: HTMLElement, pane: HTMLElement, onToggle: (op
     if (!raf) raf = requestAnimationFrame(track);
   }, { passive: true });
 
+  // Below 1000px the pane floats over the document, so a jump also closes it.
+  const floating = window.matchMedia('(max-width: 1000px)');
+
+  function jump(item: HTMLElement, viaKeyboard: boolean) {
+    const h = heads[Number(item.dataset.i)];
+    if (!h) return;
+    h.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (viaKeyboard) {
+      // Move focus to the heading so reading (and Tab) continues from there.
+      if (!h.hasAttribute('tabindex')) h.tabIndex = -1;
+      h.focus({ preventScroll: true });
+    }
+    if (floating.matches) api.setOpen(false);
+  }
+
   pane.addEventListener('click', (e) => {
     const t = e.target as Element;
-    if (t.closest('[data-act="close-outline"]')) return api.setOpen(false);
+    if (t.closest('[data-act="close-outline"]')) return api.setOpen(false, true);
     const item = t.closest('.mdr-toc-item') as HTMLElement | null;
-    if (!item) return;
-    const h = heads[Number(item.dataset.i)];
-    h?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    if (item) jump(item, e.detail === 0);
   });
+
+  // Keyboard: arrows move between entries, Enter/Space jumps, Escape closes.
+  pane.addEventListener('keydown', (e) => {
+    const item = (e.target as Element).closest('.mdr-toc-item') as HTMLElement | null;
+    const items = Array.from(pane.querySelectorAll('.mdr-toc-item')) as HTMLElement[];
+    const at = item ? items.indexOf(item) : -1;
+    let next = -1;
+    if (e.key === 'ArrowDown') next = Math.min(items.length - 1, at + 1);
+    else if (e.key === 'ArrowUp') next = Math.max(0, at - 1);
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = items.length - 1;
+    else if (item && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      return jump(item, true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      return api.setOpen(false, true);
+    }
+    if (next < 0 || !items[next]) return;
+    e.preventDefault();
+    focusItem(items[next]);
+  });
+
+  /** Roving tabindex: exactly one entry is reachable with Tab. */
+  function focusItem(item: HTMLElement | null, move = true) {
+    if (!item) return;
+    pane.querySelectorAll('.mdr-toc-item[tabindex="0"]').forEach((x) => x.setAttribute('tabindex', '-1'));
+    item.setAttribute('tabindex', '0');
+    if (move) item.focus();
+  }
 
   const api: Outline = {
     rebuild() {
@@ -76,21 +130,27 @@ export function createOutline(doc: HTMLElement, pane: HTMLElement, onToggle: (op
           const lvl = Number(h.tagName[1]) - min;
           const text = (h.textContent || '').trim() || '(untitled)';
           const n = counts[i] ? `<span class="mdr-toc-count" title="${counts[i]} open thread${counts[i] > 1 ? 's' : ''}">${counts[i]}</span>` : '';
-          return `<div class="mdr-toc-item lvl${lvl}" data-i="${i}" title="${esc(text)}"><span class="mdr-toc-text">${esc(text)}</span>${n}</div>`;
+          return `<div class="mdr-toc-item lvl${lvl}" data-i="${i}" role="link" tabindex="${i === 0 ? 0 : -1}" title="${esc(text)}"><span class="mdr-toc-text">${esc(text)}</span>${n}</div>`;
         })
         .join('');
+      const focused = (document.activeElement as HTMLElement | null)?.closest?.('.mdr-toc-item') as HTMLElement | null;
+      const refocus = focused && pane.contains(focused) ? focused.dataset.i : null;
       pane.innerHTML = `<div class="mdr-pane-head"><span>Outline</span><button data-act="close-outline" title="Hide outline (Ctrl+Shift+O)" aria-label="Hide outline">✕</button></div>
         ${items || '<div class="mdr-empty">No headings in this document.</div>'}`;
       current = -1;
       track();
+      if (refocus !== null) focusItem(pane.querySelector(`.mdr-toc-item[data-i="${refocus}"]`) as HTMLElement | null);
     },
-    setOpen(open) {
+    setOpen(open, focus = false) {
+      const wasInside = pane.contains(document.activeElement);
       document.body.classList.toggle('mdr-outline-closed', !open);
+      toggleBtn?.setAttribute('aria-expanded', String(open));
       onToggle(open);
       if (open) {
         current = -1;
         track();
-      }
+        if (focus) (pane.querySelector('.mdr-toc-item[tabindex="0"]') as HTMLElement | null)?.focus();
+      } else if (focus || wasInside) toggleBtn?.focus();
     },
     isOpen: () => !document.body.classList.contains('mdr-outline-closed'),
   };
