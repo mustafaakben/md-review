@@ -32,6 +32,8 @@ export interface Round {
   done: number;
   resolved: number;
   questions: number;
+  /** The sent threads now waiting on the reviewer's answer. */
+  questionIds: string[];
   finished: boolean;
 }
 
@@ -143,16 +145,17 @@ export class ReviewSession {
     if (!this.round) return;
     if (this.round.summary) return this.ctx.post({ type: 'round', round: this.round.summary });
     const by = new Map(data.comments.map((c) => [c.id, c]));
-    const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, finished: false };
+    const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, questionIds: [], finished: false };
     for (const id of this.round.ids) {
       const c = by.get(id);
       if (!c) continue; // deleted: no longer part of the round
       round.total++;
       if (c.status === 'resolved') round.resolved++;
-      else if (c.status === 'submitted' && !store.awaitsAgent(c)) round.questions++;
+      else if (c.status === 'submitted' && !store.awaitsAgent(c)) round.questionIds.push(c.id);
       else if (c.status === 'submitted') continue;
       round.done++; // a draft again (reviewer took it back) counts as done
     }
+    round.questions = round.questionIds.length;
     round.finished = round.done === round.total;
     if (round.finished && round.total) {
       const q = round.questions ? `, ${round.questions} question${round.questions === 1 ? '' : 's'} for you` : '';

@@ -548,7 +548,7 @@ function saveComment() {
 // ---------------------------------------------------------------- sidebar actions
 roundEl.addEventListener('click', (e) => {
   const act = (e.target as Element).closest('[data-round]')?.getAttribute('data-round');
-  if (act === 'questions') setFilter({ status: 'submitted', author: '', severity: '' });
+  if (act === 'questions' && round) setFilter({ status: 'all', author: '', severity: '', ids: round.questionIds });
   else if (act === 'dismiss') {
     post({ type: 'dismissRound' });
     // The banner is about to hide; keep focus somewhere useful.
@@ -559,7 +559,7 @@ roundEl.addEventListener('click', (e) => {
 sidebar.addEventListener('click', (e) => {
   const t = e.target as Element;
   if (pickerClick(t)) return;
-  if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '', severity: '' });
+  if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '', severity: '', ids: undefined });
   const cardEl = t.closest('.mdr-card') as HTMLElement | null;
   if (!cardEl) return;
   const id = cardEl.dataset.id!;
@@ -678,7 +678,7 @@ function setFilter(f: Partial<FilterState>) {
 }
 filtersEl.addEventListener('click', (e) => {
   const st = (e.target as Element).closest('[data-filter-status]')?.getAttribute('data-filter-status') as StatusFilter | undefined;
-  if (st) setFilter({ status: st });
+  if (st) setFilter({ status: st, ids: undefined });
   const sv = (e.target as Element).closest('[data-filter-severity]')?.getAttribute('data-filter-severity') as FilterState['severity'] | undefined;
   if (sv) setFilter({ severity: filter.severity === sv ? '' : sv });
 });

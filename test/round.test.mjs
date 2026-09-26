@@ -64,15 +64,15 @@ test('a round reports progress and one summary when the agent is done', () => {
   s.handle({ type: 'ready' });
   s.handle({ type: 'sendToAgent' });
   const rounds = () => posted.filter((m) => m.type === 'round').map((m) => m.round);
-  assert.deepEqual(rounds().at(-1), { total: 3, done: 0, resolved: 0, questions: 0, finished: false });
+  assert.deepEqual(rounds().at(-1), { total: 3, done: 0, resolved: 0, questions: 0, questionIds: [], finished: false });
 
   run('resolve', md, ids[0], 'Fixed.');
   s.onSidecarChanged();
-  assert.deepEqual(rounds().at(-1), { total: 3, done: 1, resolved: 1, questions: 0, finished: false });
+  assert.deepEqual(rounds().at(-1), { total: 3, done: 1, resolved: 1, questions: 0, questionIds: [], finished: false });
   run('reply', md, ids[1], 'Did you mean the first or second?');
   run('resolve', md, ids[2]);
   s.onSidecarChanged();
-  assert.deepEqual(rounds().at(-1), { total: 3, done: 3, resolved: 2, questions: 1, finished: true });
+  assert.deepEqual(rounds().at(-1), { total: 3, done: 3, resolved: 2, questions: 1, questionIds: [ids[1]], finished: true });
   assert.deepEqual(notes, ['Claude finished progress.md: 2 resolved, 1 question for you.']);
   // Later changes don't announce the same round again.
   s.onSidecarChanged();
@@ -83,7 +83,7 @@ test('a round reports progress and one summary when the agent is done', () => {
   s.onSidecarChanged();
   run('reply', md, ids[1], 'Done.');
   s.onSidecarChanged();
-  assert.deepEqual(rounds().at(-1), { total: 3, done: 3, resolved: 2, questions: 1, finished: true });
+  assert.deepEqual(rounds().at(-1), { total: 3, done: 3, resolved: 2, questions: 1, questionIds: [ids[1]], finished: true });
   assert.equal(notes.length, 1);
   s.handle({ type: 'dismissRound' });
   assert.equal(rounds().at(-1), null);
