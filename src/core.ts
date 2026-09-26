@@ -1,5 +1,6 @@
 // Host-side message handling, independent of the VS Code API so the same code
 // drives both the extension and the browser test harness.
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
@@ -145,7 +146,7 @@ export class ReviewSession {
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
   /** A Review with Claude run: when it started, its cap, and the drafts seen so far. Independent of the round. */
-  private review: { since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
+  private review: { run: string; since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -239,12 +240,14 @@ export class ReviewSession {
     // Drafts past the cap, or after the run finished, aren't this run's.
     for (const c of data.comments) {
       if (r.finished || r.ids.size >= r.max) break;
-      if (c.origin === 'agent' && c.createdAt >= r.since) r.ids.add(c.id);
+      if (c.origin === 'agent' && (c.reviewRun ? c.reviewRun === r.run : c.createdAt >= r.since)) r.ids.add(c.id);
     }
     const n = r.ids.size;
     let untriaged = 0;
     for (const id of r.ids) if (by.get(id) && store.isAgentDraft(by.get(id)!)) untriaged++;
-    const finished = r.finished || n >= r.max || (typeof data.reviewDoneAt === 'string' && data.reviewDoneAt >= r.since);
+    // An earlier review still running can finish after this one started; only this run's review-done counts.
+    const done = typeof data.reviewDoneAt === 'string' && (data.reviewDoneRun ? data.reviewDoneRun === r.run : data.reviewDoneAt >= r.since);
+    const finished = r.finished || n >= r.max || done;
     if (finished && !r.finished) {
       const file = path.basename(this.ctx.mdPath);
       this.ctx.notify?.(n ? `Claude left ${count(n, 'comment', 'comments')} on ${file}.` : `Claude finished reviewing ${file} with no comments.`);
@@ -524,9 +527,10 @@ export class ReviewSession {
       existing = store.readSidecar(this.ctx.mdPath).comments.filter((c) => c.status !== 'resolved').length;
     } catch {} // a broken sidecar is reported by sendComments
     const max = Math.max(1, Math.min(50, Math.round(this.ctx.reviewComments?.() ?? 12)));
-    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing });
+    const run = crypto.randomBytes(4).toString('hex');
+    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing, run });
     // A Send to Claude round still running keeps its own banner.
-    this.review = { since: store.now(), max, ids: new Set(), finished: false };
+    this.review = { run, since: store.now(), max, ids: new Set(), finished: false };
     this.sendComments();
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });

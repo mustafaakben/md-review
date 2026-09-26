@@ -177,13 +177,15 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "workingAt": "…", "workingBy": "Claude", // optional: set by the CLI while an agent works on this thread
       "suggestion": { "text": "a dock is free" }, // optional: replacement for the quote ("" deletes it); gains appliedAt / dismissedAt
       "origin": "agent",                     // optional: a draft an agent left as first reviewer, not yet kept or dismissed
+      "reviewRun": "3f9a1c07",               // optional: the review run that left it (comment --run)
       "suggestedBy": "Claude",               // optional: who raised a thread the reviewer kept
       "replies": [
         { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }  // a reply can carry a "suggestion" too
       ]
     }
   ],
-  "reviewDoneAt": "2026-09-25T20:31:00.000Z" // optional: when an agent reviewing first said it was done (CLI review-done)
+  "reviewDoneAt": "2026-09-25T20:31:00.000Z", // optional: when an agent reviewing first said it was done (CLI review-done)
+  "reviewDoneRun": "3f9a1c07"                 // optional: the review run it ended (review-done --run)
 }
 ```
 
@@ -222,9 +224,9 @@ node cli/mdreview.mjs reply   path/to/file.md <id> "text" [--author Claude]
 node cli/mdreview.mjs resolve path/to/file.md <id> ["closing reply"] [--author Claude]
 node cli/mdreview.mjs suggest path/to/file.md <id> "replacement for the quote" ["note"]
 node cli/mdreview.mjs reopen  path/to/file.md <id>
-node cli/mdreview.mjs comment path/to/file.md --quote "text as it reads" [--line N] [--kind question|praise] [--severity major|minor|nit] [--suggest "replacement"] "comment"
+node cli/mdreview.mjs comment path/to/file.md --quote "text as it reads" [--line N] [--kind question|praise] [--severity major|minor|nit] [--suggest "replacement"] [--run id] "comment"
 node cli/mdreview.mjs comment path/to/file.md --document "comment"
-node cli/mdreview.mjs review-done path/to/file.md             # after reviewing first: tell the viewer you're done
+node cli/mdreview.mjs review-done path/to/file.md [--run id]  # after reviewing first: tell the viewer you're done
 node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claude Code skill
 ```
 
@@ -232,7 +234,7 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - `next` goes file by file in document order and skips threads whose last reply is from `--author` (default `Claude`), since those are waiting on the reviewer. A thread the reviewer reopens after that reply counts as open again. `--all` includes the skipped ones, and `next` and `summary` say how many are waiting. So an agent can loop: `next`, edit, `resolve` (or `reply` with a question), `next`, until it prints `No open comments.`
 - `next` and `context` (on an open thread) mark that thread with `workingAt`/`workingBy`, so the viewer shows which thread the agent is on; `reply` and `resolve` clear it. A mark older than 5 minutes is ignored.
 - `comment` is for an agent reviewing first. It finds the quote in the source through markup (like `next`), writes the anchor the viewer needs (the quote and its context as rendered text, and the block's lines), and adds a draft from `--author` (default `Claude`) with `"origin": "agent"`. It exits with code 2 and says why when the quote isn't in the file, appears more than once (pass `--line` for the one you mean), or runs into a footnote marker or math. If the quote was given with markup, it prints the text it stored.
-- `review-done` stamps the sidecar's `reviewDoneAt`, which ends the viewer's "Claude is reviewing" banner.
+- `review-done` stamps the sidecar's `reviewDoneAt`, which ends the viewer's "Claude is reviewing" banner. The review prompt passes `--run <id>` to `comment` and `review-done` (stored as the draft's `reviewRun` and the sidecar's `reviewDoneRun`), so an earlier review that is still running can't add to or end a newer one.
 - `list --json` adds a `file` field to each comment, and `list` shows threads in document order. With no path, `list` now scans the current folder, and a path that doesn't exist is an error.
 
 ## Rendering

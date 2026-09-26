@@ -303,6 +303,38 @@ test('review-done stamps the sidecar, other writes keep it, and it finishes the 
   assert.equal(run('review-done', 'missing.md').status, 2);
 });
 
+test('an earlier review still running neither adds to nor ends a newer one', () => {
+  const md = setup();
+  const prompts = [];
+  const { s, posted } = session(md, { runAgent: (p) => (prompts.push(p), 'started') });
+  const review = () => posted.filter((m) => m.type === 'review').at(-1).review;
+  s.handle({ type: 'startReview', preset: 'copy-edit' });
+  s.handle({ type: 'startReview', preset: 'clarity' });
+  const [a, b] = prompts.map((p) => /comment \S+ --run ([0-9a-f]+) /.exec(p)[1]);
+  assert.notEqual(a, b);
+  assert.match(prompts[1], new RegExp(`review-done "paper\\.md" --run ${b}$`, 'm'));
+  run('comment', 'paper.md', '--run', a, '--quote', 'Main St', 'from the first run');
+  run('review-done', 'paper.md', '--run', a);
+  s.onSidecarChanged();
+  assert.deepEqual([review().total, review().finished], [0, false]);
+  assert.equal(store.readSidecar(md).comments[0].reviewRun, a);
+  run('comment', 'paper.md', '--run', b, '--quote', 'Numbered step one', 'from the second');
+  run('review-done', 'paper.md', '--run', b);
+  s.onSidecarChanged();
+  assert.deepEqual([review().total, review().finished], [1, true]);
+});
+
+test('comment quotes indented code as written, and text after a non-BMP entity keeps its offsets', () => {
+  const md = setup('code.md', 'Intro line.\n\n    const **x** = 1;\n    y = 2;\n\nSmile &#x1F600; words after entity.\n\n- item\n\n    continued item text\n');
+  for (const q of ['const **x** = 1;', 'words after entity.', 'continued item text']) {
+    const r = run('comment', 'code.md', '--quote', q, 'x');
+    assert.equal(r.status, 0, `${q}: ${r.stderr}`);
+    const c = last(md);
+    assert.equal(c.anchor.quote, q);
+    assert.ok(locate(renderedText(md), c.anchor), `viewer lost "${q}"`);
+  }
+});
+
 test('a review with no comments that Claude marks done says so', () => {
   const md = setup();
   const notes = [];
