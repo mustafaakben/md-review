@@ -5,11 +5,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
 import { applyBlockEdit, readBlock, toggleTask, spliceLines, BlockEditError } from './blockEdit';
-import { renderParsed, rendererFor, RenderEnv, ResolveImage } from './render';
+import { hasUrlScheme, renderParsed, rendererFor, RenderEnv, ResolveImage } from './render';
+import type { WordTargets } from './frontMatter';
 import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
+import { insideRealRoots, isNetworkPath, realRoots } from './bibliography';
 import * as redlines from './redlines';
 import { BaselineHook, memoryBaselines } from './baselineStore';
 import { diffSeq } from './wordDiff';
@@ -47,7 +49,8 @@ export interface BaselineInfo {
 }
 
 export type ToWebview =
-  | { type: 'render'; blocks: string[]; fileName: string; changes?: Changes | null; changesFailed?: boolean }
+  | { type: 'render'; blocks: string[]; fileName: string; targets?: WordTargets; changes?: Changes | null; changesFailed?: boolean }
+  | { type: 'linkCheck'; missing: string[]; seq?: number }
   | { type: 'changes'; changes: Changes | null; failed?: boolean }
   | { type: 'baseline'; info: BaselineInfo | null }
   | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
@@ -129,6 +132,8 @@ export type FromWebview =
   | { type: 'startReview'; preset: string; instruction?: string }
   /** An agent's draft: keep it as yours, or keep it and queue it for the agent's next Send. */
   | { type: 'triage'; id: string; action: 'keep' | 'do' }
+  | { type: 'reanchor'; id: string; anchor: store.Anchor }
+  | { type: 'checkLinks'; hrefs: string[]; seq?: number }
   | { type: 'showChanges'; on: boolean }
   /** Revert or keep hunk `i` of the comparison `v`. */
   | { type: 'revertChange'; v: string; i: number }
@@ -222,6 +227,23 @@ const lineCount = (s: string) => {
  */
 interface Applied { id: string; from?: string; status: store.Status; agent?: { author: string; suggestedBy?: string } }
 
+/**
+ * The file a link points at, relative to the document's folder, as written
+ * (decoded, without `#part` or `?query`); null for URLs, protocol-relative
+ * `//host/x` and in-page anchors. A drive (`C:/x.md`, `C:\x.md`) or a
+ * `\\host` path is a file. Opening a link and the health panel's check both use it.
+ */
+export function linkPath(href: string): string | null {
+  if (!href || hasUrlScheme(href) || /^(\/\/|#)/.test(href)) return null;
+  const p = href.split(/[#?]/)[0];
+  if (!p) return null;
+  try {
+    return decodeURIComponent(p);
+  } catch {
+    return p;
+  }
+}
+
 /** Kept with an undo entry: the suggestion it applied, or that it was your own edit (see foldIntoBaseline). */
 interface EditTag { applied?: Applied; yours?: boolean }
 const YOURS: EditTag = { yours: true };
@@ -293,7 +315,7 @@ export class ReviewSession {
       changes = null; // a text the parser rejects: show no redlines rather than fail the render
       changesFailed = true;
     }
-    this.ctx.post({ type: 'render', blocks, fileName: path.basename(this.ctx.mdPath), changes, changesFailed });
+    this.ctx.post({ type: 'render', blocks, fileName: path.basename(this.ctx.mdPath), targets: env.front?.targets, changes, changesFailed });
     this.syncHistory();
     this.postBaseline();
   }
@@ -874,7 +896,40 @@ export class ReviewSession {
         });
         if (msg.action === 'do') this.ctx.post({ type: 'toast', message: "Queued for Claude. Send to Claude when you've triaged the rest." });
         return;
+      case 'reanchor':
+        return this.mutate((d) => store.reanchor(d, msg.id, msg.anchor));
+      case 'checkLinks':
+        void this.checkLinks(msg.hrefs, msg.seq);
+        return;
     }
+  }
+
+  /**
+   * Which relative links and images point at files that don't exist. Only on
+   * request (the health panel). Network paths are never touched, and in
+   * Restricted Mode only files the bibliography could read are looked at.
+   * `seq` comes back with the answer, so the view can drop one for an older question.
+   */
+  private async checkLinks(hrefs: string[], seq?: number): Promise<void> {
+    const dir = path.dirname(this.ctx.mdPath);
+    const readable = this.ctx.readableRoots?.();
+    const roots = readable && realRoots(readable);
+    const list = [...new Set((Array.isArray(hrefs) ? hrefs : []).filter((h) => typeof h === 'string'))].slice(0, 2000);
+    const gone = await Promise.all(
+      list.map(async (h) => {
+        const p = linkPath(h);
+        if (!p) return false;
+        const file = path.resolve(dir, p);
+        if (isNetworkPath(file) || (roots && !insideRealRoots(file, roots))) return false;
+        try {
+          await fs.promises.stat(file);
+          return false;
+        } catch (e: any) {
+          return e?.code === 'ENOENT' || e?.code === 'ENOTDIR';
+        }
+      }),
+    );
+    this.ctx.post({ type: 'linkCheck', missing: list.filter((_, i) => gone[i]), seq: typeof seq === 'number' ? seq : undefined });
   }
 
   /** Run a file edit and remember it for undo. */

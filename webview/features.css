@@ -384,6 +384,62 @@ mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(-
   .mdr-round-part + .mdr-round-part { border-top-color: CanvasText; }
 }
 
+/* ---------- document health: word counts, targets, problems panel ---------- */
+:root {
+  --i-pulse: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.76002 2.49999C5.98102 2.50399 6.17302 2.65399 6.23202 2.86699L8.52102 11.19L10.271 5.35599C10.332 5.15399 10.513 5.01099 10.724 4.99999C10.935 4.98899 11.13 5.11199 11.211 5.30699L12.333 7.99899H14C14.276 7.99899 14.5 8.22299 14.5 8.49899C14.5 8.77499 14.276 8.99899 14 8.99899H12C11.798 8.99899 11.616 8.87799 11.538 8.69099L10.826 6.98299L8.97802 13.142C8.91402 13.356 8.71602 13.501 8.49302 13.498C8.27002 13.495 8.07602 13.346 8.01702 13.131L5.71402 4.75699L4.47502 8.64999C4.40902 8.85799 4.21602 8.99799 3.99902 8.99799H1.99902C1.72302 8.99799 1.49902 8.77399 1.49902 8.49799C1.49902 8.22199 1.72302 7.99799 1.99902 7.99799H3.63302L5.27202 2.84599C5.33902 2.63499 5.53702 2.49299 5.75802 2.49799L5.76002 2.49999Z'/%3E%3C/svg%3E");
+  --over: var(--vscode-editorWarning-foreground, #bf8700);
+}
+#mdr-health-btn { position: relative; }
+#mdr-health-btn::before {
+  content: ''; flex: none; width: 16px; height: 16px; background: currentColor; --ico: var(--i-pulse);
+  -webkit-mask: var(--ico) center / 16px no-repeat; mask: var(--ico) center / 16px no-repeat;
+}
+.mdr-health-n {
+  position: absolute; top: 0; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  font-size: 9.5px; line-height: 14px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums;
+  color: var(--vscode-badge-foreground, #fff); background: var(--vscode-badge-background, var(--over));
+}
+/* When the toolbar is short of room the word count gives way first, then the
+   thread counts, and the file name last: each shrinks many times faster than the next. */
+.mdr-title .mdr-counts { flex: 0 100 auto; min-width: 0; overflow: hidden; }
+.mdr-words { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mdr-words.over, .mdr-toc-words.over { color: var(--over); }
+.mdr-toc-words { flex: none; font-size: 10.5px; color: var(--muted); opacity: 0.8; font-variant-numeric: tabular-nums; }
+.mdr-toc-words.over { opacity: 1; font-weight: 600; }
+@media (max-width: 760px) { .mdr-words { display: none; } }
+.mdr-health-panel { width: 320px; max-height: calc(100vh - var(--bar-h) - 24px); overflow-y: auto; }
+.mdr-health-panel:focus { outline: none; }
+.mdr-hp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 2px 4px; font-weight: 600; }
+.mdr-hp-words { font-weight: 400; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mdr-hp-list { list-style: none; margin: 0; padding: 0; }
+.mdr-hp-list li { margin: 1px 0; }
+.mdr-hp-list button.mdr-hp-go {
+  display: block; width: 100%; padding: 3px 6px; text-align: left; white-space: normal; overflow-wrap: anywhere;
+  background: transparent; border-color: transparent; color: var(--fg); font-size: 12.5px;
+}
+.mdr-hp-list button.mdr-hp-go:hover { background: var(--hover); }
+.mdr-hp-orphan { padding-bottom: 4px; }
+.mdr-hp-orphan button.mdr-hp-go { font-style: italic; color: var(--muted); }
+button.mdr-hp-reanchor { margin: 2px 6px 0; padding: 1px 8px; font-size: 11.5px; }
+.mdr-hp-list .mdr-hp-text { display: block; padding: 3px 6px; font-size: 12.5px; overflow-wrap: anywhere; }
+.mdr-hp-status { margin: 10px 2px 2px; color: var(--muted); }
+.mdr-hp-status:empty { margin: 0; }
+.mdr-hp-ok { display: flex; align-items: center; gap: 6px; }
+.mdr-hp-ok::before {
+  content: ''; flex: none; width: 16px; height: 16px; background: var(--resolved);
+  -webkit-mask: var(--i-check) center / 16px no-repeat; mask: var(--i-check) center / 16px no-repeat;
+}
+.mdr-doc .mdr-flash { animation: mdr-flash 1.6s ease-out; border-radius: 2px; }
+@keyframes mdr-flash { 0%, 40% { outline: 2px solid var(--over); outline-offset: 2px; } 100% { outline: 2px solid transparent; outline-offset: 2px; } }
+@media (prefers-reduced-motion: reduce) { .mdr-doc .mdr-flash { outline: 2px solid var(--over); outline-offset: 2px; } }
+@media (forced-colors: active) {
+  #mdr-health-btn::before { forced-color-adjust: none; background: ButtonText !important; }
+  .mdr-hp-ok::before { forced-color-adjust: none; background: CanvasText; }
+  .mdr-health-n { forced-color-adjust: none; color: HighlightText; background: Highlight; }
+  /* Colour alone can't mark "over target" here: underline it too. */
+  .mdr-words.over, .mdr-toc-words.over { text-decoration: underline; font-weight: 700; }
+  .mdr-doc .mdr-flash { animation: none; outline: 2px solid Highlight; outline-offset: 2px; }
+}
 /* Changes view: word redlines against the baseline, block marks, and per-change actions. */
 :root {
   --rl-ins: var(--vscode-gitDecoration-addedResourceForeground, #2e7d32);

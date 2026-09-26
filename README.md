@@ -90,6 +90,18 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
+**Word counts and document health.**
+- The toolbar shows the document's word count and reading time (at about 230 words a minute), and the outline shows each section's words, its heading and subsections included, so the top-level sections add up to the total. Only the prose counts: not code blocks, the front-matter card, footnotes, generated citations and references, or text CriticMarkup deletes. Inline code counts; a formula (with its equation number) or a web address counts as one word, an emoji on its own counts as a word, and Chinese and Japanese characters count one each. Counting happens while the view is idle, so it never delays opening or repainting a file, and after an edit only the changed blocks are counted again.
+- Set targets in the front matter; section names match headings, ignoring case. A section over its target turns amber in the outline ("312 / 250 words" on hover), and so does the toolbar count when the whole document is over.
+
+  ```yaml
+  mdreview:
+    words: { total: 8000, Abstract: 250, Discussion: 1500 }
+  ```
+
+  The flat form `mdreview: { total: 8000, abstract: 250 }` works too.
+- The pulse icon in the toolbar opens **Document health**: relative links and images whose file is missing (checked only while the panel is open; in Restricted Mode only inside the document's folder and the workspace), unknown citation keys, an unreadable bibliography, unresolved cross-references, duplicate headings, sections over target, targets that name no heading, and orphaned comments (open ones; not resolved threads or ones whose suggested edit was applied). Click an item to jump to it. For an orphaned comment, select the passage it's about and press **Re-anchor to selection**. The badge on the icon counts the problems found so far.
+
 **Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0 (⌘ instead of Ctrl on macOS). Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
 
 **Send to Claude.**

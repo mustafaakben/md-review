@@ -8,7 +8,7 @@ const sup = require('markdown-it-sup');
 const sub = require('markdown-it-sub');
 const attrs = require('markdown-it-attrs');
 const texmath = require('markdown-it-texmath');
-import { frontMatterPlugin } from './frontMatter';
+import { frontMatterPlugin, FrontMatter } from './frontMatter';
 import { criticPlugin } from './critic';
 import { gfmPlugin } from './gfm';
 import { citationsPlugin } from './citations';
@@ -112,7 +112,10 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
     try {
       local = decodeURIComponent(src);
     } catch {} // a bare % stays as written
-    if (isRelative(local)) t.attrSet('src', resolveImage(local));
+    if (isRelative(local)) {
+      t.attrSet('src', resolveImage(local));
+      t.attrSet('data-mdr-src', src); // as written, for the health panel's file check
+    }
     const style: string[] = [];
     for (const k of ['width', 'height']) {
       const v = t.attrGet(k);
@@ -136,6 +139,8 @@ export interface RenderEnv {
   bibRoots?: string[];
   /** Filled in by the render: the bibliography files it read, to watch. */
   bibFiles?: string[];
+  /** Filled in by the render: the file's front matter, if it has one. */
+  front?: FrontMatter;
 }
 
 // One renderer per image resolver (a session keeps the same one), so plugin
