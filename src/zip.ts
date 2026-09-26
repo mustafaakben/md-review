@@ -155,7 +155,7 @@ export function openZip(buf: Buffer, limits = LIMITS): ZipReader {
       if (e.csize === 0xffffffff || e.usize === 0xffffffff) throw new ZipError('ZIP64 archives are not supported.');
       if (e.usize > limits.entry) throw new ZipError(`${name} is too large (${Math.round(e.usize / 1024 / 1024)} MB).`);
       if (e.usize > 1024 * 1024 && e.usize > e.csize * limits.ratio) throw new ZipError(`${name} is compressed suspiciously well; refusing to inflate it.`);
-      if ((total += e.usize) > limits.total) throw new ZipError('The file inflates to too much data.');
+      if (total + e.usize > limits.total) throw new ZipError('The file inflates to too much data.');
       if (e.loc + 30 > buf.length || buf.readUInt32LE(e.loc) !== 0x04034b50) throw new ZipError(`Damaged ZIP entry ${name}.`);
       const start = e.loc + 30 + buf.readUInt16LE(e.loc + 26) + buf.readUInt16LE(e.loc + 28);
       if (start + e.csize > buf.length) throw new ZipError(`Damaged ZIP entry ${name}.`);
@@ -171,6 +171,8 @@ export function openZip(buf: Buffer, limits = LIMITS): ZipReader {
         }
       } else throw new ZipError(`${name} uses an unsupported compression method (${e.method}).`);
       if (data.length !== e.usize) throw new ZipError(`${name} has the wrong size.`);
+      // Counted only once read, so a damaged entry doesn't use up the allowance.
+      total += data.length;
       return data;
     },
   };
