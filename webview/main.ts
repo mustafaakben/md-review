@@ -215,10 +215,10 @@ const elementCount = (bs: string[], from: number, to: number) => {
   return n;
 };
 const firstLine = (b: string) => Number(/data-ls="(\d+)"/.exec(b)?.[1] ?? NaN);
-/** A block's HTML with its line numbers made relative to its first line: equal keys differ only by a move. */
+/** A block's HTML with its line numbers (ranges, task lines) made relative to its first line: equal keys differ only by a move. */
 const moveKey = (b: string) => {
   const base = firstLine(b);
-  return b.replace(/data-l([se])="(\d+)"/g, (_, k, v) => `data-l${k}="${Number(v) - base}"`);
+  return b.replace(/data-(l[se]|task-line)="(\d+)"/g, (_, k, v) => `data-${k}="${Number(v) - base}"`);
 };
 
 /**
@@ -281,9 +281,11 @@ function patchDoc(): boolean {
     const d = firstLine(b) - firstLine(a);
     if (!d) continue;
     const el = kids[firstKept + k];
-    for (const x of [...(el.hasAttribute('data-ls') ? [el] : []), ...Array.from(el.querySelectorAll('[data-ls]'))]) {
-      x.setAttribute('data-ls', String(Number(x.getAttribute('data-ls')) + d));
-      x.setAttribute('data-le', String(Number(x.getAttribute('data-le')) + d));
+    for (const x of [el, ...Array.from(el.querySelectorAll('[data-ls], [data-task-line]'))]) {
+      for (const a of ['data-ls', 'data-le', 'data-task-line']) {
+        const v = x.getAttribute(a);
+        if (v !== null) x.setAttribute(a, String(Number(v) + d));
+      }
     }
   }
   // Moved blocks keep their keys: those don't depend on where the block is.
