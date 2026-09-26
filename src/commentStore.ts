@@ -123,13 +123,17 @@ const obj = (x: unknown): Record<string, any> => (x && typeof x === 'object' && 
  * MD Review) are kept as they are, on the file, comments, anchors and replies.
  */
 export function readSidecar(mdPath: string): Sidecar {
-  const p = sidecarPath(mdPath);
   let raw: string;
   try {
-    raw = fs.readFileSync(p, 'utf8');
+    raw = fs.readFileSync(sidecarPath(mdPath), 'utf8');
   } catch {
     return emptySidecar(mdPath);
   }
+  return parseSidecar(raw, mdPath);
+}
+
+/** Parse sidecar text (see readSidecar); throws on invalid JSON. */
+export function parseSidecar(raw: string, mdPath: string): Sidecar {
   if (!raw.trim()) return emptySidecar(mdPath);
   const data = obj(JSON.parse(raw.replace(/^﻿/, '')));
   const out: Sidecar = { ...data, schemaVersion: 1, file: data.file || path.basename(mdPath), comments: [] };
@@ -249,7 +253,7 @@ export function setStatus(data: Sidecar, id: string, status: Status): void {
 }
 
 /** An agent's draft the reviewer hasn't kept, acted on, or dismissed yet. */
-export const isAgentDraft = (c: Comment): boolean => c.status === 'draft' && c.origin === 'agent';
+export const isAgentDraft = (c: Pick<Comment, 'status' | 'origin'>): boolean => c.status === 'draft' && c.origin === 'agent';
 
 /** Take over an agent's draft: it becomes the reviewer's own, noting who raised it. */
 export function keepAgentDraft(data: Sidecar, id: string, author: string): void {
@@ -282,7 +286,7 @@ export function deleteComment(data: Sidecar, id: string): void {
  * Whether a submitted thread is waiting on the agent: its last reply isn't the
  * agent's, or the reviewer reopened it after that reply.
  */
-export function awaitsAgent(c: Comment, agent = 'Claude'): boolean {
+export function awaitsAgent(c: Pick<Comment, 'status' | 'reopenedAt'> & { replies: Pick<Reply, 'author' | 'createdAt'>[] }, agent = 'Claude'): boolean {
   if (c.status !== 'submitted') return false;
   const last = c.replies[c.replies.length - 1];
   return !last || last.author !== agent || (!!c.reopenedAt && c.reopenedAt > last.createdAt);
