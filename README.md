@@ -136,6 +136,12 @@ Single-letter keys work when you're not typing in a box. Tab reaches the toolbar
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 
+**Word round-trip.** For reviewers who work in Word (an advisor, a co-author):
+- **MD Review: Export to Word (with comments)** (Command Palette, or `…` in the MD Review title bar) writes `<file>.docx` next to the Markdown. Headings, lists, quotes, code, tables, links and local PNG/JPEG images come across; math appears as its TeX source and footnotes as `[n]`. Each open thread becomes a real Word comment on its quoted text, with the author and date; its kind and severity and any open suggested edit follow as a line in italics. Choose whether to add replies (as Word replies in the same thread) and resolved threads (marked resolved in Word). A document comment sits on the first paragraph; threads whose quote is gone are listed under **Unanchored comments** at the end. No pandoc or Word needed.
+- **MD Review: Import Comments from Word…** reads a reviewed `.docx` and adds each Word comment as a draft thread by its author (`"origin": "word"`), placed on the same text in the Markdown. Word replies join their thread, comments resolved in Word stay resolved, and tracked changes (insertions and deletions) become threads with a suggested edit you can apply. A file exported by MD Review comes back with its kinds, severities and suggested edits. A comment whose text can't be found is added as a document comment that quotes it, so nothing is lost. Importing the same file twice adds nothing new.
+- Import only reads the comment, reply and document parts of the `.docx`, and refuses files that are not plain Word documents: over 100 MB, parts that would inflate past 64 MB or that pack suspiciously well (ZIP bombs), ZIP64 or encrypted archives, and XML that declares a DTD (entity bombs and external entities). Entry names that point outside the archive are ignored.
+- In Restricted Mode both work: export reads images and the bibliography only from the document's folder and the workspace and doesn't offer to open the `.docx` in another program; import reads the `.docx` you pick and writes only the comments file. The Word code loads when you first run one of these commands, not when MD Review starts.
+
 **Settings.**
 - `mdReview.author`: the name on your comments. If empty (the default), your system user name is used.
 - `mdReview.showResolved`: whether resolved threads show in the sidebar.
@@ -183,7 +189,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "scope": "section",                    // optional: "section" (quote is a heading; about the whole section) | "document" (empty quote)
       "workingAt": "…", "workingBy": "Claude", // optional: set by the CLI while an agent works on this thread
       "suggestion": { "text": "a dock is free" }, // optional: replacement for the quote ("" deletes it); gains appliedAt / dismissedAt
-      "origin": "agent",                     // optional: a draft an agent left as first reviewer, not yet kept or dismissed
+      "origin": "agent",                     // optional: "agent", a draft an agent left as first reviewer, not yet kept or dismissed;
+                                             //   "word", imported from a Word document
       "reviewRun": "3f9a1c07",               // optional: the review run that left it (comment --run)
       "suggestedBy": "Claude",               // optional: who raised a thread the reviewer kept
       "replies": [
@@ -274,6 +281,8 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/inbox.ts`, `src/inboxView.ts` | review inbox: grouping (VS Code-independent) and the Explorer tree |
 | `src/render.ts` | Markdown → HTML with source-line tags |
 | `src/redlines.ts`, `src/wordDiff.ts` | Changes view: baselines, block matching, word diff |
+| `src/docModel.ts`, `src/textQuote.ts` | the view's text and blocks without a browser; quote anchoring shared with the webview |
+| `src/docx.ts`, `src/wordImport.ts`, `src/zip.ts`, `src/wordCommands.ts` | Word export with comments, comment/tracked-change import, the ZIP container; bundled apart as `dist/word.js`, loaded on first use |
 | `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts`, `redlines.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
@@ -285,6 +294,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 - The Changes view compares against the copy saved at Send. Your edits in the view are left out, but edits made in the text editor or by other tools after Send show as changes, and an edit inside a change Claude made is part of that change. Blocks are matched on their source lines: a nested list item is matched on its own line, and a table or code block as a whole.
 - Undo history lives in the open view and covers edits made there. It's cleared if another program changes the file in between, so an agent's edits are never overwritten by an undo.
 - Inline `<!-- COMMENT -->` storage is not implemented. By design the `.md` stays clean.
+- Word export is a plain rendering: math is TeX source, Mermaid diagrams are their source, remote images are `[alt text]`, and there is no bibliography styling beyond the viewer's reference list. Word comments made on an equation land on the whole equation.
 
 ## Development
 
