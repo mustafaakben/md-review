@@ -9,3 +9,4 @@ export * from './agentPrompt';
 export * from './reviewPresets';
 export { loadBibliography, parseBibTeX, parseCslJson } from './bibliography';
 export * from './agentLaunch';
+export * from './fileWatch';

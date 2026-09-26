@@ -10,6 +10,7 @@ import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inl
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
+import { SIDECAR_RETRY_MS } from './fileWatch';
 
 export type ToWebview =
   | { type: 'render'; blocks: string[]; fileName: string }
@@ -124,6 +125,10 @@ export interface HostContext {
   notify?(message: string): void;
   /** The most comments Review with Claude asks for (default 12). */
   reviewComments?(): number;
+  /** Delays before re-reading a sidecar that didn't parse (tests shorten them). */
+  sidecarRetryMs?: number[];
+  /** Run fn after ms; defaults to setTimeout. */
+  schedule?(fn: () => void, ms: number): void;
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -142,6 +147,11 @@ interface Applied { id: string; from?: string; status: store.Status; agent?: { a
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
+  /** Counts sidecar events, so a pending re-read gives way to a newer one. */
+  private sidecarEvents = 0;
+  /** The sidecar text last shown after a watcher event, so a second report of the same change is skipped. */
+  private lastSidecarSeen: string | undefined;
+  private disposed = false;
   private lastRendered: string | undefined;
   private watched = '';
   private lastParse: RenderedParse | undefined;
@@ -198,12 +208,20 @@ export class ReviewSession {
     try {
       data = store.readSidecar(this.ctx.mdPath);
     } catch (e: any) {
-      this.ctx.post({ type: 'error', message: `Could not parse ${path.basename(store.sidecarPath(this.ctx.mdPath))}: ${e.message}` });
+      this.postParseError(e);
       return;
     }
+    this.postComments(data);
+  }
+
+  private postComments(data: store.Sidecar): void {
     this.ctx.post({ type: 'comments', data, author: this.ctx.author(), showResolved: this.ctx.showResolved() });
     this.updateRound(data);
     this.updateReview(data);
+  }
+
+  private postParseError(e: any): void {
+    this.ctx.post({ type: 'error', message: `Could not parse ${path.basename(store.sidecarPath(this.ctx.mdPath))}: ${e.message}` });
   }
 
   private updateRound(data: store.Sidecar): void {
@@ -230,6 +248,11 @@ export class ReviewSession {
       this.round.summary = round;
     }
     this.ctx.post({ type: 'round', round: round.total ? round : null });
+  }
+
+  /** The panel closed: pending re-reads do nothing. */
+  dispose(): void {
+    this.disposed = true;
   }
 
   /**
@@ -260,16 +283,40 @@ export class ReviewSession {
     this.ctx.post({ type: 'review', review: { startedAt: r.since, total: n, ids: [...r.ids], untriaged, finished } });
   }
 
-  /** Called by a file watcher when the sidecar changes on disk. */
+  /**
+   * Called by a file watcher when the sidecar changes on disk. The writer may
+   * not be done yet (sync tools and Windows fall back to writing in place), so
+   * a file that doesn't parse is read again a few times before it's an error.
+   */
   onSidecarChanged(): void {
-    let current: string | undefined;
-    try {
-      current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
-    } catch {
-      current = undefined;
-    }
-    if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
-    this.sendComments();
+    const gen = ++this.sidecarEvents;
+    const delays = this.ctx.sidecarRetryMs ?? SIDECAR_RETRY_MS;
+    const schedule = this.ctx.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
+    const attempt = (i: number) => {
+      if (this.disposed || gen !== this.sidecarEvents) return; // closed, or a newer event reads it instead
+      let current: string | undefined;
+      try {
+        current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
+      } catch {
+        current = undefined;
+      }
+      if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
+      if (current !== undefined && current === this.lastSidecarSeen) return; // already shown (event and poll both saw it)
+      const retry = i < delays.length;
+      // An empty file is usually a writer that has truncated but not written yet.
+      if (current === '' && retry) return schedule(() => attempt(i + 1), delays[i]);
+      let data: store.Sidecar;
+      try {
+        data = store.readSidecar(this.ctx.mdPath);
+      } catch (e: any) {
+        if (retry) schedule(() => attempt(i + 1), delays[i]);
+        else this.postParseError(e);
+        return;
+      }
+      this.lastSidecarSeen = current;
+      this.postComments(data);
+    };
+    attempt(0);
   }
 
   private mutate(fn: (d: store.Sidecar) => void): void {
