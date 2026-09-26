@@ -121,6 +121,12 @@ const reading = createReading(
   },
   (msg) => toast(msg),
 );
+// The host puts the stored reading look into the page (see shell()).
+try {
+  reading.apply(JSON.parse(document.body.dataset.prefs || '{}'));
+} catch {
+  /* keep the defaults */
+}
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;
 const outline = createOutline(
   doc,
