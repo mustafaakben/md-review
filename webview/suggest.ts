@@ -23,12 +23,14 @@ export function suggestionDiff(before: string, after: string): string {
 }
 
 export function suggestionBlock(quote: string, s: Suggestion, from: string, who: string, open: boolean): string {
+  const you = who === 'You';
+  const owner = you ? 'your' : `${who}'s`;
   const state = s.appliedAt ? '<span class="mdr-sugg-state">Applied</span>' : s.dismissedAt ? '<span class="mdr-sugg-state">Dismissed</span>' : '';
   const acts = open
-    ? `<div class="mdr-row"><button class="mdr-primary" data-act="apply-sugg" data-from="${esc(from)}" title="Make this change in the file and resolve the thread" aria-label="Apply ${esc(who)}'s suggestion">Apply</button>${from ? `<button data-act="dismiss-sugg" data-from="${esc(from)}" aria-label="Dismiss ${esc(who)}'s suggestion">Dismiss</button>` : ''}</div>`
+    ? `<div class="mdr-row"><button class="mdr-primary" data-act="apply-sugg" data-from="${esc(from)}" title="Make this change in the file and resolve the thread" aria-label="Apply ${esc(owner)} suggestion">Apply</button><button data-act="dismiss-sugg" data-from="${esc(from)}" aria-label="Dismiss ${esc(owner)} suggestion">Dismiss</button></div>`
     : '';
   const diff = s.text ? suggestionDiff(quote, s.text) : `<del><span class="mdr-sr">deleted: </span>${esc(quote)}</del>`;
-  return `<div class="mdr-sugg${open ? '' : ' done'}"><div class="mdr-sugg-head">${esc(who)} suggests${s.text ? '' : ' deleting'}${state}</div><div class="mdr-sugg-diff">${diff}</div>${acts}</div>`;
+  return `<div class="mdr-sugg${open ? '' : ' done'}"><div class="mdr-sugg-head">${esc(who)} ${you ? 'suggest' : 'suggests'}${s.text ? '' : ' deleting'}${state}</div><div class="mdr-sugg-diff">${diff}</div>${acts}</div>`;
 }
 
 export interface ApplyEdit { ls: number; le: number; kind: string; oldText: string; newText: string }
@@ -52,5 +54,13 @@ export function suggestionEdit(doc: HTMLElement, id: string, text: string, kindO
   r.setEndAfter(marks[marks.length - 1]);
   const end = r.toString().length;
   const oldText = block.textContent || '';
-  return { ls: Number(block.dataset.ls), le: Number(block.dataset.le), kind, oldText, newText: oldText.slice(0, start) + text + oldText.slice(end) };
+  let before = oldText.slice(0, start);
+  let after = oldText.slice(end);
+  // Deleting a word shouldn't leave "the  dog" or "dog ." behind.
+  if (!text.trim()) {
+    if (/\s$/.test(before) && /^\s/.test(after)) after = after.replace(/^\s+/, '');
+    else if (/\s$/.test(before) && /^[.,;:!?)\]]/.test(after)) before = before.replace(/\s+$/, '');
+    else if (!before.trim()) after = after.replace(/^\s+/, '');
+  }
+  return { ls: Number(block.dataset.ls), le: Number(block.dataset.le), kind, oldText, newText: before + text + after };
 }

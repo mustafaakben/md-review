@@ -103,3 +103,18 @@ onFixture('bold table header cell', 30, 31, 'tr', (t) => t.replace('Station func
 onFixture('table body cell', 32, 33, 'tr', (t) => t.replace('variable demand', 'fluctuating demand'), lines[32].replace('variable demand', 'fluctuating demand'));
 onFixture('paragraph with citations', 10, 11, 'paragraph', (t) => t.replace('(Rivera & Chen, 2021)', '(Rivera & Chen, 2021, p. 52)'), lines[10].replace('(Rivera & Chen, 2021)', '(Rivera & Chen, 2021, p. 52)'));
 onFixture('italic *Note.* paragraph', 82, 83, 'paragraph', (t) => t.replace('Note.', 'Notes.'), lines[82].replace('*Note.*', '*Notes.*'));
+
+test('the last list item, which owns the blank line after it, edits in place', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const src = ['# T', '', '- one item', '- three item', '', 'After para.', ''].join(eol);
+    const f = setup('lastitem.md', src);
+    assert.equal(edit(f, 3, 5, 'list_item', (t) => t.replace('three', 'third')), src.replace('three', 'third'));
+  }
+});
+
+test('the source editor keeps the blank line after the last list item', () => {
+  const src = '- one\n- two\n\nAfter.\n';
+  const f = setup('lastitem-src.md', src);
+  lib.applyBlockEdit(f, 1, 3, lib.readBlock(fs.readFileSync(f), 1, 3), '- two, edited\n');
+  assert.equal(fs.readFileSync(f, 'utf8'), '- one\n- two, edited\n\nAfter.\n');
+});
