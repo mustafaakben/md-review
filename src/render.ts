@@ -86,5 +86,12 @@ export interface RenderEnv {
 }
 
 export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
-  return createRenderer(resolveImage).render(text, env);
+  return renderTokens(text, resolveImage, env).html;
+}
+
+/** The HTML and the parsed tokens (so the Changes view needn't parse again). */
+export function renderTokens(text: string, resolveImage: ResolveImage, env: RenderEnv = {}) {
+  const md = createRenderer(resolveImage);
+  const tokens = md.parse(text, env);
+  return { html: md.renderer.render(tokens, md.options, env), tokens };
 }

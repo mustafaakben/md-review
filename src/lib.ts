@@ -7,3 +7,5 @@ export * from './inlineEdit';
 export * from './editHistory';
 export * from './agentPrompt';
 export { parseBibTeX, parseCslJson } from './bibliography';
+export * from './redlines';
+export * from './wordDiff';

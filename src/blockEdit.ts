@@ -64,6 +64,42 @@ export function spliceBlock(buf: Buffer, lineStart: number, lineEnd: number, ori
   return Buffer.concat([buf.subarray(0, from), Buffer.from(replacement, 'utf8'), buf.subarray(to)]);
 }
 
+/**
+ * Replace lines [ts, te) of `target` with lines [ss, se) of `source`, as raw
+ * bytes. Either span may be empty (ts === te inserts), and an end may be the
+ * line count (the end of the file). Every byte outside the span is kept. The
+ * copied lines take the target's line endings when the two files differ, and
+ * a line break is added where the copy would otherwise run into its neighbour.
+ */
+export function spliceLines(target: Buffer, ts: number, te: number, source: Buffer, ss: number, se: number): Buffer {
+  const span = (buf: Buffer, from: number, to: number) => {
+    const { starts } = indexLines(buf);
+    if (!(from >= 0 && to >= from && to <= starts.length)) {
+      throw new BlockEditError(`Line range ${from}-${to} is outside the file (${starts.length} lines).`);
+    }
+    const at = (l: number) => (l < starts.length ? starts[l] : buf.length);
+    const end = at(to);
+    return [at(from), end, /^[\r\n]*$/.test(buf.subarray(end).toString('latin1')) ? 1 : 0]; // 1: nothing but line breaks follows
+  };
+  const [tf, tt, tEnd] = span(target, ts, te);
+  const [sf, st, sEnd] = span(source, ss, se);
+  let seg = source.subarray(sf, st);
+  const eol = detectEol(target);
+  if (seg.length && detectEol(source) !== eol) seg = Buffer.from(seg.toString('utf8').replace(/\r?\n/g, eol), 'utf8');
+  const nl = (b: Buffer) => b.length > 0 && b[b.length - 1] === 0x0a;
+  const parts = [target.subarray(0, tf)];
+  // Inserting after a last line that has no line break.
+  if (seg.length && tf === target.length && tf > indexLines(target).bom && !nl(target)) parts.push(Buffer.from(eol));
+  parts.push(seg);
+  // The copy ends the source file without a break, but lines follow it here.
+  if (seg.length && !nl(seg) && tt < target.length) parts.push(Buffer.from(eol));
+  parts.push(target.subarray(tt));
+  const out = Buffer.concat(parts);
+  // Removing the last block of both files: end with a line break only if the source does.
+  if (!seg.length && tEnd && sEnd && nl(out) && !nl(source)) return out.subarray(0, out.length - (out.length > 1 && out[out.length - 2] === 0x0d ? 2 : 1));
+  return out;
+}
+
 function detectEol(buf: Buffer): string {
   const i = buf.indexOf(0x0a);
   return i > 0 && buf[i - 1] === 0x0d ? '\r\n' : '\n';

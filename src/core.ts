@@ -3,14 +3,35 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
-import { applyBlockEdit, readBlock, toggleTask, BlockEditError } from './blockEdit';
-import { renderMarkdown, RenderEnv, ResolveImage } from './render';
+import { applyBlockEdit, readBlock, toggleTask, spliceLines, BlockEditError } from './blockEdit';
+import { renderTokens, RenderEnv, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
+import * as redlines from './redlines';
+
+/** What the Changes view paints: the hunks against the current baseline. `v` names this comparison. */
+export interface Changes {
+  v: string;
+  at: string;
+  /** The baseline rendered, sent once per baseline (the view keeps it). */
+  baseHtml?: string;
+  baseId: string;
+  hunks: redlines.Hunk[];
+}
+
+/** Enough about the baseline for the view to offer Show change and Review changes, without loading it. */
+export interface BaselineInfo {
+  at: string;
+  threads: string[];
+  /** The file differs from the baseline. */
+  changed: boolean;
+}
 
 export type ToWebview =
-  | { type: 'render'; html: string; fileName: string }
+  | { type: 'render'; html: string; fileName: string; changes?: Changes | null }
+  | { type: 'changes'; changes: Changes | null }
+  | { type: 'baseline'; info: BaselineInfo | null }
   | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
   | { type: 'block'; ls: number; le: number; text: string }
   | { type: 'blockSaved'; ls: number }
@@ -37,6 +58,8 @@ export interface Round {
   /** The sent threads now waiting on the reviewer (questions and suggested edits). */
   questionIds: string[];
   finished: boolean;
+  /** Blocks changed since the baseline, counted when the round finishes. */
+  changes?: number;
 }
 
 export type FromWebview =
@@ -61,7 +84,12 @@ export type FromWebview =
   | { type: 'sendToAgent'; id?: string }
   | { type: 'setPrefs'; prefs: Record<string, unknown> }
   | { type: 'composing'; on: boolean }
-  | { type: 'dismissRound' };
+  | { type: 'dismissRound' }
+  | { type: 'showChanges'; on: boolean }
+  /** Revert or keep hunk `i` of the comparison `v`. */
+  | { type: 'revertChange'; v: string; i: number }
+  | { type: 'keepChange'; v: string; i: number }
+  | { type: 'acceptChanges' };
 
 export interface HostContext {
   mdPath: string;
@@ -93,6 +121,16 @@ export interface HostContext {
   cliPath?: string;
   /** Tell the user something happened while they may be looking elsewhere (the view isn't focused). */
   notify?(message: string): void;
+  /** Where Changes baselines are kept (workspace storage in VS Code). In memory when absent. */
+  baselines?: { load(): redlines.Baselines | undefined; save(b: redlines.Baselines): void };
+}
+
+function readText(p: string): string | undefined {
+  try {
+    return fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
+  } catch {
+    return undefined;
+  }
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -112,6 +150,16 @@ export class ReviewSession {
   private lastApply: { id: string; from?: string; status: store.Status } | null = null;
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
+  private bases: redlines.Baselines | undefined;
+  /** The Changes view is on, so every render carries the hunks. */
+  private changesOn = false;
+  /** The baseline's text, and (once the Changes view needs them) its HTML and blocks. */
+  private baseView: { id: string; text: string; html?: string; blocks?: redlines.Block[] } | null = null;
+  private sentBaseId = '';
+  private hunks: { v: string; baseId: string; list: redlines.Hunk[] } | null = null;
+  private lastInfo = '';
+  /** The current text's blocks, from the last render's own parse. */
+  private curBlocks: { text: string; blocks: redlines.Block[] } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -121,7 +169,9 @@ export class ReviewSession {
     let html: string;
     const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
     try {
-      html = renderMarkdown(text, this.ctx.resolveImage, env);
+      const r = renderTokens(text, this.ctx.resolveImage, env);
+      html = r.html;
+      this.curBlocks = this.changesOn ? { text, blocks: redlines.blocksOfTokens(r.tokens) } : null;
     } catch (e: any) {
       html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
     }
@@ -130,8 +180,104 @@ export class ReviewSession {
       this.watched = bibs;
       this.ctx.watchFiles?.(env.bibFiles || []);
     }
-    this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath) });
+    let changes: Changes | null | undefined;
+    try {
+      if (this.changesOn) changes = this.changes();
+    } catch {
+      changes = null; // a text the parser rejects: show no redlines rather than fail the render
+    }
+    this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath), changes });
     this.syncHistory();
+    this.postBaseline();
+  }
+
+  /** Read through the hook each time, so two views of one file agree. */
+  private baselines(): redlines.Baselines {
+    return (this.ctx.baselines ? this.ctx.baselines.load() : this.bases) ?? { current: null, past: [] };
+  }
+
+  private setBaselines(b: redlines.Baselines): void {
+    if (this.ctx.baselines) this.ctx.baselines.save(b);
+    else this.bases = b;
+    this.postBaseline();
+  }
+
+  private postBaseline(): void {
+    const cur = this.baselines().current;
+    const info: BaselineInfo | null = cur ? { at: cur.at, threads: cur.threads, changed: this.differs(cur) } : null;
+    const key = JSON.stringify(info);
+    if (key === this.lastInfo) return;
+    this.lastInfo = key;
+    this.ctx.post({ type: 'baseline', info });
+  }
+
+  private differs(b: redlines.Baseline, text = this.lastRendered): boolean {
+    return this.view(b).text.replace(/\r\n/g, '\n') !== text.replace(/\r\n/g, '\n');
+  }
+
+  private view(b: redlines.Baseline) {
+    if (this.baseView?.id !== b.id) this.baseView = { id: b.id, text: redlines.baselineText(b) };
+    return this.baseView;
+  }
+
+  private blocks(b: redlines.Baseline): redlines.Block[] {
+    const v = this.view(b);
+    return (v.blocks ||= redlines.blocksOf(v.text));
+  }
+
+  private baseHtml(b: redlines.Baseline): string {
+    const v = this.view(b);
+    if (v.html === undefined) {
+      try {
+        const r = renderTokens(v.text, this.ctx.resolveImage, { docDir: path.dirname(this.ctx.mdPath) });
+        v.html = r.html;
+        v.blocks ||= redlines.blocksOfTokens(r.tokens);
+      } catch (e: any) {
+        v.html = `<pre class="mdr-error">Render failed: ${String(e?.message || e).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]!)}</pre>`;
+      }
+    }
+    return v.html;
+  }
+
+  /** The hunks of the current text against the baseline, remembered so Revert and Keep can name one by index. */
+  private changes(): Changes | null {
+    const cur = this.baselines().current;
+    if (!cur) {
+      this.hunks = null;
+      return null;
+    }
+    const html = this.sentBaseId !== cur.id ? this.baseHtml(cur) : undefined; // renders and splits the baseline in one parse
+    if (this.curBlocks?.text !== this.lastRendered) this.curBlocks = { text: this.lastRendered, blocks: redlines.blocksOf(this.lastRendered) };
+    const list = redlines.diffBlocks(this.view(cur).text, this.lastRendered, this.blocks(cur), this.curBlocks.blocks);
+    const v = redlines.sha1(cur.id + '\0' + this.lastRendered);
+    this.hunks = { v, baseId: cur.id, list };
+    this.sentBaseId = cur.id;
+    return { v, at: cur.at, baseId: cur.id, baseHtml: html, hunks: list };
+  }
+
+  private postChanges(): void {
+    if (this.changesOn) this.ctx.post({ type: 'changes', changes: this.changes() });
+  }
+
+  /** Revert copies the baseline's lines over the file's; Keep copies the file's into the baseline. */
+  private settleChange(revert: boolean, v: string, i: number): void {
+    const cur = this.baselines().current;
+    const h = this.hunks && this.hunks.v === v && cur && this.hunks.baseId === cur.id ? this.hunks.list[i] : undefined;
+    if (!cur || !h) {
+      this.render();
+      throw new Error('The file or its baseline changed since these changes were shown, so nothing was written. The view has been refreshed.');
+    }
+    const base = redlines.baselineBytes(cur);
+    if (revert) {
+      this.assertEditable(); // refuses if the file changed on disk since this render
+      this.recorded(() => fs.writeFileSync(this.ctx.mdPath, spliceLines(fs.readFileSync(this.ctx.mdPath), h.c[0], h.c[1], base, h.b[0], h.b[1])));
+      this.ctx.post({ type: 'toast', message: 'Reverted that change. Undo brings it back.' });
+      this.render();
+      return;
+    }
+    const next = spliceLines(base, h.b[0], h.b[1], Buffer.from(this.lastRendered, 'utf8'), h.c[0], h.c[1]);
+    this.setBaselines({ ...this.baselines(), current: { ...cur, id: redlines.sha1(next), data: next.toString('base64') } });
+    this.postChanges();
   }
 
   /** Every render follows a file change, so check undo history still applies. */
@@ -178,6 +324,10 @@ export class ReviewSession {
     round.questions = round.questionIds.length - round.suggestions;
     round.finished = round.done === round.total;
     if (round.finished && round.total) {
+      // The agent's last edit may not have been rendered yet: count against the disk.
+      const base = this.baselines().current;
+      const disk = base ? readText(this.ctx.mdPath) : undefined;
+      if (base && disk !== undefined && this.differs(base, disk)) round.changes = redlines.changedBlocks(redlines.diffBlocks(this.view(base).text, disk, this.blocks(base)));
       this.ctx.notify?.(`Claude finished ${path.basename(this.ctx.mdPath)}: ${roundSummary(round)}.`);
       this.round.summary = round;
     }
@@ -215,6 +365,8 @@ export class ReviewSession {
     const author = this.ctx.author();
     switch (msg.type) {
       case 'ready':
+        this.sentBaseId = ''; // a new view has no baseline yet
+        this.lastInfo = 'null'; // and knows of none
         this.render();
         this.sendComments();
         this.postHistory();
@@ -312,6 +464,15 @@ export class ReviewSession {
       case 'setPrefs':
         this.ctx.setPrefs?.(msg.prefs);
         return;
+      case 'showChanges':
+        this.changesOn = msg.on;
+        return this.postChanges();
+      case 'revertChange':
+      case 'keepChange':
+        return this.settleChange(msg.type === 'revertChange', msg.v, msg.i);
+      case 'acceptChanges':
+        this.setBaselines(redlines.accept(this.baselines()));
+        return this.postChanges();
       case 'composing': // a VS Code context key for Alt+1/2/3; set by the extension
         return;
     }
@@ -387,6 +548,7 @@ export class ReviewSession {
     }
     // Only threads that are actually waiting on the agent count toward the round.
     const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
+    this.snapshot(ids);
     // Ask Claude on one thread while a round is still running adds to that round.
     if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
     else this.round = ids.length ? { ids } : null;
@@ -401,6 +563,19 @@ export class ReviewSession {
     });
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+  }
+
+  /** Save the baseline the Changes view compares against (see redlines.onSend). */
+  private snapshot(ids: string[]): void {
+    if (!ids.length) return;
+    let disk: Buffer;
+    try {
+      disk = fs.readFileSync(this.ctx.mdPath);
+    } catch {
+      return;
+    }
+    if (disk.length > redlines.MAX_BASELINE_BYTES) return;
+    this.setBaselines(redlines.onSend(this.baselines(), disk, ids));
   }
 
   /** Block editing works on disk bytes, so the view must reflect the disk. */

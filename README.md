@@ -95,6 +95,9 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
 - While Claude works, the comments pane shows **Claude is working · 2 of 5** with a progress bar, and the thread Claude is on right now pulses in the document and the list. When every sent thread has an answer you get a summary, "Claude finished: 4 resolved, 1 question for you", with **Show questions** to jump to the threads that need you. If the panel is in the background, VS Code shows the summary as a notification.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
+- **See what Claude changed.** Send to Claude saves a copy of the file first. The **Changes** icon in the toolbar (or `]`) paints a redline over the view: inserted words are underlined and deleted words are struck through, in your theme's diff colours. Math, code, diagrams and tables are marked as changed as a whole, with **Show before** beside them. Each change has **Keep** and **Revert**. Revert puts the old lines back through the same checked, byte-exact path as your own edits, so Undo brings the change back, and it's refused if the file changed since the view was drawn. **Accept all** drops the copy. `]` and `[` step through the changes.
+- Threads Claude resolved or answered get **Show change**, which jumps to the changes inside that thread's text. When Claude finishes, the summary says how many blocks changed, with **Review changes**.
+- The copy lives in VS Code's workspace storage (in memory in browser mode), never next to your file. If you send again before reviewing the last round's changes, the older copy stays, so nothing drops out of view. Each file keeps at most 3 copies, and files over 4 MB get none.
 - Set `mdReview.agent.editMode` to `suggest` and Claude proposes a replacement on each thread instead of editing the file. Its suggestions show on the card with **Apply** and **Dismiss**, so nothing changes until you say so.
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
@@ -111,6 +114,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 | Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
 | Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
 | Next / previous comment | Alt+↓ / Alt+↑, or `j` / `k` | ⌥↓ / ⌥↑, or `j` / `k` |
+| Next / previous change | `]` / `[` | `]` / `[` |
 | Find in document | Ctrl+F or `/` | ⌘F or `/` |
 | Outline | Ctrl+Shift+O | ⇧⌘O |
 | Comments pane | Ctrl+Alt+P | ⌥⌘P |
@@ -247,7 +251,8 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/editHistory.ts` | byte-exact undo/redo of in-view edits |
 | `src/agentPrompt.ts`, `src/agentCommands.ts` | the prompts Send to Claude hands to the agent; the folder and skill commands |
 | `src/render.ts` | Markdown → HTML with source-line tags |
-| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts` |
+| `src/redlines.ts`, `src/wordDiff.ts` | Changes view: baselines, block matching, word diff |
+| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts`, `redlines.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 
@@ -255,6 +260,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 
 - Block editing works on disk bytes. If the same file has unsaved edits in a text editor, save or revert them first.
 - The quote is anchored on rendered text. A selection that crosses math or UI elements anchors on the visible text only.
+- The Changes view compares against the copy saved at Send, so your own edits made after that also show as changes. Blocks are matched on their source lines: a nested list item is matched on its own line, and a table or code block as a whole.
 - Undo history lives in the open view and covers edits made there. It's cleared if another program changes the file in between, so an agent's edits are never overwritten by an undo.
 - Inline `<!-- COMMENT -->` storage is not implemented. By design the `.md` stays clean.
 

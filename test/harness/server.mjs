@@ -23,6 +23,7 @@ const dir = path.dirname(md);
 const clients = new Set();
 
 let prefs = {}; // reading prefs, kept for the life of the server
+let baselines; // Changes baselines, in memory like prefs
 const session = new lib.ReviewSession({
   mdPath: md,
   author: () => os.userInfo().username,
@@ -37,6 +38,7 @@ const session = new lib.ReviewSession({
   openLink: (href) => console.log('openLink', href),
   getPrefs: () => prefs,
   setPrefs: (p) => (prefs = p),
+  baselines: { load: () => baselines, save: (b) => (baselines = b) },
 });
 
 let t1, t2;
