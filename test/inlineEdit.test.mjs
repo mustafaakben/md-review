@@ -148,6 +148,14 @@ test('block-only verification agrees on cases found in review', () => {
     ['\\[ a + b\n\nRun `cmd` now.\n', 2, 'paragraph', (t) => t.replace('cmd', 'cmd\\]')],
     // A footnote definition right below the paragraph.
     ['Second has a note[^b] here and more.\n\n[^b]: B note.\n', 0, 'paragraph', (t) => t.replace('more', 'much more')],
+    // A paragraph that becomes {attrs} joins the table or list above.
+    ['| a |\n|---|\n| 1 |\n\nHello world {.c}\n', 4, 'paragraph', (t) => '{' + t],
+    ['- a\n\nHello world {.c}\n', 2, 'paragraph', (t) => '{' + t],
+    // A footnote definition inside a quote right below.
+    ['Note[^1] and[^2] then [^1] again.\n> [^1]: in quote\n', 0, 'paragraph', (t) => t.replace('again', 'once more')],
+    // Table captions with the same id.
+    ['Table: first {#tbl:x}\n\nTable: second {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('second', 'second one')],
+    [': cap {#tbl:x}\n\n: caption {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('n ', '')],
     // With a bibliography, a typed @key is a citation, which only the front matter says.
     ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by @smith2020')],
     ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by me@example.com')],
