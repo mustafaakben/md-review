@@ -75,6 +75,26 @@
         "title": "Send Review to Claude",
         "category": "MD Review",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "title": "Zoom In (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "title": "Zoom Out (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "title": "Reset Zoom (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.readingView",
+        "title": "Reading Theme, Font, and Zoom…",
+        "category": "MD Review"
       }
     ],
     "menus": {
@@ -129,6 +149,22 @@
         },
         {
           "command": "mdReview.sendToClaude",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomIn",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomOut",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomReset",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.readingView",
           "when": "activeCustomEditorId == 'mdReview.editor'"
         }
       ]
@@ -204,6 +240,48 @@
         "command": "mdReview.toggleOutline",
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+=",
+        "mac": "cmd+=",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+numpad_add",
+        "mac": "cmd+numpad_add",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+shift+=",
+        "mac": "cmd+shift+=",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "key": "ctrl+-",
+        "mac": "cmd+-",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "key": "ctrl+numpad_subtract",
+        "mac": "cmd+numpad_subtract",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "key": "ctrl+0",
+        "mac": "cmd+0",
+        "when": "activeCustomEditorId == 'mdReview.editor'"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "key": "ctrl+numpad0",
+        "mac": "cmd+numpad0",
         "when": "activeCustomEditorId == 'mdReview.editor'"
       }
     ]

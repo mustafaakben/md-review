@@ -5,6 +5,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 
+const PREFS_KEY = 'mdReview.readingPrefs';
+
 function readDisk(p: string): string | undefined {
   try {
     return fs.readFileSync(p, 'utf8').replace(/^﻿/, '');
@@ -54,6 +56,12 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       openLink: (href) => openLink(href, dir),
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
       cliPath: vscode.Uri.joinPath(this.context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
+      getPrefs: () => this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {},
+      setPrefs: (prefs) => {
+        void this.context.globalState.update(PREFS_KEY, prefs);
+        // Keep other open MD Review panels in step.
+        for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+      },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
     });
     MdReviewEditorProvider.panels.add(panel);

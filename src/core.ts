@@ -18,6 +18,7 @@ export type ToWebview =
   | { type: 'history'; canUndo: boolean; canRedo: boolean }
   | { type: 'toast'; message: string }
   | { type: 'agentPrompt'; prompt: string; count: number }
+  | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'error'; message: string };
 
 export type FromWebview =
@@ -34,7 +35,8 @@ export type FromWebview =
   | { type: 'openLink'; href: string }
   | { type: 'undo' }
   | { type: 'redo' }
-  | { type: 'sendToAgent'; id?: string };
+  | { type: 'sendToAgent'; id?: string }
+  | { type: 'setPrefs'; prefs: Record<string, unknown> };
 
 export interface HostContext {
   mdPath: string;
@@ -55,6 +57,9 @@ export interface HostContext {
   runAgent?(prompt: string): string;
   /** Working directory for the agent; defaults to the Markdown file's folder. */
   agentCwd?(): string;
+  /** Per-user view preferences (reading theme, zoom), shared by every file. */
+  getPrefs?(): Record<string, unknown>;
+  setPrefs?(prefs: Record<string, unknown>): void;
   /** Absolute path to cli/mdreview.mjs, if available. */
   cliPath?: string;
 }
@@ -123,6 +128,7 @@ export class ReviewSession {
         this.render();
         this.sendComments();
         this.postHistory();
+        if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         return;
       case 'addComment':
         return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body));
@@ -170,6 +176,9 @@ export class ReviewSession {
         return this.undoRedo(msg.type);
       case 'sendToAgent':
         return this.sendToAgent(msg.id);
+      case 'setPrefs':
+        this.ctx.setPrefs?.(msg.prefs);
+        return;
     }
   }
 

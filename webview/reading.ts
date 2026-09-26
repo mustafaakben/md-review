@@ -1,0 +1,155 @@
+// Reading preferences for the document area: zoom, colour theme, and font.
+// They belong to the user, not the file, so the host keeps them across files
+// and sessions (VS Code globalState); the view just applies and reports them.
+
+export type ReadingTheme = 'auto' | 'paper' | 'sepia' | 'dusk' | 'night';
+export type ReadingFont = 'sans' | 'serif';
+
+export interface ReadingPrefs {
+  zoom: number; // 1 = 100%
+  theme: ReadingTheme;
+  font: ReadingFont;
+}
+
+export const DEFAULT_PREFS: ReadingPrefs = { zoom: 1, theme: 'auto', font: 'sans' };
+const THEMES: [ReadingTheme, string][] = [
+  ['auto', 'Match VS Code'],
+  ['paper', 'Paper'],
+  ['sepia', 'Sepia'],
+  ['dusk', 'Dusk'],
+  ['night', 'Night'],
+];
+const STEPS = [0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2, 2.5];
+const MIN = STEPS[0];
+const MAX = STEPS[STEPS.length - 1];
+
+export interface Reading {
+  apply(p: Partial<ReadingPrefs>): void;
+  zoomBy(dir: 1 | -1): void;
+  resetZoom(): void;
+  togglePanel(): void;
+}
+
+export function createReading(
+  doc: HTMLElement,
+  button: HTMLElement,
+  panel: HTMLElement,
+  save: (p: ReadingPrefs) => void,
+  note: (msg: string) => void,
+): Reading {
+  const prefs: ReadingPrefs = { ...DEFAULT_PREFS };
+  let saveT: any;
+
+  function render() {
+    document.body.dataset.readingTheme = prefs.theme;
+    document.body.dataset.readingFont = prefs.font;
+    document.documentElement.style.setProperty('--mdr-zoom', String(prefs.zoom));
+    const pct = `${Math.round(prefs.zoom * 100)}%`;
+    button.title = `Reading view: theme, font, and zoom (${pct})`;
+    panel.innerHTML = `
+      <div class="mdr-rp-label">Theme</div>
+      <div class="mdr-rp-themes" role="radiogroup" aria-label="Reading theme">${THEMES.map(
+        ([k, label]) =>
+          `<button class="mdr-swatch t-${k}${prefs.theme === k ? ' on' : ''}" data-theme="${k}" role="radio" aria-checked="${prefs.theme === k}" title="${label}"><span></span>${label}</button>`,
+      ).join('')}</div>
+      <div class="mdr-rp-label">Font</div>
+      <div class="mdr-rp-seg" role="radiogroup" aria-label="Font">
+        <button data-font="sans" class="${prefs.font === 'sans' ? 'on' : ''}" aria-checked="${prefs.font === 'sans'}" role="radio">Sans</button>
+        <button data-font="serif" class="serif${prefs.font === 'serif' ? ' on' : ''}" aria-checked="${prefs.font === 'serif'}" role="radio">Serif</button>
+      </div>
+      <div class="mdr-rp-label">Zoom <span class="mdr-rp-hint">Ctrl+wheel · Ctrl+= / Ctrl+− · Ctrl+0</span></div>
+      <div class="mdr-rp-seg">
+        <button data-zoom="-1" aria-label="Zoom out" ${prefs.zoom <= MIN ? 'disabled' : ''}>−</button>
+        <button data-zoom="0" class="mdr-rp-pct" title="Reset to 100%">${pct}</button>
+        <button data-zoom="1" aria-label="Zoom in" ${prefs.zoom >= MAX ? 'disabled' : ''}>+</button>
+      </div>`;
+  }
+
+  function set(p: Partial<ReadingPrefs>, persist: boolean) {
+    Object.assign(prefs, p);
+    prefs.zoom = Math.min(MAX, Math.max(MIN, Math.round(prefs.zoom * 100) / 100));
+    render();
+    if (persist) {
+      clearTimeout(saveT);
+      saveT = setTimeout(() => save({ ...prefs }), 250);
+    }
+  }
+
+  /** Zoom while keeping the text under `anchorY` (viewport px) in place. */
+  function zoomTo(z: number, anchorY = window.innerHeight / 3) {
+    const before = prefs.zoom;
+    z = Math.min(MAX, Math.max(MIN, z));
+    if (Math.abs(z - before) < 0.001) return;
+    const docTop = doc.getBoundingClientRect().top;
+    const offset = anchorY - docTop; // distance into the document
+    set({ zoom: z }, true);
+    const after = doc.getBoundingClientRect().top;
+    window.scrollBy(0, after + offset * (z / before) - anchorY);
+    note(`Zoom ${Math.round(z * 100)}%`);
+  }
+
+  function step(dir: 1 | -1) {
+    const z = prefs.zoom;
+    const next = dir > 0 ? STEPS.find((s) => s > z + 0.001) : [...STEPS].reverse().find((s) => s < z - 0.001);
+    zoomTo(next ?? z);
+  }
+
+  // Ctrl/Cmd + wheel (and trackpad pinch, which Chromium reports the same way).
+  let wheelAcc = 0;
+  window.addEventListener(
+    'wheel',
+    (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      wheelAcc += e.deltaY;
+      // Pinch sends many tiny deltas: scale smoothly. A wheel notch is ~100: one step.
+      if (Math.abs(e.deltaY) < 50) {
+        zoomTo(prefs.zoom * Math.exp(-wheelAcc / 300), e.clientY);
+        wheelAcc = 0;
+      } else if (Math.abs(wheelAcc) >= 50) {
+        const dir = wheelAcc < 0 ? 1 : -1;
+        wheelAcc = 0;
+        const z = prefs.zoom;
+        const next = dir > 0 ? STEPS.find((s) => s > z + 0.001) : [...STEPS].reverse().find((s) => s < z - 0.001);
+        if (next) zoomTo(next, e.clientY);
+      }
+    },
+    { passive: false },
+  );
+
+  button.addEventListener('click', (e) => {
+    e.stopPropagation();
+    api.togglePanel();
+  });
+  panel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const t = (e.target as Element).closest('button');
+    if (!t) return;
+    if (t.dataset.theme) set({ theme: t.dataset.theme as ReadingTheme }, true);
+    else if (t.dataset.font) set({ font: t.dataset.font as ReadingFont }, true);
+    else if (t.dataset.zoom === '0') api.resetZoom();
+    else if (t.dataset.zoom) step(Number(t.dataset.zoom) as 1 | -1);
+  });
+  document.addEventListener('click', (e) => {
+    if (!panel.hidden && !panel.contains(e.target as Node)) panel.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.hidden) panel.hidden = true;
+  });
+
+  const api: Reading = {
+    apply(p) {
+      set(p, false);
+    },
+    zoomBy: step,
+    resetZoom() {
+      zoomTo(1);
+    },
+    togglePanel() {
+      panel.hidden = !panel.hidden;
+      button.setAttribute('aria-expanded', String(!panel.hidden));
+    },
+  };
+  render();
+  return api;
+}

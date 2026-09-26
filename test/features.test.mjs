@@ -136,3 +136,12 @@ test('Send to Claude with nothing open says so', () => {
   s.handle({ type: 'sendToAgent' });
   assert.match(last('toast').message, /No open comments/);
 });
+
+test('reading prefs are sent on ready and saved on change', () => {
+  const md = fresh('prefs.md', 'Text.\n');
+  let stored = { theme: 'sepia', zoom: 1.2 };
+  const { s, last } = session(md, { getPrefs: () => stored, setPrefs: (p) => (stored = p) });
+  assert.deepEqual(last('prefs').prefs, { theme: 'sepia', zoom: 1.2 });
+  s.handle({ type: 'setPrefs', prefs: { theme: 'night', zoom: 1.5, font: 'serif' } });
+  assert.deepEqual(stored, { theme: 'night', zoom: 1.5, font: 'serif' });
+});

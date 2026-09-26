@@ -83,3 +83,56 @@ button.mdr-send:hover:not(:disabled) { background: color-mix(in srgb, var(--acce
 .mdr-empty button { font-size: 11.5px; padding: 1px 8px; margin-left: 4px; }
 .mdr-actions { flex-wrap: wrap; }
 .mdr-actions button { white-space: nowrap; }
+
+/* ---------- reading view: zoom, theme, font ---------- */
+.mdr-doc { font-size: calc(15px * var(--mdr-zoom, 1)); }
+.mdr-doc table { font-size: 0.87em; }
+button.mdr-reading-btn { font-weight: 600; font-size: 12px; letter-spacing: -0.02em; }
+body[data-reading-font='serif'] .mdr-doc {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', Charter, 'Book Antiqua', Georgia, serif; line-height: 1.72;
+}
+.mdr-reading-panel {
+  position: fixed; top: 52px; right: 20px; z-index: 35; width: 272px; padding: 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--vscode-editorWidget-background, var(--bg));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2); font-size: 12.5px;
+}
+.mdr-reading-panel[hidden] { display: none; }
+.mdr-rp-label { margin: 10px 2px 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.mdr-rp-label:first-child { margin-top: 0; }
+.mdr-rp-hint { text-transform: none; letter-spacing: 0; margin-left: 4px; opacity: 0.8; }
+.mdr-rp-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+button.mdr-swatch { display: flex; align-items: center; gap: 8px; padding: 5px 8px; text-align: left; background: transparent; }
+button.mdr-swatch span {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  background: linear-gradient(135deg, var(--sw-bg) 50%, var(--sw-fg) 50%);
+}
+button.mdr-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.t-auto { --sw-bg: var(--vscode-editor-background, #fff); --sw-fg: var(--vscode-editor-foreground, #222); }
+.t-paper { --sw-bg: #fdfcf9; --sw-fg: #1f2328; }
+.t-sepia { --sw-bg: #f4ecd8; --sw-fg: #5b4636; }
+.t-dusk { --sw-bg: #2a2c38; --sw-fg: #d9dae4; }
+.t-night { --sw-bg: #0f1013; --sw-fg: #c4c7cc; }
+.mdr-rp-seg { display: flex; gap: 0; }
+.mdr-rp-seg button { flex: 1; border-radius: 0; margin-left: -1px; background: transparent; }
+.mdr-rp-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.mdr-rp-seg button:last-child { border-radius: 0 6px 6px 0; }
+.mdr-rp-seg button.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); position: relative; }
+.mdr-rp-seg button.serif { font-family: Georgia, serif; }
+.mdr-rp-pct { font-variant-numeric: tabular-nums; }
+
+/* Themes recolour only the reading column; panels keep following VS Code. */
+body[data-reading-theme='paper'] { --rt-bg: #fdfcf9; --rt-fg: #1f2328; --rt-muted: #646b75; --rt-accent: #1d4ed8; }
+body[data-reading-theme='sepia'] { --rt-bg: #f4ecd8; --rt-fg: #433422; --rt-muted: #7a6752; --rt-accent: #9a4f14; }
+body[data-reading-theme='dusk'] { --rt-bg: #2a2c38; --rt-fg: #d9dae4; --rt-muted: #9a9cb0; --rt-accent: #9db4ff; }
+body[data-reading-theme='night'] { --rt-bg: #0f1013; --rt-fg: #c4c7cc; --rt-muted: #858a93; --rt-accent: #7fb0ff; }
+body:not([data-reading-theme='auto']) .mdr-layout { background: var(--rt-bg); transition: background-color 0.2s; }
+body:not([data-reading-theme='auto']) .mdr-doc {
+  --bg: var(--rt-bg); --fg: var(--rt-fg); --muted: var(--rt-muted); --accent: var(--rt-accent);
+  --border: color-mix(in srgb, var(--rt-fg) 18%, transparent);
+  --soft: color-mix(in srgb, var(--rt-fg) 6%, var(--rt-bg));
+  --softer: color-mix(in srgb, var(--rt-fg) 3%, var(--rt-bg));
+  color: var(--fg); background: var(--bg);
+}
+body[data-reading-theme='dusk'] .mdr-doc, body[data-reading-theme='night'] .mdr-doc {
+  --hl-draft: rgba(245, 158, 11, 0.3); --hl-submitted: rgba(96, 150, 255, 0.28); --hl-resolved: rgba(74, 222, 128, 0.16);
+}

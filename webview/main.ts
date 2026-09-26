@@ -1,6 +1,7 @@
 import { buildTextMap, capture, locate, wrapRange, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
+import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
@@ -41,6 +42,7 @@ app.innerHTML = `
     <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline">☰</button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
       <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled>↶</button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled>↷</button></span>
+ <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false">Aa</button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document">⌕</button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">✎ Edit</button>
@@ -50,6 +52,7 @@ app.innerHTML = `
     </div>
   </header>
   <div id="mdr-find" class="mdr-find mdr-ui" hidden></div>
+  <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
     <main id="mdr-doc" class="mdr-doc"></main>
@@ -76,6 +79,13 @@ const sendBtn = document.getElementById('mdr-send') as HTMLButtonElement;
 const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
 const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
 const search = createSearch(doc, document.getElementById('mdr-find')!);
+const reading = createReading(
+  doc,
+  document.getElementById('mdr-reading-btn')!,
+  document.getElementById('mdr-reading')!,
+  (prefs: ReadingPrefs) => post({ type: 'setPrefs', prefs }),
+  (msg) => toast(msg),
+);
 const outline = createOutline(doc, document.getElementById('mdr-outline')!, (open) => {
   vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open });
 });
@@ -441,6 +451,14 @@ function runCommand(cmd: string) {
       return outline.setOpen(!outline.isOpen());
     case 'send':
       return post({ type: 'sendToAgent' });
+    case 'zoomIn':
+      return reading.zoomBy(1);
+    case 'zoomOut':
+      return reading.zoomBy(-1);
+    case 'zoomReset':
+      return reading.resetZoom();
+    case 'reading':
+      return reading.togglePanel();
   }
 }
 
@@ -454,6 +472,9 @@ document.addEventListener('keydown', (e) => {
       : mod && (k === 'y' || (e.shiftKey && k === 'z')) ? 'redo'
       : mod && k === 'f' ? 'find'
       : mod && e.shiftKey && k === 'o' ? 'outline'
+      : mod && (e.key === '=' || e.key === '+') ? 'zoomIn'
+      : mod && (e.key === '-' || e.key === '_') ? 'zoomOut'
+      : mod && e.key === '0' ? 'zoomReset'
       : e.altKey && e.key === 'ArrowDown' ? 'next'
       : e.altKey && e.key === 'ArrowUp' ? 'prev'
       : '';
@@ -735,6 +756,9 @@ window.addEventListener('message', (ev) => {
       copyText(m.prompt).then(
         (ok) => toast(ok ? `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into Claude Code.` : 'Could not copy the prompt.', !ok),
       );
+      break;
+    case 'prefs':
+      reading.apply(m.prefs || {});
       break;
     case 'command':
       runCommand(m.command);

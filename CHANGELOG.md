@@ -7,6 +7,7 @@
 - Find in document (Ctrl+F) with all matches highlighted.
 - Keyboard navigation between comments (`j`/`k`, Alt+↓/↑) and `r` to reply.
 - Thread filters by status and author.
+- Reading view: zoom the document (Ctrl+wheel, Ctrl+= / Ctrl+−, Ctrl+0), a theme for the reading column that follows VS Code by default (plus Paper, Sepia, Dusk, Night), and a Sans/Serif choice, remembered across files.
 - **Send to Claude**: submit drafts and start Claude Code on the open threads, or send a single thread with **Ask Claude**. The prompt is also copied to the clipboard.
 
 ## 0.1.0 — 2026-09-25

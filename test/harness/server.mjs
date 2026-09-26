@@ -22,6 +22,7 @@ const port = Number(process.argv[3] || 4417);
 const dir = path.dirname(md);
 const clients = new Set();
 
+let prefs = {}; // reading prefs, kept for the life of the server
 const session = new lib.ReviewSession({
   mdPath: md,
   author: () => os.userInfo().username,
@@ -34,6 +35,8 @@ const session = new lib.ReviewSession({
   getText: () => fs.readFileSync(md, 'utf8').replace(/^﻿/, ''),
   isDirty: () => false,
   openLink: (href) => console.log('openLink', href),
+  getPrefs: () => prefs,
+  setPrefs: (p) => (prefs = p),
 });
 
 let t1, t2;

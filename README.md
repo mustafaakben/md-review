@@ -81,6 +81,8 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
+**Reading view.** **Aa** in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0. Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
+
 **Send to Claude.**
 - **✦ Send to Claude** submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **✦ Ask Claude** on a card sends just that thread.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
