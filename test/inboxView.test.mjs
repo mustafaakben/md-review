@@ -53,6 +53,8 @@ class EventEmitter {
   dispose() {}
 }
 const Uri = { file: (p) => ({ fsPath: p, scheme: 'file' }) };
+/** A relative path as the tree shows it: forward slashes on every platform. */
+const rel = (from, to) => path.relative(from, to).split(path.sep).join('/');
 const skip = (name) => name === 'node_modules' || name.startsWith('.');
 // Like the search: follows links to folders, but not round a loop.
 function walk(dir, acc = [], seen = new Set()) {
@@ -113,7 +115,7 @@ const vscode = {
         return { mtime: st.mtimeMs, size: st.size };
       },
       async readFile(uri) {
-        calls.reads.push(path.relative(root, uri.fsPath));
+        calls.reads.push(rel(root, uri.fsPath));
         return fs.readFileSync(uri.fsPath);
       },
     },
@@ -132,7 +134,7 @@ const vscode = {
     getConfiguration: (section) => ({ get: (k, d) => (section === 'files' && k === 'exclude' ? state.exclude : d) }),
     asRelativePath: (uri) => {
       const p = typeof uri === 'string' ? uri : uri.fsPath;
-      return path.relative(folderOf(p) ?? root, p);
+      return rel(folderOf(p) ?? root, p); // VS Code's uses forward slashes
     },
   },
 };
@@ -180,7 +182,7 @@ write('.hidden/x.md', [thread('submitted')]);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const view = (globalThis.view = new InboxView());
 const tree = calls.trees[0];
-const labelOf = (item, at = root) => item.label ?? path.relative(at, item.resourceUri.fsPath);
+const labelOf = (item, at = root) => item.label ?? rel(at, item.resourceUri.fsPath);
 async function snapshot(view = globalThis.view, at = root) {
   const out = {};
   for (const g of await view.getChildren()) {
@@ -414,18 +416,24 @@ test('events the search would skip are skipped too', async () => {
   for (const [rel, where] of [['y.md', outside], ['.cache/y.md', at], ['node_modules/p/y.md', at], ['build/y.md', at]]) emit('create', write(rel, [thread('submitted')], where));
   emit('create', write('keep/y.md', [thread('submitted', { body: 'kept' })], at));
   await wait(450);
-  assert.deepEqual(calls.reads.slice(reads), [path.relative(root, path.join(at, 'keep/y.md.comments.json'))]);
+  assert.deepEqual(calls.reads.slice(reads), [rel(root, path.join(at, 'keep/y.md.comments.json'))]);
   assert.deepEqual(Object.keys((await snapshot(v, at))['Waiting on Claude (2)']), ['doc.md', 'keep/y.md']);
   state.exclude = {};
   v.dispose();
 });
 
-test('a folder linked in beside its target is listed once', async () => {
+test('a folder linked in beside its target is listed once', async (t) => {
   const at = mkroot();
   made.push(at);
   write('a/doc.md', [thread('submitted', { body: 'in a' })], at);
-  fs.symlinkSync(path.join(at, 'a'), path.join(at, 'b'), 'dir');
-  fs.symlinkSync(at, path.join(at, 'a', 'loop'), 'dir');
+  try {
+    fs.symlinkSync(path.join(at, 'a'), path.join(at, 'b'), 'dir');
+    fs.symlinkSync(at, path.join(at, 'a', 'loop'), 'dir');
+  } catch (e) {
+    // Windows without Developer Mode or admin rights cannot make symlinks.
+    if (e.code === 'EPERM') return t.skip('cannot create symlinks here (EPERM)');
+    throw e;
+  }
   const { view: v } = fresh(at);
   assert.deepEqual(await snapshot(v, at), { 'Waiting on Claude (1)': { 'a/doc.md': ['in a'] } });
   v.dispose();

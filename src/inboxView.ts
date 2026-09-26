@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildInbox, excludedBy, GROUPS, Inbox, InboxFile, InboxGroup, InboxThread, parseInboxSidecar, threadDescription, threadLabel } from './inbox';
 import { isWorking } from '../webview/round';
+import { nameKey } from './fileWatch';
 
 const SIDECAR = '.comments.json';
 const INCLUDE = '**/*.md.comments.json';
@@ -289,9 +290,11 @@ async function distinct(paths: string[]): Promise<string[]> {
   const real = new Map(await Promise.all(dirs.map(async (d) => [d, await fs.promises.realpath(d).catch(() => d)] as const)));
   const by = new Map<string, string>();
   for (const p of paths) {
-    const r = path.join(real.get(path.dirname(p))!, path.basename(p));
+    // Compared without case where the disk ignores it: on Windows VS Code gives
+    // `c:\` while a link's target usually reads back as `C:\`.
+    const r = nameKey(path.join(real.get(path.dirname(p))!, path.basename(p)), process.platform);
     // The file's own path wins over one through a link.
-    if (!by.has(r) || p === r) by.set(r, p);
+    if (!by.has(r) || nameKey(p, process.platform) === r) by.set(r, p);
   }
   return [...by.values()];
 }
