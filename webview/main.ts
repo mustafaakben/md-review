@@ -23,7 +23,7 @@ interface Comment extends Meta {
   /** Set by the CLI while an agent is on this thread. */
   workingAt?: string; workingBy?: string;
   /** "agent": Claude's draft from Review with Claude, not yet triaged. */
-  origin?: 'agent'; suggestedBy?: string;
+  origin?: 'agent' | 'word'; suggestedBy?: string;
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
 }
 
