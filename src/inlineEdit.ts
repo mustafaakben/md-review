@@ -79,8 +79,8 @@ const indentOf = (s: string) => /^[ \t]*/.exec(s)![0];
 // An inline footnote renumbers every note after it, and block-math delimiters
 // can pair with ones far above or below: none of that shows in the block alone.
 // A paragraph that is only `{attrs}` joins the table or list above it, and a
-// table caption's id counts only once in the file.
-const needsWholeFile = (s: string) => /\^\[|\$\$|\\[[\]]|\{#tbl:/i.test(s) || /^\s*\{[^]*\}\s*$/.test(s);
+// table caption (any paragraph with a tbl: id) depends on the whole file.
+const needsWholeFile = (s: string) => /\^\[|\$\$|\\[[\]]|tbl:/i.test(s) || /^\s*\{[^]*\}\s*$/.test(s);
 // A footnote definition in the lines that come along (maybe inside a quote or
 // a list) would be defined twice.
 const noteDefinition = /\[\^[^\]\s]+\]:/;

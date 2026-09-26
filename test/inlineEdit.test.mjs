@@ -156,6 +156,9 @@ test('block-only verification agrees on cases found in review', () => {
     // Table captions with the same id.
     ['Table: first {#tbl:x}\n\nTable: second {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('second', 'second one')],
     [': cap {#tbl:x}\n\n: caption {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('n ', '')],
+    // A table id written another way still makes a typed `Table:` a caption prefix.
+    ['# Intro {#sec:intro}\n\nResults by group {.wide #tbl:r}\n', 2, 'paragraph', (t) => 'Table: ' + t],
+    ['# Intro {#sec:intro}\n\nResults by group {id=tbl:r}\n', 2, 'paragraph', (t) => 'Table: ' + t],
     // With a bibliography, a typed @key is a citation, which only the front matter says.
     ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by @smith2020')],
     ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by me@example.com')],
