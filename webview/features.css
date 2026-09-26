@@ -266,6 +266,8 @@ button.mdr-doc-comment::before { width: 14px; height: 14px; --ico: var(--i-discu
 .mdr-round { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); font-size: 12px; }
 .mdr-round[hidden] { display: none; }
 .mdr-round-row { display: flex; align-items: center; gap: 8px; }
+/* A Review with Claude run and a Send round can both be live: one row each. */
+.mdr-round-part + .mdr-round-part { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mdr-round-text { flex: 1; min-width: 0; }
 .mdr-round-actions { justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .mdr-round-actions button { font-size: 12px; }
@@ -335,6 +337,11 @@ button.mdr-chip-agent { display: inline-flex; align-items: center; gap: 4px; }
   button.mdr-review-btn { padding: 5px; }
   button.mdr-review-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
+@media (max-width: 760px) {
+  /* Tighter spacing pays for the review button, so a narrow toolbar is no wider than before it. */
+  .mdr-toolbar { padding-left: 12px; }
+  .mdr-tools { gap: 0; }
+}
 .mdr-review-panel {
   position: fixed; z-index: 35; width: 264px; padding: 10px; border-radius: 10px;
   border: 1px solid var(--border); background: var(--vscode-editorWidget-background, var(--bg));
@@ -367,4 +374,6 @@ mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(-
   .mdr-card.mdr-agent::before { forced-color-adjust: none; background: repeating-linear-gradient(Highlight 0 5px, transparent 5px 8px); }
   mark.mdr-hl.mdr-agent { outline: 1px dashed Highlight; text-decoration-color: Highlight; }
   .mdr-pill.agent::before { background: Highlight; }
+  .mdr-round-icon:not(.done) { forced-color-adjust: none; background: CanvasText; }
+  .mdr-round-part + .mdr-round-part { border-top-color: CanvasText; }
 }

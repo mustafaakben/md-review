@@ -90,6 +90,8 @@ export interface Sidecar {
   schemaVersion: 1;
   file: string;
   comments: Comment[];
+  /** Set by the CLI's review-done when an agent finishes reviewing the file first. */
+  reviewDoneAt?: string;
 }
 
 export function sidecarPath(mdPath: string): string {

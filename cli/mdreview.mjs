@@ -13,6 +13,7 @@
 //   node mdreview.mjs comment <file.md> --quote "<text as it reads>" [--line N] [--kind question|praise]
 //                             [--severity major|minor|nit] [--suggest "<replacement>"] "<body>"
 //   node mdreview.mjs comment <file.md> --document "<body>"
+//   node mdreview.mjs review-done <file.md>
 //   node mdreview.mjs init-claude [folder] [--force]
 //
 // paths can be .md files or folders (searched recursively; default: the current
@@ -20,7 +21,8 @@
 // is on, so an agent can loop: next -> edit -> reply/resolve -> next. It skips
 // threads whose last reply is from --author (waiting on the reviewer) unless --all.
 // `comment` is for an agent reviewing first: it adds a draft from --author,
-// marked origin "agent", for the reviewer to keep, act on, or dismiss.
+// marked origin "agent", for the reviewer to keep, act on, or dismiss;
+// `review-done` then tells the viewer the review is finished.
 //
 // Every write re-reads the sidecar, applies the change, and writes it back, so
 // it never clobbers comments the viewer added in the meantime.
@@ -357,8 +359,10 @@ function sectionEnd(lines, h) {
   return end;
 }
 const SEVERITY_RANK = { major: 0, minor: 1, nit: 2 };
-const severityRank = (c) => SEVERITY_RANK[c.severity] ?? 3;
-const tagsOf = (c) => [c.scope === 'document' ? 'whole document' : c.scope === 'section' ? 'whole section' : '', c.kind === 'question' || c.kind === 'praise' ? c.kind : '', SEVERITY_RANK[c.severity] != null ? c.severity : ''].filter(Boolean);
+// Own keys only: a severity of "constructor" or "__proto__" is not a severity.
+const isSeverity = (s) => typeof s === 'string' && Object.hasOwn(SEVERITY_RANK, s);
+const severityRank = (c) => (isSeverity(c.severity) ? SEVERITY_RANK[c.severity] : 3);
+const tagsOf = (c) => [c.scope === 'document' ? 'whole document' : c.scope === 'section' ? 'whole section' : '', c.kind === 'question' || c.kind === 'praise' ? c.kind : '', isSeverity(c.severity) ? c.severity : ''].filter(Boolean);
 const KIND_HINT = { question: "a question: answer it in a reply, don't edit the document", praise: 'praise: no change needed; resolve it' };
 
 function contextOf(md, c) {
@@ -498,10 +502,12 @@ function plainText(src) {
     if (src[k] === '_' && word(a) !== word(b)) out[k] = DROP;
   }
   // Collapse whitespace; remember where a STOP fell between two characters.
-  let text = '';
+  // Built as an array: checking the end of a growing string flattens it every time (quadratic).
+  const chars = [];
   const at = [];
   const stop = [];
   let pending = false;
+  let space = true; // at the start, or just after a space: more whitespace is dropped
   for (let k = 0; k < n; k++) {
     const ch = out[k];
     if (ch === DROP) continue;
@@ -509,15 +515,15 @@ function plainText(src) {
       pending = true;
       continue;
     }
-    if (/\s/.test(ch)) {
-      if (!text || text.endsWith(' ')) continue;
-      text += ' ';
-    } else text += ch;
+    const ws = /\s/.test(ch);
+    if (ws && space) continue;
+    chars.push(ws ? ' ' : ch);
+    space = ws;
     at.push(k);
     stop.push(pending);
     pending = false;
   }
-  return { text, at, stop };
+  return { text: chars.join(''), at, stop };
 }
 
 /** 1-based first and last line of the block(s) covering source lines a..b. */
@@ -631,7 +637,7 @@ function describeWithContext(c, ctx) {
   let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}${tags.length ? ` (${tags.join(', ')})` : ''}\n  comment: ${c.body}`;
   if (c.scope === 'document') s += '\n  about:   the whole document';
   else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
-  if (KIND_HINT[c.kind]) s += `\n  (${KIND_HINT[c.kind]})`;
+  if (Object.hasOwn(KIND_HINT, c.kind ?? '')) s += `\n  (${KIND_HINT[c.kind]})`;
   if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
@@ -687,7 +693,7 @@ switch (cmd) {
     const rows = collect(rest).map((md) => {
       const n = { draft: 0, submitted: 0, resolved: 0, waiting: 0 };
       for (const c of readOrSkip(md).comments || []) {
-        if (c.status in n) n[c.status]++;
+        if (['draft', 'submitted', 'resolved'].includes(c.status)) n[c.status]++;
         if (c.status === 'submitted' && !awaits(c)) n.waiting++;
       }
       return { file: shown(md), ...n };
@@ -825,7 +831,7 @@ switch (cmd) {
     if (!mdArg || !body?.trim() || rest.length > 2) usage();
     if (wholeDoc === (quoteArg !== undefined)) fail('Pass either --quote "<text>" or --document.');
     if (kindArg && !['comment', 'question', 'praise'].includes(kindArg)) fail('--kind is question or praise.');
-    if (severityArg && !(severityArg in SEVERITY_RANK)) fail('--severity is major, minor or nit.');
+    if (severityArg !== undefined && !isSeverity(severityArg)) fail('--severity is major, minor or nit.');
     if (wholeDoc && suggestArg !== undefined) fail('--suggest replaces a quote; a whole-document comment has none.');
     const line = lineArg === undefined ? 0 : Number(lineArg);
     if (!Number.isInteger(line) || line < 0) fail('--line is a 1-based line number.');
@@ -853,6 +859,17 @@ switch (cmd) {
     const where = hit ? ` on L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? `-${c.anchor.lineEnd}` : ''}` : ' on the whole document';
     console.log(`Added ${c.id}${where}, a draft for the reviewer.`);
     if (hit && !hit.asGiven) console.log(`Quoted as it reads: "${c.anchor.quote}"`);
+    break;
+  }
+  case 'review-done': {
+    // The viewer's "Claude is reviewing" banner ends here, not only when it goes quiet.
+    const [mdArg] = rest;
+    if (!mdArg) usage();
+    const md = mdOf(mdArg);
+    if (!fs.existsSync(md)) fail(`Not found: ${mdArg}`);
+    const d = mutate(md, (x) => void (x.reviewDoneAt = now()));
+    const mine = d.comments.filter((c) => c.origin === 'agent' && c.status === 'draft').length;
+    console.log(`Marked the review of ${shown(md)} done (${mine} draft${mine === 1 ? '' : 's'} waiting for the reviewer).`);
     break;
   }
   case 'init-claude':

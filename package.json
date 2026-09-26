@@ -112,6 +112,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "mdReview.reviewWithClaude",
+        "title": "Review with Claude",
+        "category": "MD Review",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "mdReview.sendFolderToClaude",
         "title": "Send Open Reviews in Folder to Claude",
         "category": "MD Review",
@@ -200,6 +206,10 @@
         },
         {
           "command": "mdReview.sendToClaude",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.reviewWithClaude",
           "when": "activeCustomEditorId == 'mdReview.editor'"
         },
         {

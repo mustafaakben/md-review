@@ -2,11 +2,14 @@
 // when the menu opens (built-ins plus .mdreview/reviewers/*.md), so nothing is
 // read until someone asks. Picking one starts Claude as first reviewer.
 
-export interface Reviewer { id: string; label: string }
+/** `path`: the workspace file a reviewer's brief comes from. */
+export interface Reviewer { id: string; label: string; path?: string }
 
 export interface ReviewMenu {
   setReviewers(list: Reviewer[]): void;
   toggle(focus?: boolean): void;
+  /** Open the menu (if it isn't) with focus on its first reviewer: the palette command. */
+  open(): void;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -21,17 +24,17 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
   function render(list: Reviewer[] | null) {
     const builtIn = (list || []).filter((r) => !r.id.startsWith('file:'));
     const mine = (list || []).filter((r) => r.id.startsWith('file:'));
-    const item = (r: Reviewer) => `<button role="menuitem" tabindex="-1" data-reviewer="${esc(r.id)}">${esc(r.label)}</button>`;
+    const item = (r: Reviewer) => `<button role="menuitem" tabindex="-1" data-reviewer="${esc(r.id)}"${r.path ? ` title="${esc(r.path)}"` : ''}>${esc(r.label)}</button>`;
     panel.innerHTML = `
-      <div class="mdr-rv-note">Claude reads the document and leaves draft comments. You keep, act on, or dismiss each one.</div>
-      <div class="mdr-rv-list" role="menu" aria-label="Reviewers">${
+      <div class="mdr-rv-note">Claude reads the document and leaves draft comments. You keep, act on, or discard each one.</div>
+      <div id="mdr-review-menu" class="mdr-rv-list" role="menu" aria-label="Reviewers">${
         list
           ? builtIn.map(item).join('') +
             (mine.length ? `<div class="mdr-rv-label" role="presentation">This workspace</div>${mine.map(item).join('')}` : '') +
-            `<button role="menuitem" tabindex="-1" data-reviewer="custom" aria-expanded="false">Custom…</button>`
+            `<button role="menuitem" tabindex="-1" data-reviewer="custom" aria-expanded="false" aria-controls="mdr-review-custom">Custom…</button>`
           : '<div class="mdr-rv-label" role="presentation">Loading…</div>'
       }</div>
-      <form class="mdr-rv-custom" hidden>
+      <form id="mdr-review-custom" class="mdr-rv-custom" hidden>
         <input type="text" maxlength="500" aria-label="What should Claude look for?" placeholder="What should Claude look for?">
         <button type="submit" class="mdr-primary">Start</button>
       </form>`;
@@ -73,6 +76,12 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
     e.stopPropagation();
     api.toggle(e.detail === 0);
   });
+  // ArrowDown on the button opens the menu on its first reviewer, as menu buttons do.
+  button.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    api.open();
+  });
   panel.addEventListener('click', (e) => {
     e.stopPropagation();
     const b = (e.target as Element).closest<HTMLElement>('[data-reviewer]');
@@ -87,10 +96,15 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
     e.preventDefault();
     const input = panel.querySelector('.mdr-rv-custom input') as HTMLInputElement;
     const text = input.value.trim();
-    if (text) start('custom', text);
-    else input.focus();
+    if (text) return start('custom', text);
+    // Say why nothing started; typing clears it.
+    input.setCustomValidity('Type what Claude should look for, for example "Check the units".');
+    input.reportValidity();
+    input.focus();
   });
+  panel.addEventListener('input', (e) => (e.target as HTMLInputElement).setCustomValidity?.(''));
   panel.addEventListener('keydown', (e) => {
+    if (e.key === 'Tab') return tabOut(e);
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -104,6 +118,18 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
     list.forEach((b, k) => (b.tabIndex = k === next ? 0 : -1));
     list[next].focus();
   });
+  /**
+   * The panel sits after the toolbar in the page, so Tab out of it would skip
+   * the rest of the toolbar: leaving it goes back to the button, and Tab then
+   * carries on from there (Shift+Tab stops on the button).
+   */
+  function tabOut(e: KeyboardEvent) {
+    const stops = Array.from(panel.querySelectorAll<HTMLElement>('button, input')).filter((el) => el.tabIndex >= 0 && !el.closest('[hidden]'));
+    const edge = e.shiftKey ? stops[0] : stops[stops.length - 1];
+    if (document.activeElement !== edge) return;
+    close(true);
+    if (e.shiftKey) e.preventDefault(); // the browser's Tab moves on from the button
+  }
   // Tabbing or clicking out of the menu closes it.
   panel.addEventListener('focusout', (e) => {
     const to = (e as FocusEvent).relatedTarget as Node | null;
@@ -126,6 +152,14 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
       if (panel.hidden) open(focus);
       else close(focus);
     },
+    open() {
+      if (panel.hidden) return open(true);
+      const list = items();
+      list.forEach((b, k) => (b.tabIndex = k ? -1 : 0));
+      if (list.length) list[0].focus();
+      else focusFirst = true; // still loading: render() focuses it
+    },
   };
+  render(null); // so the button's aria-controls names an element from the start
   return api;
 }

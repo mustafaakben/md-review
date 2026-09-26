@@ -9,7 +9,7 @@ export interface FilterState {
   status: StatusFilter;
   author: string; // '' = everyone
   severity: SeverityFilter; // '' = any
-  ids?: string[]; // only these threads (the last round's questions); not remembered
+  ids?: string[]; // only these threads (the last round's questions, or a review's drafts); not remembered
 }
 
 interface Filterable {
@@ -53,11 +53,12 @@ export function authorsOf(comments: Filterable[]): string[] {
 
 /**
  * Markup for the filter bar; `counts` is per status over the author-filtered
- * set. Severity chips show only once some thread has a severity.
+ * set (and the ids, when set). Severity chips show only once some thread has
+ * a severity. With ids, one chip names the set and clears it.
  */
 export function filterBar(f: FilterState, authors: string[], counts: Record<StatusFilter, number>, severities: Record<string, number> = {}): string {
   const chips = f.ids
-    ? `<button class="mdr-chip on" data-filter-status="all" aria-pressed="true" title="Show all threads">Waiting on you<span>${f.ids.length}</span></button>`
+    ? `<button class="mdr-chip on${f.status === 'agent' ? ' mdr-chip-agent' : ''}" data-filter-status="all" aria-pressed="true" title="Show all threads">${f.status === 'agent' ? 'From this review' : 'Waiting on you'}<span>${counts[f.status]}</span></button>`
     : (Object.keys(LABEL) as StatusFilter[])
         .filter((k) => k !== 'agent' || counts.agent || f.status === 'agent')
         .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}${k === 'agent' ? ' mdr-chip-agent' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)

@@ -1,6 +1,6 @@
 ---
 name: md-review
-description: Work through MD Review comments on Markdown files (sidecars named *.md.comments.json). Use when the user asks to address, answer, or resolve review comments on a Markdown document, paper, or draft, or says "go through my review".
+description: Work through MD Review comments on Markdown files (sidecars named *.md.comments.json), or review a document first by leaving draft comments. Use when the user asks to address, answer, or resolve review comments on a Markdown document, paper, or draft, says "go through my review", or asks you to review a document or leave review comments on it.
 ---
 
 # MD Review comments
@@ -52,7 +52,12 @@ node .claude/skills/md-review/mdreview.mjs comment <file.md> --document "a note 
 The quote is the rendered text, without `**`, `_` or link syntax. Add
 `--line <n>` when the words appear more than once, `--kind question` for a
 question, and `--suggest "<replacement>"` for a concrete fix. If the command
-says the quote wasn't found or is ambiguous, fix it and run it again.
+says the quote wasn't found or is ambiguous, fix it and run it again. When
+you're done, tell the viewer so:
+
+```bash
+node .claude/skills/md-review/mdreview.mjs review-done <file.md>
+```
 
 Always use the default author (`Claude`); `next` recognizes your own replies
 by that name, and a different one makes it hand you the same thread again.

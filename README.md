@@ -102,11 +102,11 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
 **Review with Claude.**
-- **Review with Claude** in the toolbar (the sparkle) asks Claude to read the document first and leave comments for you, before you review it yourself. Pick a reviewer: **Copy edit**, **Clarity and flow**, **Methods reviewer**, **Claims need citations**, **Reviewer 2 (tough but fair)**, or **Custom…** to type one line of your own.
+- **Review with Claude** in the toolbar (the sparkle, or **MD Review: Review with Claude** in the Command Palette) asks Claude to read the document first and leave comments for you, before you review it yourself. Pick a reviewer: **Copy edit**, **Clarity and flow**, **Methods reviewer**, **Claims need citations**, **Reviewer 2 (tough but fair)**, or **Custom…** to type one line of your own.
 - Claude starts the same way as Send to Claude (a terminal, or the clipboard in browser mode). It leaves at most 12 comments (`mdReview.agent.reviewComments`), most important first, each with a severity and sometimes a suggested replacement. It doesn't edit the file.
-- Its comments arrive as drafts under **From Claude** at the top of the comments pane, with their own filter chip, and dashed highlights in the text. Each has three buttons: **Keep** makes it your draft (it goes out with your review, noting Claude raised it), **Do it** keeps it and sends just that thread to Claude, like Ask Claude, and **Dismiss** deletes it. Submit review and Send to Claude leave untriaged drafts from Claude alone, and the draft count leaves them out.
-- While Claude reviews, the comments pane shows **Claude is reviewing · 3 comments so far**, then **Show them** when it's quiet or reaches the limit.
-- Add your own reviewers as Markdown files in `.mdreview/reviewers/` in the workspace. The file name is the label (`House style.md` shows as "House style") and the content is the brief. They're read when you open the menu.
+- Its comments arrive as drafts under **From Claude** at the top of the comments pane, with their own filter chip, and dashed highlights in the text. Each has three buttons: **Keep** makes it your draft (it goes out with your review, noting Claude raised it), **Do it** keeps it and queues it for Claude (it's submitted, so the next **Send to Claude** hands it over with everything else you queued), and **Discard** deletes it. Submit review and Send to Claude leave untriaged drafts from Claude alone, and the draft count leaves them out.
+- While Claude reviews, the comments pane shows **Claude is reviewing · 3 comments so far**. When Claude says it's done (the CLI's `review-done`), reaches the limit, or goes quiet for five minutes, it shows **Claude left 5 comments · 3 to triage** with **Show them**, and **All 5 of Claude's comments triaged** once you're through. A Send to Claude round started meanwhile gets its own row.
+- Add your own reviewers as Markdown files in `.mdreview/reviewers/` in the workspace. The file name is the label (`House style.md` shows as "House style") and the content is the brief (the first 64 KB). The menu lists the files when it opens and reads only the one you pick; symlinks and anything that isn't a plain file are left out. Claude gets the brief as quoted material from whoever set up the workspace, under rules that keep it to leaving comments.
 
 **Keyboard.** Press `?` in the view (or the keyboard icon in the toolbar) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind the Ctrl/⌘ shortcuts under **Keyboard Shortcuts** in VS Code (search for "MD Review"); the single-letter keys are fixed.
 
@@ -182,7 +182,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
         { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }  // a reply can carry a "suggestion" too
       ]
     }
-  ]
+  ],
+  "reviewDoneAt": "2026-09-25T20:31:00.000Z" // optional: when an agent reviewing first said it was done (CLI review-done)
 }
 ```
 
@@ -223,6 +224,7 @@ node cli/mdreview.mjs suggest path/to/file.md <id> "replacement for the quote" [
 node cli/mdreview.mjs reopen  path/to/file.md <id>
 node cli/mdreview.mjs comment path/to/file.md --quote "text as it reads" [--line N] [--kind question|praise] [--severity major|minor|nit] [--suggest "replacement"] "comment"
 node cli/mdreview.mjs comment path/to/file.md --document "comment"
+node cli/mdreview.mjs review-done path/to/file.md             # after reviewing first: tell the viewer you're done
 node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claude Code skill
 ```
 
@@ -230,6 +232,7 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - `next` goes file by file in document order and skips threads whose last reply is from `--author` (default `Claude`), since those are waiting on the reviewer. A thread the reviewer reopens after that reply counts as open again. `--all` includes the skipped ones, and `next` and `summary` say how many are waiting. So an agent can loop: `next`, edit, `resolve` (or `reply` with a question), `next`, until it prints `No open comments.`
 - `next` and `context` (on an open thread) mark that thread with `workingAt`/`workingBy`, so the viewer shows which thread the agent is on; `reply` and `resolve` clear it. A mark older than 5 minutes is ignored.
 - `comment` is for an agent reviewing first. It finds the quote in the source through markup (like `next`), writes the anchor the viewer needs (the quote and its context as rendered text, and the block's lines), and adds a draft from `--author` (default `Claude`) with `"origin": "agent"`. It exits with code 2 and says why when the quote isn't in the file, appears more than once (pass `--line` for the one you mean), or runs into a footnote marker or math. If the quote was given with markup, it prints the text it stored.
+- `review-done` stamps the sidecar's `reviewDoneAt`, which ends the viewer's "Claude is reviewing" banner.
 - `list --json` adds a `file` field to each comment, and `list` shows threads in document order. With no path, `list` now scans the current folder, and a path that doesn't exist is an error.
 
 ## Rendering
