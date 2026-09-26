@@ -159,7 +159,7 @@ button.mdr-side-toggle { padding: 5px; }
   .mdr-doc { padding: 32px 28px 100px 64px; }
 }
 @media (max-width: 620px) {
-  .mdr-layout { grid-template-columns: 1fr; }
+  .mdr-layout { grid-template-columns: minmax(0, 1fr); }
   .mdr-sidebar { position: static; height: auto; border-left: 0; border-top: 1px solid var(--hairline); }
   .mdr-doc { padding: 24px 20px 60px; }
 }
@@ -250,8 +250,8 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
 .mdr-row { display: flex; gap: 6px; margin-top: 8px; }
 
 /* ---------- sidebar cards ---------- */
-.mdr-empty { display: flex; flex-direction: column; align-items: center; text-align: center; color: var(--muted); padding: 48px 18px; line-height: 1.6; }
-.mdr-empty::before { --ico: var(--i-discussion); width: 32px; height: 32px; -webkit-mask-size: 32px; mask-size: 32px; opacity: 0.45; margin-bottom: 14px; }
+.mdr-empty { display: block; text-align: center; color: var(--muted); padding: 48px 18px; line-height: 1.6; }
+.mdr-empty::before { --ico: var(--i-discussion); width: 32px; height: 32px; -webkit-mask-size: 32px; mask-size: 32px; opacity: 0.45; display: block; margin: 0 auto 14px; }
 .mdr-empty b { color: var(--fg); font-weight: 600; }
 .mdr-section { margin: 22px 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .mdr-card {
