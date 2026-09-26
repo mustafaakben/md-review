@@ -8,6 +8,7 @@
 //   node mdreview.mjs show    <file.md> <id>
 //   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude]
 //   node mdreview.mjs resolve <file.md> <id> ["<closing reply>"] [--author Claude]
+//   node mdreview.mjs suggest <file.md> <id> "<replacement for the quote>" ["<note>"]
 //   node mdreview.mjs reopen  <file.md> <id>
 //   node mdreview.mjs init-claude [folder] [--force]
 //
@@ -341,11 +342,13 @@ function contextOf(md, c) {
   return { file: shown(md), found: !!hit, lineStart: ls, lineEnd: le, source };
 }
 
+const sugState = (s) => (s.appliedAt ? ' (applied)' : s.dismissedAt ? ' (dismissed)' : '');
 function describe(c) {
   const lines = c.anchor?.lineStart ? `L${c.anchor.lineStart}-${c.anchor.lineEnd}` : 'L?';
   const tags = tagsOf(c);
   let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}${c.scope === 'document' ? '' : `\n  quote: "${c.anchor?.quote}"`}\n  body:  ${c.body}`;
-  for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}`;
+  if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
+  for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   return s;
 }
 function describeWithContext(c, ctx) {
@@ -357,7 +360,8 @@ function describeWithContext(c, ctx) {
   if (c.scope === 'document') s += '\n  about:   the whole document';
   else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
   if (KIND_HINT[c.kind]) s += `\n  (${KIND_HINT[c.kind]})`;
-  for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}`;
+  if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
+  for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
   if (ctx.source.length) {
     const w = String(ctx.source.at(-1).line).length;
@@ -500,6 +504,22 @@ switch (cmd) {
       unclaim(c);
     });
     console.log(`Replied to ${id}`);
+    break;
+  }
+  case 'suggest': {
+    // Propose the quote's replacement instead of editing; the reviewer applies it.
+    const [mdArg, id, text, note] = rest;
+    if (!mdArg || !id || text === undefined) usage();
+    mutate(mdOf(mdArg), (d) => {
+      const c = find(d, id);
+      if (!c.anchor?.quote || c.scope) {
+        console.error(`${id} has no quote to replace (it's about a whole ${c.scope || 'document'}). Reply instead.`);
+        process.exit(2);
+      }
+      c.replies.push({ id: newId('r'), author, createdAt: now(), body: note || 'Suggested edit.', suggestion: { text } });
+      unclaim(c);
+    });
+    console.log(`Suggested an edit on ${id}`);
     break;
   }
   case 'resolve': {

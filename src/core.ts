@@ -37,7 +37,10 @@ export interface Round {
 
 export type FromWebview =
   | { type: 'ready' }
-  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta }
+  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta; suggestion?: string }
+  /** Apply a suggestion: the block's rendered text before and after, as for saveInline. */
+  | { type: 'applySuggestion'; id: string; from?: string; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
+  | { type: 'dismissSuggestion'; id: string; from?: string }
   | { type: 'setMeta'; id: string; meta: store.CommentMeta }
   | { type: 'reply'; id: string; body: string }
   | { type: 'setStatus'; id: string; status: store.Status }
@@ -67,6 +70,8 @@ export interface HostContext {
   /** True if the document has unsaved changes in an editor. */
   isDirty(): boolean;
   openLink(href: string): void;
+  /** True when Send to Claude should ask for suggestions instead of edits. */
+  suggestMode?(): boolean;
   /** Re-render when any of these files (the bibliography) changes. */
   watchFiles?(files: string[]): void;
   /**
@@ -199,7 +204,36 @@ export class ReviewSession {
         if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         return;
       case 'addComment':
-        return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body, msg.meta));
+        return this.mutate((d) => {
+          const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
+          if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
+        });
+      case 'applySuggestion':
+        this.assertEditable();
+        try {
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText));
+        } catch (e) {
+          if (e instanceof InlineMapError) {
+            this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: "Couldn't apply that suggestion to the Markdown safely, so nothing was written. Make the change in the source below." });
+            return;
+          }
+          throw e;
+        }
+        // Applied is done: the thread resolves, like accepting a suggestion in Docs.
+        this.mutate((d) => {
+          const c = store.find(d, msg.id);
+          const s = store.suggestionOf(c, msg.from);
+          if (s) s.appliedAt = store.now();
+          if (c.status !== 'resolved') store.setStatus(d, msg.id, 'resolved');
+        });
+        this.ctx.post({ type: 'blockSaved', ls: msg.ls });
+        this.render();
+        return;
+      case 'dismissSuggestion':
+        return this.mutate((d) => {
+          const s = store.suggestionOf(store.find(d, msg.id), msg.from);
+          if (s) s.dismissedAt = store.now();
+        });
       case 'setMeta':
         return this.mutate((d) => store.setMeta(d, msg.id, msg.meta));
       case 'reply':
@@ -329,6 +363,7 @@ export class ReviewSession {
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
       comments,
       cliPath: this.ctx.cliPath,
+      suggest: this.ctx.suggestMode?.(),
     });
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });

@@ -12,6 +12,8 @@ export interface PromptOptions {
   comments: Comment[];
   /** Absolute path to cli/mdreview.mjs, when it ships with the extension. */
   cliPath?: string;
+  /** Propose replacements for the reviewer to apply instead of editing the file. */
+  suggest?: boolean;
 }
 
 export interface FolderPromptOptions {
@@ -21,6 +23,7 @@ export interface FolderPromptOptions {
   /** Files with open comments and how many each has. */
   files: { mdPath: string; open: number }[];
   cliPath: string;
+  suggest?: boolean;
 }
 
 function rel(cwd: string, p: string): string {
@@ -33,12 +36,23 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const ANCHOR_NOTE =
   'Each comment has an anchor whose "quote" is the RENDERED text (Markdown markup stripped); lineStart-lineEnd are 1-based source lines to start looking from.';
 
-function steps(where: string): string[] {
+function steps(where: string, suggest = false, cli = 'node mdreview.mjs'): string[] {
+  const act = suggest
+    ? [
+        'For each comment:',
+        `1. Don't edit ${where}. Work out the replacement for the quoted text itself (the whole quote, rewritten; empty to delete it).`,
+        `2. Propose it with \`${cli} suggest <file.md> <id> "<replacement>" "<one line on why>"\`. It adds your reply with the suggestion; the reviewer applies it with one click. Leave the thread "submitted".`,
+        '3. If the comment needs no text change, or can\'t be done by replacing the quote, reply instead (and resolve it if nothing is left to do).',
+      ]
+    : [
+        'For each comment:',
+        `1. Find the quoted text in ${where} and make a minimal, targeted edit that addresses the comment. Don't reformat anything else.`,
+        '2. Add a reply to the thread with author "Claude" saying what you changed.',
+        '3. Set its status to "resolved". If the request is unclear, leave it "submitted" and ask your question in the reply instead.',
+      ];
   return [
-    'For each comment:',
-    `1. Find the quoted text in ${where} and make a minimal, targeted edit that addresses the comment. Don't reformat anything else.`,
-    '2. Add a reply to the thread with author "Claude" saying what you changed.',
-    '3. Set its status to "resolved". If the request is unclear, leave it "submitted" and ask your question in the reply instead.',
+    ...act,
+    'A comment with a "suggestion" already says what the quote should become: use that text unless the comment says otherwise.',
     '',
     'Re-read the sidecar right before each write, change only the comments you touch, and never change ids.',
     '',
@@ -63,15 +77,16 @@ export function buildAgentPrompt(o: PromptOptions): string {
   const side = md + '.comments.json';
   const one = o.comments.length === 1 ? o.comments[0] : null;
   const scope = one ? `the review comment with id ${one.id}` : `the ${plural(o.comments.length, 'submitted review comment')}`;
-  const lines = [`Please address ${scope} on ${md}.`, '', `The comments live in ${side} (MD Review sidecar, schema v1). ${ANCHOR_NOTE}`, '', ...steps(md)];
-  if (o.cliPath) {
-    const cli = `node "${o.cliPath}"`;
+  const cli = o.cliPath ? `node "${o.cliPath}"` : undefined;
+  const lines = [`Please address ${scope} on ${md}.`, '', `The comments live in ${side} (MD Review sidecar, schema v1). ${ANCHOR_NOTE}`, '', ...steps(md, o.suggest, cli)];
+  if (cli) {
     lines.push(
       '',
       'A helper CLI does the sidecar writes safely:',
       `  ${cli} context "${md}" <id>    # the comment plus the source lines its quote is on`,
       `  ${cli} reply "${md}" <id> "what you changed"`,
       `  ${cli} resolve "${md}" <id>`,
+      ...(o.suggest ? [`  ${cli} suggest "${md}" <id> "replacement for the quote" "why"`] : []),
     );
   }
   lines.push('', one ? 'The comment:' : 'The comments:');
@@ -80,7 +95,8 @@ export function buildAgentPrompt(o: PromptOptions): string {
     const where = c.anchor.lineStart ? ` (lines ${c.anchor.lineStart}-${c.anchor.lineEnd || c.anchor.lineStart})` : '';
     const what = c.scope === 'document' ? 'the whole document' : `"${c.anchor.quote.replace(/\s+/g, ' ').slice(0, 200)}"`;
     lines.push(`- ${c.id}${tags(c)}${c.scope === 'document' ? '' : where}: ${what} -> ${c.body.replace(/\s+/g, ' ')}`);
-    for (const r of c.replies) lines.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}`);
+    if (c.suggestion && !c.suggestion.appliedAt) lines.push(`    suggestion: replace the quote with "${c.suggestion.text.replace(/\s+/g, ' ')}"`);
+    for (const r of c.replies) lines.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}${r.suggestion ? ` [suggested: "${r.suggestion.text.replace(/\s+/g, ' ')}"${r.suggestion.appliedAt ? ', applied' : r.suggestion.dismissedAt ? ', dismissed' : ''}]` : ''}`);
   }
   return lines.join('\n');
 }
@@ -101,12 +117,13 @@ export function buildFolderPrompt(o: FolderPromptOptions): string {
     '',
     `Each file's comments live beside it in <name>.md.comments.json (MD Review sidecar, schema v1). ${ANCHOR_NOTE}`,
     '',
-    ...steps('that file'),
+    ...steps('that file', o.suggest, cli),
     '',
     'Work through them with the helper CLI, which does the sidecar writes safely:',
     `  ${cli} next "${folder}"    # the next open comment, with the source lines its quote is on`,
     `  ${cli} reply <file.md> <id> "your question"`,
     `  ${cli} resolve <file.md> <id> "what you changed"`,
+    ...(o.suggest ? [`  ${cli} suggest <file.md> <id> "replacement for the quote" "why"`] : []),
     `Repeat \`next\` until it says there are no open comments (it skips threads whose last reply is yours), then summarize what you changed and which threads you left open.`,
   ].join('\n');
 }

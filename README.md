@@ -64,6 +64,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) or `c` to go straight to the comment box.
 - In the comment box, pick a kind: **Comment** (asks for a change), **Question** (asks for an answer, not an edit) or **Praise** (no action). Optionally mark it **Major**, **Minor** or **Nit** (Alt+1/2/3, ⌥1/2/3 on macOS). Plain comments look exactly as before.
 - Selections snap to whole words, so a drag that stops mid-word quotes the whole word.
+- **Suggest edit.** In the comment box, **Suggest edit** opens a "Replace with" box holding the selection. Rewrite it (or clear it to suggest deleting it) and save. The card shows the change as a small redline with **Apply**, which rewrites just that text in the file through the same checked path as typing in the view, then resolves the thread. Undo reverts it. If the quote spans blocks or sits next to math or citations, Apply opens the source instead.
 - **Whole sections and the whole document.** Hover a heading and click the comment icon at its right to comment on that section. **Comment on document** in the comments pane is for notes about the whole file.
 - The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
 - Each thread has Reply, Resolve/Reopen, and (for drafts) Delete.
@@ -94,6 +95,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
 - While Claude works, the comments pane shows **Claude is working · 2 of 5** with a progress bar, and the thread Claude is on right now pulses in the document and the list. When every sent thread has an answer you get a summary, "Claude finished: 4 resolved, 1 question for you", with **Show questions** to jump to the threads that need you. If the panel is in the background, VS Code shows the summary as a notification.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
+- Set `mdReview.agent.editMode` to `suggest` and Claude proposes a replacement on each thread instead of editing the file. Its suggestions show on the card with **Apply** and **Dismiss**, so nothing changes until you say so.
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
 - **Send a whole folder.** Right-click a folder in the Explorer → **Send Open Reviews in Folder to Claude** (or run it from the Command Palette for the workspace). Claude gets the list of files with open threads and works through them one at a time with the CLI's `next` command, which shows each comment with the source lines its quote is on.
@@ -165,8 +167,9 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "severity": "major",                   // optional: "major" | "minor" | "nit"
       "scope": "section",                    // optional: "section" (quote is a heading; about the whole section) | "document" (empty quote)
       "workingAt": "…", "workingBy": "Claude", // optional: set by the CLI while an agent works on this thread
+      "suggestion": { "text": "a dock is free" }, // optional: replacement for the quote ("" deletes it); gains appliedAt / dismissedAt
       "replies": [
-        { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }
+        { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }  // a reply can carry a "suggestion" too
       ]
     }
   ]
@@ -206,6 +209,7 @@ node cli/mdreview.mjs list    [paths…] [--status submitted] [--json]
 node cli/mdreview.mjs show    path/to/file.md <id>
 node cli/mdreview.mjs reply   path/to/file.md <id> "text" [--author Claude]
 node cli/mdreview.mjs resolve path/to/file.md <id> ["closing reply"] [--author Claude]
+node cli/mdreview.mjs suggest path/to/file.md <id> "replacement for the quote" ["note"]
 node cli/mdreview.mjs reopen  path/to/file.md <id>
 node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claude Code skill
 ```

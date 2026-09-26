@@ -58,6 +58,7 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
     cwd,
     files,
     cliPath: vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
+    suggest: vscode.workspace.getConfiguration('mdReview').get<string>('agent.editMode') === 'suggest',
   });
   void vscode.window.showInformationMessage(runAgent(prompt, name, cwd));
 }
