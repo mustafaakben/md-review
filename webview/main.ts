@@ -1,4 +1,4 @@
-import { buildTextMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
+import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
 import { createDiagrams } from './diagrams';
@@ -64,6 +64,9 @@ const touched = new Set<Element>();
 // footnotes are two), so a repaint can replace only the ones that changed.
 let paintedBlocks: string[] | null = null;
 let paintedKeys: (string | undefined)[] = [];
+// The sidebar list as last rendered: one key and one HTML string per top-level element.
+let sidebarKeys: string[] = [];
+let sidebarParts: string[] = [];
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
@@ -167,10 +170,12 @@ const outline = createOutline(
 );
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+// One formatter for every date: toLocaleString builds a new one per call.
+const dateFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const fmt = (iso: string | null) => {
   if (!iso) return '';
   const d = new Date(iso);
-  return isNaN(+d) ? iso : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return isNaN(+d) ? iso : dateFmt.format(d);
 };
 const post = (m: unknown) => vscode.postMessage(m);
 
@@ -205,7 +210,7 @@ function paint() {
     paintedKeys = [];
   }
   touched.clear();
-  const map = buildTextMap(doc);
+  const map = textMap(doc);
   if (map.text !== paintedText) anchorCache.clear();
   paintedText = map.text;
   const located = layout();
@@ -526,28 +531,56 @@ function renderSidebar() {
   const whole = rest.filter((c) => c.scope === 'document').sort((a, b) => severityRank(a) - severityRank(b));
   const anchored = rest.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort(byPos);
   const orphaned = visible.filter((c) => orphans.has(c.id));
-  let out = '';
+  // The list as keyed parts (one element each), so a repaint replaces only the cards that changed.
+  const keys: string[] = [];
+  const parts: string[] = [];
+  const add = (key: string, html: string) => {
+    keys.push(key);
+    parts.push(html);
+  };
   if (!visible.length && comments.length) {
-    out = `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`;
+    add('e:filter', `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`);
   } else if (!visible.length) {
-    out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
+    add('e:none', `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`);
   }
   const now = Date.now(); // one clock for every card's working state
-  if (fromClaude.length) out += `<div class="mdr-section mdr-section-agent">From Claude · keep, do, or discard</div>` + fromClaude.map((c) => card(c, now)).join('');
-  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c, now)).join('');
-  if ((whole.length || fromClaude.length) && anchored.length) out += `<div class="mdr-section">In the text</div>`;
-  out += anchored.map((c) => card(c, now)).join('');
-  if (orphaned.length) {
-    out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map((c) => card(c, now)).join('');
+  const cards = (cs: Comment[]) => cs.forEach((c) => add('c:' + c.id, card(c, now)));
+  if (fromClaude.length) {
+    add('s:agent', `<div class="mdr-section mdr-section-agent">From Claude · keep, do, or discard</div>`);
+    cards(fromClaude);
   }
+  if (whole.length) {
+    add('s:whole', `<div class="mdr-section">Whole document</div>`);
+    cards(whole);
+  }
+  if ((whole.length || fromClaude.length) && anchored.length) add('s:text', `<div class="mdr-section">In the text</div>`);
+  cards(anchored);
+  if (orphaned.length) {
+    add('s:orphan', `<div class="mdr-section">Orphaned (quoted text no longer found)</div>`);
+    cards(orphaned);
+  }
+  const full = keys.length !== sidebarKeys.length || keys.some((k, i) => k !== sidebarKeys[i]) || sidebar.children.length !== keys.length;
+  const changed: number[] = [];
+  if (!full) for (let i = 0; i < parts.length; i++) if (parts[i] !== sidebarParts[i]) changed.push(i);
+  sidebarKeys = keys;
+  sidebarParts = parts;
+  // Rebuild in full when the list of keys changed; otherwise replace only the cards whose HTML changed.
+  const olds = full ? null : changed.map((i) => sidebar.children[i]);
   // Keep what's being typed in a card (a reply, an edit) when the list repaints under it.
-  const typed = Array.from(sidebar.querySelectorAll<HTMLTextAreaElement>('.mdr-card textarea')).map((t) => ({
+  const typed = (full ? [sidebar] : olds!).flatMap((root) => Array.from(root.querySelectorAll<HTMLTextAreaElement>('.mdr-card textarea'))).map((t) => ({
     id: t.closest<HTMLElement>('.mdr-card')!.dataset.id!,
     cls: t.className,
     value: t.value,
     focus: t === document.activeElement ? [t.selectionStart, t.selectionEnd] : null,
   }));
-  sidebar.innerHTML = out;
+  if (full) sidebar.innerHTML = parts.join('');
+  else if (changed.length) {
+    const tpl = document.createElement('template');
+    changed.forEach((i, j) => {
+      tpl.innerHTML = parts[i];
+      olds![j].replaceWith(tpl.content.firstElementChild!);
+    });
+  }
   for (const d of typed) {
     const t = sidebar.querySelector<HTMLTextAreaElement>(`.mdr-card[data-id="${CSS.escape(d.id)}"] textarea${d.cls ? '.' + d.cls.split(' ')[0] : ':not([class])'}`);
     if (!t) continue;
@@ -577,7 +610,13 @@ function showWorking() {
   sidebar.querySelectorAll<HTMLElement>('.mdr-card').forEach((el) => {
     const w = on.has(el.dataset.id!);
     el.classList.toggle('mdr-working', w);
-    if (!w) el.querySelector('.mdr-working-line')?.remove();
+    const line = w ? null : el.querySelector('.mdr-working-line');
+    if (line) {
+      line.remove();
+      // The card no longer matches its stored HTML: repaint it next time.
+      const i = sidebarKeys.indexOf('c:' + el.dataset.id);
+      if (i >= 0) sidebarParts[i] = '';
+    }
   });
   clearTimeout(workingTimer);
   const left = [nextExpiry(comments, now), reviewing].filter((x): x is number => x !== null);
@@ -734,7 +773,7 @@ function selectionRange(): Range | null {
     sel.removeAllRanges();
     sel.addRange(range);
   }
-  const cap = capture(buildTextMap(doc), range);
+  const cap = capture(textMap(doc), range);
   if (!cap) return null;
   const a = blockRange(range.startContainer);
   const b = blockRange(range.endContainer) || a;
@@ -1412,7 +1451,7 @@ doc.addEventListener('mouseleave', (e) => {
 function commentOnSection(h: HTMLElement) {
   const range = document.createRange();
   range.selectNodeContents(h);
-  const cap = capture(buildTextMap(doc), range);
+  const cap = capture(textMap(doc), range);
   if (!cap || !cap.quote.trim()) return toast('This heading has no text to anchor a comment to.');
   const [lineStart, lineEnd] = sectionLines(h, doc);
   pendingAnchor = { quote: cap.quote, prefix: cap.prefix, suffix: cap.suffix, lineStart, lineEnd, scope: 'section' };

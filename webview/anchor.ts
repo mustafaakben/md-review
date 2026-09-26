@@ -19,20 +19,52 @@ export function buildTextMap(root: Element): TextMap {
   const starts: number[] = [];
   let text = '';
   if (root.closest(SKIP)) return { text, nodes, starts };
-  // Reject skipped elements once (and their whole subtree) instead of calling
-  // closest() for every text node.
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
-    acceptNode(n) {
-      if (n.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
-      return (n as Element).matches(SKIP) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP;
-    },
-  });
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+  // Walk text nodes only (no per-element callback) and drop the ones inside a
+  // skipped subtree, found with one querySelectorAll.
+  const skip = new Set(Array.from(root.querySelectorAll(SKIP)));
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  outer: for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (skip.size) for (let p = n.parentElement; p && p !== root; p = p.parentElement) if (skip.has(p)) continue outer;
     nodes.push(n as Text);
     starts.push(text.length);
     text += (n as Text).data;
   }
   return { text, nodes, starts };
+}
+
+// One text map per root, reused until the DOM under the root changes. A
+// MutationObserver says when it has; its records are read synchronously
+// (takeRecords) before each use, so a change made a moment ago is never missed.
+interface MapCache {
+  obs: MutationObserver;
+  map: TextMap | null;
+}
+const caches = new WeakMap<Element, MapCache>();
+const SKIP_CLASS = /(?:^|\s)(?:katex-mathml|mdr-ui|mdr-block-editor|mdr-front-raw)(?:\s|$)/;
+function changesText(recs: MutationRecord[]): boolean {
+  for (const r of recs) {
+    if (r.type !== 'attributes') return true;
+    // A class change matters only when it moves an element in or out of SKIP.
+    if (SKIP_CLASS.test(r.oldValue || '') || SKIP_CLASS.test((r.target as Element).getAttribute('class') || '')) return true;
+  }
+  return false;
+}
+
+/** The root's text map, rebuilt only when something under the root changed since the last call. */
+export function textMap(root: Element): TextMap {
+  let c = caches.get(root);
+  if (!c) {
+    const cache: MapCache = {
+      map: null,
+      obs: new MutationObserver((recs) => {
+        if (changesText(recs)) cache.map = null;
+      }),
+    };
+    cache.obs.observe(root, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+    caches.set(root, (c = cache));
+  }
+  if (changesText(c.obs.takeRecords())) c.map = null;
+  return (c.map ??= buildTextMap(root));
 }
 
 /** Global text offset of a DOM boundary point. */
@@ -98,9 +130,17 @@ export interface WrapSpec {
  * wrapRange() for each spec in turn: the text map is patched in place as nodes
  * split, instead of being rebuilt per range.
  */
-/** `map`: the root's text map, when the caller just built it (it is updated as marks go in). */
-export function wrapRanges(root: Element, specs: WrapSpec[], map = buildTextMap(root)): HTMLElement[][] {
-  return specs.map((sp) => wrapInMap(map, sp.start, sp.end, sp.make));
+/** `map`: the root's current text map, when the caller has it (it is updated as marks go in). */
+export function wrapRanges(root: Element, specs: WrapSpec[], map = textMap(root)): HTMLElement[][] {
+  const out = specs.map((sp) => wrapInMap(map, sp.start, sp.end, sp.make));
+  // The map was patched along with the DOM, so it stays the root's current map:
+  // drop the records of our own splits and wraps.
+  const c = caches.get(root);
+  if (c) {
+    c.obs.takeRecords();
+    c.map = map;
+  }
+  return out;
 }
 
 function wrapInMap(map: TextMap, start: number, end: number, make: () => HTMLElement): HTMLElement[] {
