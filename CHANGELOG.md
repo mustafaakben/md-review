@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Suggested edits: **Suggest edit** in the comment box proposes replacement text for the selection, and the card shows it as a redline with **Apply** (a checked, byte-exact rewrite of just that text, with Undo) that resolves the thread. With `mdReview.agent.editMode` set to `suggest`, Claude proposes changes with the CLI's new `suggest` command instead of editing, and you apply or dismiss each one.
+- The last item of a list followed by a blank line can be edited in the view again (it used to fail with "The file changed on disk").
 - Rendering is about 2–4× faster on long documents: formulas are rendered once and reused while you edit, and documents with many footnotes no longer slow down quadratically (a workaround for a markdown-it-footnote bug).
 - An edit in the view renders the document once instead of up to four times (the edit, a timer, the file watcher, and VS Code reloading the file each triggered a full render), cutting the extension's work per edit by about 70%.
 - Live agent status: after **Send to Claude**, the comments pane shows "Claude is working · 2 of 5" with a progress bar, and the thread Claude is on pulses. When it's done you get one summary (resolved, and questions for you) with **Show questions**; a background panel shows it as a notification. The CLI's `next` and `context` mark the thread they hand out, and `reply` and `resolve` clear the mark.

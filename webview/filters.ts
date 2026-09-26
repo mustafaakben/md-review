@@ -50,7 +50,7 @@ export function authorsOf(comments: Filterable[]): string[] {
  */
 export function filterBar(f: FilterState, authors: string[], counts: Record<StatusFilter, number>, severities: Record<string, number> = {}): string {
   const chips = f.ids
-    ? `<button class="mdr-chip on" data-filter-status="all" aria-pressed="true" title="Show all threads">Questions for you<span>${f.ids.length}</span></button>`
+    ? `<button class="mdr-chip on" data-filter-status="all" aria-pressed="true" title="Show all threads">Waiting on you<span>${f.ids.length}</span></button>`
     : (Object.keys(LABEL) as StatusFilter[])
         .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)
         .join('');
