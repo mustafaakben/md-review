@@ -210,6 +210,8 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - `$…$` / `$$…$$` math via KaTeX
 - pandoc image attributes `{width="6.5in"}`, turned into CSS
 - relative images resolved from the file's folder
+- YAML front matter at the top of the file, shown as a title card (title, subtitle, authors, date, keywords; the raw YAML is under a disclosure)
+- CriticMarkup: `{++added++}`, `{--deleted--}`, `{~~old~>new~~}`, `{==highlight==}`, `{>>note<<}`
 
 Every block carries `data-ls`/`data-le` attributes: its 0-based source line range, end exclusive. Block editing uses these.
 

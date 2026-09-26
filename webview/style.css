@@ -221,6 +221,25 @@ button.mdr-side-toggle { padding: 5px; }
 .mdr-doc eq { display: inline; }
 .mdr-doc section.eqno, .mdr-doc eqn { display: block; }
 
+/* front matter title card */
+.mdr-doc .mdr-front { margin: 0 0 2em; padding: 0 0 1.1em; border-bottom: 1px solid var(--doc-rule); }
+.mdr-doc .mdr-front-title { font-size: 2.1em; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 0.2em; }
+.mdr-doc .mdr-front-subtitle { font-size: 1.2em; color: var(--doc-muted); margin: 0 0 0.5em; }
+.mdr-doc .mdr-front-meta { color: var(--doc-muted); font-size: 0.95em; margin: 0.35em 0; }
+.mdr-doc .mdr-front-sep { opacity: 0.6; }
+.mdr-doc .mdr-front-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0.6em 0 0.2em; }
+.mdr-doc .mdr-front-tags span { font-size: 0.8em; padding: 0.1em 0.6em; border-radius: 999px; background: var(--doc-soft); color: var(--doc-muted); }
+.mdr-doc .mdr-front-raw { margin-top: 0.7em; font-size: 0.82em; color: var(--doc-muted); }
+.mdr-doc .mdr-front-raw summary { cursor: pointer; width: max-content; user-select: none; opacity: 0.8; }
+.mdr-doc .mdr-front-raw summary:hover { opacity: 1; }
+.mdr-doc .mdr-front-raw pre { margin: 0.5em 0 0; padding: 0.7em 0.9em; background: var(--doc-code-bg); border-radius: 6px; font-family: var(--doc-mono); white-space: pre-wrap; }
+
+/* CriticMarkup */
+.mdr-doc ins.mdr-critic-add { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 2px; color: var(--vscode-gitDecoration-addedResourceForeground, #2e7d32); background: color-mix(in srgb, #2ea043 12%, transparent); border-radius: 2px; }
+.mdr-doc del.mdr-critic-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #c62828); background: color-mix(in srgb, #f85149 10%, transparent); border-radius: 2px; }
+.mdr-doc mark.mdr-critic-mark { background: color-mix(in srgb, #e3b341 35%, transparent); color: inherit; border-radius: 2px; }
+.mdr-doc .mdr-critic-note { font-size: 0.85em; color: var(--doc-muted); font-style: italic; padding: 0 0.35em; border-left: 2px solid var(--doc-rule); margin-left: 0.2em; }
+
 /* block edit affordance */
 .mdr-doc [data-ls] { border-radius: 4px; transition: box-shadow 0.15s var(--ease), background-color 0.15s var(--ease), opacity 0.15s; }
 .mdr-doc p[data-ls]:hover, .mdr-doc h1[data-ls]:hover, .mdr-doc h2[data-ls]:hover, .mdr-doc h3[data-ls]:hover,
@@ -350,6 +369,7 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
   .mdr-file::before, .mdr-empty::before { forced-color-adjust: none; background: CanvasText !important; }
   button:disabled::before { background: GrayText !important; }
   .mdr-pill::before { forced-color-adjust: none; }
+  .mdr-doc mark.mdr-critic-mark { outline: 1px solid Mark; text-decoration: underline dotted; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
