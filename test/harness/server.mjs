@@ -36,6 +36,7 @@ const session = new lib.ReviewSession({
   isDirty: () => false,
   openLink: (href) => console.log('openLink', href),
   getPrefs: () => prefs,
+  cliPath: path.join(root, 'cli', 'mdreview.mjs'),
   setPrefs: (p) => (prefs = p),
 });
 

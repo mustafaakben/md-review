@@ -57,6 +57,12 @@ export interface Comment {
   /** Set by the CLI while an agent works on this thread; cleared when it replies or resolves. */
   workingAt?: string;
   workingBy?: string;
+  /** "agent": a draft an agent left as first reviewer, waiting for the reviewer to triage it. */
+  origin?: 'agent';
+  /** The Review with Claude run that left this draft (the CLI's --run). */
+  reviewRun?: string;
+  /** Who first raised a thread the reviewer took over (kept from an agent's draft). */
+  suggestedBy?: string;
   replies: Reply[];
 }
 
@@ -86,6 +92,10 @@ export interface Sidecar {
   schemaVersion: 1;
   file: string;
   comments: Comment[];
+  /** Set by the CLI's review-done when an agent finishes reviewing the file first. */
+  reviewDoneAt?: string;
+  /** The review run review-done ended (its --run), when Claude was given one. */
+  reviewDoneRun?: string;
 }
 
 export function sidecarPath(mdPath: string): string {
@@ -238,11 +248,24 @@ export function setStatus(data: Sidecar, id: string, status: Status): void {
   if (status === 'submitted' && !c.submittedAt) c.submittedAt = now();
 }
 
+/** An agent's draft the reviewer hasn't kept, acted on, or dismissed yet. */
+export const isAgentDraft = (c: Comment): boolean => c.status === 'draft' && c.origin === 'agent';
+
+/** Take over an agent's draft: it becomes the reviewer's own, noting who raised it. */
+export function keepAgentDraft(data: Sidecar, id: string, author: string): void {
+  const c = find(data, id);
+  if (c.origin !== 'agent') return;
+  c.suggestedBy = c.author;
+  c.author = author;
+  delete c.origin;
+}
+
+/** Submit the reviewer's drafts; an agent's untriaged drafts stay where they are. */
 export function submitDrafts(data: Sidecar): number {
   const ts = now();
   let n = 0;
   for (const c of data.comments) {
-    if (c.status === 'draft') {
+    if (c.status === 'draft' && c.origin !== 'agent') {
       c.status = 'submitted';
       c.submittedAt = ts;
       n++;

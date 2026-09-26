@@ -32,6 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
         ['mdReview.previousComment', { type: 'command', command: 'prev' }],
         ['mdReview.toggleOutline', { type: 'command', command: 'outline' }],
         ['mdReview.sendToClaude', { type: 'command', command: 'send' }],
+        ['mdReview.reviewWithClaude', { type: 'command', command: 'review' }],
         ['mdReview.addComment', { type: 'command', command: 'comment' }],
         ['mdReview.submitReview', { type: 'command', command: 'submit' }],
         ['mdReview.toggleComments', { type: 'command', command: 'comments' }],

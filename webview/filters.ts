@@ -1,6 +1,7 @@
 // Thread filters (status, author and severity) shown above the comment list.
 
-export type StatusFilter = 'all' | 'draft' | 'submitted' | 'resolved';
+/** 'agent': drafts Claude left as first reviewer, waiting to be triaged. */
+export type StatusFilter = 'all' | 'draft' | 'submitted' | 'resolved' | 'agent';
 
 export type SeverityFilter = '' | 'major' | 'minor' | 'nit';
 
@@ -8,7 +9,7 @@ export interface FilterState {
   status: StatusFilter;
   author: string; // '' = everyone
   severity: SeverityFilter; // '' = any
-  ids?: string[]; // only these threads (the last round's questions); not remembered
+  ids?: string[]; // only these threads (the last round's questions, or a review's drafts); not remembered
 }
 
 interface Filterable {
@@ -16,20 +17,26 @@ interface Filterable {
   author: string;
   status: 'draft' | 'submitted' | 'resolved';
   severity?: string;
+  origin?: string;
   replies: { author: string }[];
 }
 
+/** A draft from Claude that the reviewer hasn't kept or dismissed yet. */
+export const isAgentDraft = (c: { status: string; origin?: string }) => c.status === 'draft' && c.origin === 'agent';
+
 const SEVERITY: Record<Exclude<SeverityFilter, ''>, string> = { major: 'Major', minor: 'Minor', nit: 'Nit' };
 
-const LABEL: Record<StatusFilter, string> = { all: 'All', draft: 'Drafts', submitted: 'Open', resolved: 'Resolved' };
+const LABEL: Record<StatusFilter, string> = { all: 'All', agent: 'From Claude', draft: 'Drafts', submitted: 'Open', resolved: 'Resolved' };
 
 /**
  * A thread passes when its status matches and the author started it or
  * replied in it. Resolved threads stay hidden under "All" when showResolved is
- * off, but picking "Resolved" always shows them.
+ * off, but picking "Resolved" always shows them. Claude's untriaged drafts
+ * are under "From Claude", not "Drafts".
  */
 export function passes(c: Filterable, f: FilterState, showResolved: boolean): boolean {
-  if (f.status === 'all' ? c.status === 'resolved' && !showResolved : c.status !== f.status) return false;
+  const status = isAgentDraft(c) ? 'agent' : c.status;
+  if (f.status === 'all' ? c.status === 'resolved' && !showResolved : status !== f.status) return false;
   if (f.severity && c.severity !== f.severity) return false;
   if (f.ids && !f.ids.includes(c.id)) return false;
   return !f.author || c.author === f.author || c.replies.some((r) => r.author === f.author);
@@ -46,13 +53,15 @@ export function authorsOf(comments: Filterable[]): string[] {
 
 /**
  * Markup for the filter bar; `counts` is per status over the author-filtered
- * set. Severity chips show only once some thread has a severity.
+ * set (and the ids, when set). Severity chips show only once some thread has
+ * a severity. With ids, one chip names the set and clears it.
  */
 export function filterBar(f: FilterState, authors: string[], counts: Record<StatusFilter, number>, severities: Record<string, number> = {}): string {
   const chips = f.ids
-    ? `<button class="mdr-chip on" data-filter-status="all" aria-pressed="true" title="Show all threads">Waiting on you<span>${f.ids.length}</span></button>`
+    ? `<button class="mdr-chip on${f.status === 'agent' ? ' mdr-chip-agent' : ''}" data-filter-status="all" aria-pressed="true" title="Show all threads">${f.status === 'agent' ? 'From this review' : 'Waiting on you'}<span>${counts[f.status]}</span></button>`
     : (Object.keys(LABEL) as StatusFilter[])
-        .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)
+        .filter((k) => k !== 'agent' || counts.agent || f.status === 'agent')
+        .map((k) => `<button class="mdr-chip${f.status === k ? ' on' : ''}${k === 'agent' ? ' mdr-chip-agent' : ''}" data-filter-status="${k}" aria-pressed="${f.status === k}">${LABEL[k]}<span>${counts[k]}</span></button>`)
         .join('');
   const opts = ['<option value="">Everyone</option>']
     .concat(authors.map((a) => `<option value="${esc(a)}"${a === f.author ? ' selected' : ''}>${esc(a)}</option>`))

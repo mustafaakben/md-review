@@ -73,6 +73,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       // machine. (A document at a drive root or in the home folder allows that folder.)
       readableRoots: () => (vscode.workspace.isTrusted ? undefined : [dir, ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)]),
       suggestMode: () => cfg().get<string>('agent.editMode') === 'suggest',
+      reviewComments: () => cfg().get<number>('agent.reviewComments', 12),
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
       cliPath: vscode.Uri.joinPath(this.context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
       getPrefs: () => this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {},
