@@ -193,3 +193,9 @@ test('a file change reaching the host several ways renders once', () => {
   s.handle({ type: 'ready' });
   assert.equal(renders(), 4);
 });
+
+test('on open the document comes last, after the reading look, comments and history', () => {
+  const md = fresh('open-order.md', '# Title\n\nText.\n');
+  const { posted } = session(md, { getPrefs: () => ({ zoom: 1.2 }) });
+  assert.deepEqual(posted.map((m) => m.type), ['prefs', 'comments', 'history', 'render']);
+});

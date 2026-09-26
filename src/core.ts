@@ -226,10 +226,11 @@ export class ReviewSession {
     const author = this.ctx.author();
     switch (msg.type) {
       case 'ready':
-        this.render(true);
+        // Document last, so the view paints once with its look and comments.
+        if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         this.sendComments();
         this.postHistory();
-        if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
+        this.render(true);
         return;
       case 'addComment':
         return this.mutate((d) => {

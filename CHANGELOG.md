@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Opening a document paints once, already in your reading theme, font and zoom, with its comments highlighted: no flash of the default look, and about twice as fast on long documents. The extension package is less than half the size (469 KB instead of 1.1 MB) and starts in half the time; KaTeX loads with the first formula.
 - Suggested edits: **Suggest edit** in the comment box proposes replacement text for the selection, and the card shows it as a redline with **Apply** (a checked, byte-exact rewrite of just that text, with Undo) that resolves the thread. With `mdReview.agent.editMode` set to `suggest`, Claude proposes changes with the CLI's new `suggest` command instead of editing, and you apply or dismiss each one.
 - The last item of a list followed by a blank line can be edited in the view again (it used to fail with "The file changed on disk").
 - Saving an edit made in the view takes a few milliseconds instead of up to two seconds on long documents: a changed paragraph or heading is checked on its own rather than by re-reading the whole file (list items, table cells and quotes still check the whole file, once instead of twice).
