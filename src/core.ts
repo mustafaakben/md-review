@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
 import { applyBlockEdit, readBlock, toggleTask, BlockEditError } from './blockEdit';
-import { renderMarkdown, ResolveImage } from './render';
+import { renderMarkdown, RenderEnv, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
@@ -50,6 +50,8 @@ export interface HostContext {
   /** True if the document has unsaved changes in an editor. */
   isDirty(): boolean;
   openLink(href: string): void;
+  /** Re-render when any of these files (the bibliography) changes. */
+  watchFiles?(files: string[]): void;
   /**
    * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
    * a status line for the user. When absent, the prompt goes back to the
@@ -68,6 +70,7 @@ export interface HostContext {
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
   private lastRendered = '';
+  private watched = '';
   private history = new EditHistory();
 
   constructor(private ctx: HostContext) {}
@@ -76,10 +79,16 @@ export class ReviewSession {
     const text = this.ctx.getText();
     this.lastRendered = text;
     let html: string;
+    const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
     try {
-      html = renderMarkdown(text, this.ctx.resolveImage);
+      html = renderMarkdown(text, this.ctx.resolveImage, env);
     } catch (e: any) {
       html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
+    }
+    const bibs = (env.bibFiles || []).join('\n');
+    if (bibs !== this.watched) {
+      this.watched = bibs;
+      this.ctx.watchFiles?.(env.bibFiles || []);
     }
     this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath) });
     this.syncHistory();

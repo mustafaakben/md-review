@@ -12,6 +12,7 @@ const katex = require('katex');
 import { frontMatterPlugin } from './frontMatter';
 import { criticPlugin } from './critic';
 import { gfmPlugin } from './gfm';
+import { citationsPlugin } from './citations';
 
 export type ResolveImage = (src: string) => string;
 
@@ -31,6 +32,7 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   md.use(footnote).use(sup).use(sub).use(gfmPlugin);
   md.use(texmath, { engine: katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } });
   md.use(attrs, { allowedAttributes: ['id', 'class', 'width', 'height', 'style'] });
+  md.use(citationsPlugin);
 
   // Tag block tokens with their source line range.
   md.core.ruler.push('mdr_lines', (state) => {
@@ -76,6 +78,13 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   return md;
 }
 
-export function renderMarkdown(text: string, resolveImage: ResolveImage): string {
-  return createRenderer(resolveImage).render(text);
+/** `docDir`: the file's folder, for reading its `bibliography:`. */
+export interface RenderEnv {
+  docDir?: string;
+  /** Filled in by the render: the bibliography files it read, to watch. */
+  bibFiles?: string[];
+}
+
+export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
+  return createRenderer(resolveImage).render(text, env);
 }

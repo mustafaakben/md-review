@@ -43,6 +43,19 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     webview.html = this.shell(webview);
 
     const cfg = () => vscode.workspace.getConfiguration('mdReview');
+    // The bibliography can live anywhere; watch exactly the files the last render read.
+    let bibWatchers: vscode.Disposable[] = [];
+    const watchBibs = (files: string[]) => {
+      bibWatchers.forEach((d) => d.dispose());
+      bibWatchers = files.map((f) => {
+        const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(f)), path.basename(f)));
+        const again = () => rerender();
+        w.onDidChange(again);
+        w.onDidCreate(again);
+        w.onDidDelete(again);
+        return w;
+      });
+    };
     const session = new ReviewSession({
       mdPath,
       author: () => cfg().get<string>('author') || os.userInfo().username,
@@ -54,6 +67,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       getText: () => (document.isDirty ? document.getText() : readDisk(mdPath) ?? document.getText()),
       isDirty: () => document.isDirty,
       openLink: (href) => openLink(href, dir),
+      watchFiles: watchBibs,
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
       cliPath: vscode.Uri.joinPath(this.context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
       getPrefs: () => this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {},
@@ -102,6 +116,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     panel.onDidDispose(() => {
       MdReviewEditorProvider.panels.delete(panel);
       subs.forEach((d) => d.dispose());
+      bibWatchers.forEach((d) => d.dispose());
     });
   }
 
