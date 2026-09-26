@@ -107,6 +107,7 @@ export const severityRank = (m: Meta) => (isSeverity(m.severity) ? SEVERITIES.in
 // CJK has no spaces between words, so snapping would grow to a whole clause.
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const LETTER = /[\p{L}\p{N}_]/u;
+const BREAK = /^(?:BR|IMG|HR|P|DIV|LI|UL|OL|TD|TH|TR|DT|DD|BLOCKQUOTE|PRE|H[1-6])$/;
 const letter = (c: string | undefined) => !!c && LETTER.test(c) && !CJK.test(c);
 /** Letters, plus an apostrophe inside a word ("don't"), but not a closing quote. */
 const inWord = (t: string, i: number) => letter(t[i]) || ((t[i] === "'" || t[i] === '’') && letter(t[i - 1]) && letter(t[i + 1]));
@@ -127,19 +128,24 @@ function snapEdge(r: Range, start: boolean): void {
   const node = start ? r.startContainer : r.endContainer;
   if (node.nodeType !== Node.TEXT_NODE || !node.parentElement) return;
   const block = node.parentElement.closest('[data-ls]') || node.parentElement;
+  // The block's text, with a break wherever a line break or a nested block separates two words.
   const nodes: Text[] = [];
-  const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.parentElement?.closest('.mdr-ui') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
-  });
-  for (let n = walk.nextNode(); n; n = walk.nextNode()) nodes.push(n as Text);
-  const k = nodes.indexOf(node as Text);
-  if (k < 0) return;
   const starts: number[] = [];
   let t = '';
-  for (const n of nodes) {
+  const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+    acceptNode: (n) => ((n as Element).classList?.contains('mdr-ui') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (n.nodeType !== Node.TEXT_NODE) {
+      if (BREAK.test(n.nodeName)) t += '\n';
+      continue;
+    }
+    nodes.push(n as Text);
     starts.push(t.length);
-    t += n.data;
+    t += (n as Text).data;
   }
+  const k = nodes.indexOf(node as Text);
+  if (k < 0) return;
   let i = starts[k] + (start ? r.startOffset : r.endOffset);
   if (!(i > 0 && i < t.length && inWord(t, i - 1) && inWord(t, i))) return;
   if (start) while (i > 0 && inWord(t, i - 1)) i--;

@@ -248,15 +248,29 @@ function readSource(md) {
     return null;
   }
 }
+// CommonMark's HTML block tags (type 6): these start a raw HTML block even inside a paragraph.
+const HTML_BLOCK = /^(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)$/i;
 /** Last line (1-based) of the section whose heading is on line `h`: before the next heading at its level or above. */
 function sectionEnd(lines, h) {
   const atx = (t) => /^ {0,3}(#{1,6})(?:[ \t]|$)/.exec(t);
   const m = atx(lines[h - 1] || '');
   const level = m ? m[1].length : /^ {0,3}=+[ \t]*$/.test(lines[h] || '') ? 1 : 2; // ATX, else setext
   let fence = null;
+  let html = null; // what ends the raw HTML block we're in: a closing tag, '-->', or a blank line
   let para = 0; // first line of the paragraph just above, which a setext underline turns into a heading
   for (let n = h + 1; n <= lines.length; n++) {
     const t = lines[n - 1];
+    if (html) {
+      if (html === 'blank' ? !t.trim() : t.toLowerCase().includes(html)) html = null;
+      continue;
+    }
+    const raw = /^ {0,3}<(?:(!--)|(script|pre|style|textarea)(?=[\s>]|$)|\/?([a-z][a-z0-9-]*)(?=[\s/>]|$))/i.exec(t);
+    if (raw && (raw[1] || raw[2] || !para || HTML_BLOCK.test(raw[3]))) {
+      const close = raw[1] ? '-->' : raw[2] ? `</${raw[2].toLowerCase()}>` : 'blank';
+      if (close === 'blank' || !t.toLowerCase().includes(close, raw.index + 4)) html = close;
+      para = 0;
+      continue;
+    }
     if (fence) {
       // Closed only by the same character, at least as long, and nothing after it.
       const c = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(t);
