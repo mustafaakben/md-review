@@ -34,8 +34,8 @@ app.innerHTML = `
     <div class="mdr-title"><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
-      <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">✎ Edit</button>
-      <label class="mdr-toggle"><input type="checkbox" id="mdr-show-resolved"> Show resolved</label>
+      <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
+      <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
       <button id="mdr-submit" class="mdr-primary" disabled>Submit review</button>
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
     </div>
@@ -46,7 +46,7 @@ app.innerHTML = `
   </div>
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
-  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). Alt+double-click edits the raw Markdown." hidden>✎</button>`;
+  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). Alt+double-click edits the raw Markdown." aria-label="Edit" hidden></button>`;
 const doc = document.getElementById('mdr-doc')!;
 const sidebar = document.getElementById('mdr-threads')!;
 const pop = document.getElementById('mdr-pop')!;
@@ -128,7 +128,7 @@ function renderSidebar() {
   const orphaned = visible.filter((c) => orphans.has(c.id));
   let out = '';
   if (!visible.length) {
-    out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>✎ Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
+    out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
   out += anchored.map(card).join('');
   if (orphaned.length) {
@@ -216,7 +216,7 @@ document.addEventListener('mouseup', (ev) => {
       lineStart: a ? a[0] + 1 : 0,
       lineEnd: b ? b[1] : a ? a[1] : 0,
     };
-    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment">💬 Comment</button>`;
+    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment">Comment</button>`;
     placePop(range.getBoundingClientRect());
   }, 0);
 });
@@ -346,7 +346,8 @@ showResolvedBox.addEventListener('change', () => {
 // Collapsible comments pane; the choice is remembered per editor.
 function setSidebarOpen(open: boolean) {
   document.body.classList.toggle('mdr-side-collapsed', !open);
-  sideToggle.textContent = open ? '⟩' : '⟨ Comments';
+  sideToggle.textContent = open ? '' : 'Comments';
+  sideToggle.setAttribute('aria-label', open ? 'Hide comments' : 'Show comments');
   sideToggle.title = open ? 'Hide the comments pane' : 'Show the comments pane';
   sideToggle.setAttribute('aria-expanded', String(open));
   vscode.setState({ ...(vscode.getState() || {}), sidebarOpen: open });
@@ -369,7 +370,7 @@ function setEditMode(on: boolean) {
   editMode = on;
   document.body.classList.toggle('mdr-edit-mode', on);
   editModeBtn.classList.toggle('on', on);
-  editModeBtn.textContent = on ? '✎ Editing: click text to change it' : '✎ Edit';
+  editModeBtn.textContent = on ? 'Done editing' : 'Edit';
   vscode.setState({ ...(vscode.getState() || {}), editMode: on });
   if (!on) commitInline();
   hidePop();
@@ -470,7 +471,7 @@ doc.addEventListener('dblclick', (e) => {
   startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
 });
 
-// Hover "✎" button in the left gutter of the block under the pointer.
+// Hover edit (pencil) button in the left gutter of the block under the pointer.
 const editBtn = document.getElementById('mdr-edit-btn') as HTMLButtonElement;
 let hoverEl: HTMLElement | null = null;
 doc.addEventListener('mousemove', (e) => {
