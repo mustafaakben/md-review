@@ -3,6 +3,7 @@
 !README.md
 !LICENSE
 !dist/extension.js
+!dist/word.js
 !media/**
 !CHANGELOG.md
 !cli/**

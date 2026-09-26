@@ -12,3 +12,8 @@ export * from './agentLaunch';
 export * from './fileWatch';
 export { inlineImage } from './localImage';
 export * as inbox from './inbox';
+export { locate, locateLoose, quoteAt } from './textQuote';
+export { buildDocModel, modelFromHtml, tokenizeHtml, linesAt, isLocalImage } from './docModel';
+export { writeZip, readZip, openZip, crc32, ZipError, LIMITS as zipLimits } from './zip';
+export { exportDocx, xml as xmlEscape } from './docx';
+export { importDocx, readDocx, placeQuote, widenToWords, xmlTokens } from './wordImport';
