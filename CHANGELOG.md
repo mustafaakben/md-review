@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pandoc citations: with `bibliography:` in the front matter (a .bib or CSL-JSON file), `[@key, p. 4]`, `[see @a; -@b]` and `@key` render author-date, link to a References list the viewer adds at the end (or under your closing References heading), and show the full entry on hover. Keys missing from the file get a red squiggle and are listed above the references. Without a bibliography, `@name` stays plain text.
+- pandoc-crossref: `{#fig:x}` on an image, `{#tbl:x}` on a table caption, `$$…$$ {#eq:x}` and `{#sec:x}` on a heading are numbered, `@fig:x` becomes a link ("fig. 1"), and broken references are flagged. Numbered equations show their number beside the equation.
 - GitHub-flavored extras: task lists with checkboxes you can tick (the file changes by one character, and Undo reverts it), GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), `==highlight==`, and syntax colours for code in 19 common languages. Mermaid fences draw as diagrams; Mermaid loads only when a file has one.
 - YAML front matter (pandoc, Quarto, Jekyll, Hugo, Obsidian) shows as a title card with the title, subtitle, authors, date and keywords, instead of a horizontal rule and a heading full of YAML. The raw YAML is one click away, and Alt+double-click edits it.
 - CriticMarkup renders: {++added++}, {--deleted--}, {~~old~>new~~}, {==highlight==} and {>>note<<}. Deletions used to disappear.

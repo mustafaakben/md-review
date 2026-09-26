@@ -11,6 +11,9 @@ export interface FrontMatter {
   authors: string[];
   date?: string;
   keywords: string[];
+  /** `bibliography:` file(s), as written. */
+  bibliography: string[];
+  suppressBibliography?: boolean;
 }
 
 const unquote = (s: string) => {
@@ -60,7 +63,7 @@ function flowList(s: string): string[] | null {
  * anything it doesn't understand is still visible in the raw view.
  */
 export function parseFrontMatter(raw: string): FrontMatter {
-  const fm: FrontMatter = { raw, authors: [], keywords: [] };
+  const fm: FrontMatter = { raw, authors: [], keywords: [], bibliography: [] };
   const lines = raw.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const m = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(lines[i]);
@@ -100,6 +103,12 @@ export function parseFrontMatter(raw: string): FrontMatter {
         break;
       case 'date':
         fm.date = unquote(value) || undefined;
+        break;
+      case 'bibliography':
+        fm.bibliography = list;
+        break;
+      case 'suppress-bibliography':
+        fm.suppressBibliography = /^(true|yes|on)$/i.test(unquote(value));
         break;
       case 'keywords':
       case 'tags':
