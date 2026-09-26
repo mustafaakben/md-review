@@ -50,6 +50,7 @@ const SHEET: { title: string; rows: Row[] }[] = [
     title: 'Move around',
     rows: [
       { label: 'Next / previous comment', keys: [['Alt+ArrowDown', 'Alt+ArrowUp'], ['J', 'K']] },
+      { label: 'Next / previous change (turns on Changes)', keys: [[']', '[']] },
       { label: 'Find in document', keys: [['Mod+F'], ['/']] },
       { label: 'Next / previous match', keys: [['Enter', 'Shift+Enter']] },
       { label: 'Outline', keys: [['Mod+Shift+O']] },

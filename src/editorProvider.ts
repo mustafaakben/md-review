@@ -4,8 +4,11 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
+import type { Baselines } from './redlines';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
+/** Changes baselines per file, in workspace storage (never next to the document). */
+const BASELINES_KEY = 'mdReview.baselines:';
 
 function readDisk(p: string): string | undefined {
   try {
@@ -77,6 +80,10 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         void this.context.globalState.update(PREFS_KEY, prefs);
         // Keep other open MD Review panels in step.
         for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+      },
+      baselines: {
+        load: () => this.context.workspaceState.get<Baselines>(BASELINES_KEY + mdPath),
+        save: (b) => void this.context.workspaceState.update(BASELINES_KEY + mdPath, b.current || b.past.length ? b : undefined),
       },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.

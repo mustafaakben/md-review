@@ -8,3 +8,5 @@ export * from './editHistory';
 export * from './agentPrompt';
 export * from './reviewPresets';
 export { parseBibTeX, parseCslJson } from './bibliography';
+export * from './redlines';
+export * from './wordDiff';
