@@ -5,13 +5,14 @@ import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
+import { Meta, metaPicker, pickerClick, pickerKey, readPicker, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
 
 type Status = 'draft' | 'submitted' | 'resolved';
 interface Reply { id: string; author: string; createdAt: string; body: string }
-interface Comment {
+interface Comment extends Meta {
   id: string; author: string; createdAt: string; body: string; status: Status;
   submittedAt: string | null; resolvedAt: string | null; replies: Reply[];
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
@@ -24,7 +25,7 @@ let comments: Comment[] = [];
 let author = '';
 let showResolved = true;
 let activeId: string | null = null;
-let pendingAnchor: (Captured & { lineStart: number; lineEnd: number }) | null = null;
+let pendingAnchor: (Omit<Captured, 'start' | 'end'> & { lineStart: number; lineEnd: number; scope?: 'section' | 'document' }) | null = null;
 let editing: { ls: number; le: number; original: string; el: HTMLElement; box: HTMLElement } | null = null;
 let deferredPaint = false;
 // What the document currently shows, so comment changes can patch highlights
@@ -42,7 +43,7 @@ const orphans = new Set<string>();
 const openReplies = new Set<string>();
 const editingBodies = new Set<string>();
 const saved = vscode.getState() || {};
-const filter: FilterState = { status: saved.filterStatus || 'all', author: saved.filterAuthor || '' };
+const filter: FilterState = { status: saved.filterStatus || 'all', author: saved.filterAuthor || '', severity: saved.filterSeverity || '' };
 let navOrder: string[] = []; // visible, anchored thread ids in document order
 // The browser harness has no VS Code keybindings, so the view handles those keys itself.
 const standalone = !!(window as any).__mdrStandalone;
@@ -73,6 +74,7 @@ app.innerHTML = `
       <div class="mdr-side-head">
         <div class="mdr-filters"></div>
         <button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button>
+        <button id="mdr-doc-comment" class="mdr-doc-comment" title="A comment about the whole document, not a passage">Comment on document</button>
       </div>
       <div id="mdr-threads"></div>
     </aside>
@@ -80,7 +82,8 @@ app.innerHTML = `
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
   <div id="mdr-keys" class="mdr-keys mdr-ui" hidden></div>
-  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). ${altName}+double-click edits the raw Markdown." aria-label="Edit" hidden></button>`;
+  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). ${altName}+double-click edits the raw Markdown." aria-label="Edit" hidden></button>
+  <button id="mdr-sec-btn" class="mdr-sec-btn mdr-ui" title="Comment on this whole section" aria-label="Comment on this section" hidden></button>`;
 const doc = document.getElementById('mdr-doc')!;
 const sidebar = document.getElementById('mdr-threads')!;
 const pop = document.getElementById('mdr-pop')!;
@@ -140,6 +143,7 @@ function paint() {
   deferredPaint = false;
   docStale = false;
   editBtn.hidden = true;
+  secBtn.hidden = true;
   hoverEl = null;
   const y = window.scrollY;
   doc.innerHTML = html;
@@ -226,6 +230,10 @@ function layout(): [Comment, number, number][] {
   orphans.clear();
   const out: [Comment, number, number][] = [];
   for (const c of comments) {
+    if (c.scope === 'document') {
+      positions.set(c.id, -1); // listed first, never highlighted
+      continue;
+    }
     const key = `${c.anchor.quote}\u0000${c.anchor.prefix}\u0000${c.anchor.suffix}`;
     let r = anchorCache.get(key);
     if (r === undefined) anchorCache.set(key, (r = locate(paintedText, c.anchor)));
@@ -263,17 +271,20 @@ function renderSidebar() {
   submitBtn.textContent = n.draft ? `Submit review (${n.draft})` : 'Submit review';
   showResolvedBox.checked = showResolved;
 
-  const byAuthor = comments.filter((c) => passes(c, { status: 'all', author: filter.author }, true));
+  const byAuthor = comments.filter((c) => passes(c, { status: 'all', author: filter.author, severity: filter.severity }, true));
   const fc = { all: 0, draft: 0, submitted: 0, resolved: 0 } as Record<StatusFilter, number>;
   for (const c of byAuthor) fc[c.status]++;
   fc.all = byAuthor.filter((c) => showResolved || c.status !== 'resolved').length;
-  filtersEl.innerHTML = filterBar(filter, authorsOf(comments), fc);
+  const sevCount: Record<string, number> = {};
+  for (const c of comments) if (c.severity && passes(c, { ...filter, severity: '' }, showResolved)) sevCount[c.severity] = (sevCount[c.severity] || 0) + 1;
+  filtersEl.innerHTML = filterBar(filter, authorsOf(comments), fc, sevCount);
   const sendable = n.draft + n.submitted;
   sendBtn.disabled = sendable === 0;
   sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
 
   const visible = comments.filter((c) => passes(c, filter, showResolved));
-  const anchored = visible.filter((c) => !orphans.has(c.id)).sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+  const whole = visible.filter((c) => c.scope === 'document').sort((a, b) => severityRank(a) - severityRank(b));
+  const anchored = visible.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
   const orphaned = visible.filter((c) => orphans.has(c.id));
   navOrder = anchored.map((c) => c.id);
   let out = '';
@@ -282,6 +293,7 @@ function renderSidebar() {
   } else if (!visible.length) {
     out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
+  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map(card).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
   out += anchored.map(card).join('');
   if (orphaned.length) {
     out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map(card).join('');
@@ -306,10 +318,11 @@ function card(c: Comment): string {
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
   return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}" data-id="${c.id}">
-    <div class="mdr-meta"><span class="mdr-badge ${c.status}">${c.status}</span><b>${esc(c.author)}</b> · ${fmt(c.createdAt)}<span class="mdr-lines">${lines}</span></div>
-    <blockquote class="mdr-quote" data-act="goto" title="Go to text">${esc(c.anchor.quote.length > 180 ? c.anchor.quote.slice(0, 180) + '…' : c.anchor.quote)}</blockquote>
+    <div class="mdr-meta"><span class="mdr-badge ${c.status}">${c.status}</span><b>${esc(c.author)}</b> · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
+    ${metaBadges(c) ? `<div class="mdr-tags">${metaBadges(c)}</div>` : ''}
+    ${c.scope === 'document' ? '' : `<blockquote class="mdr-quote" data-act="goto" title="Go to text">${esc(c.anchor.quote.length > 180 ? c.anchor.quote.slice(0, 180) + '…' : c.anchor.quote)}</blockquote>`}
     ${editingBodies.has(c.id)
-      ? `<div class="mdr-replybox"><textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
+      ? `<div class="mdr-replybox">${metaPicker(c, altDigit)}<textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
       : `<div class="mdr-body">${esc(c.body)}</div>`}
     ${replies ? `<div class="mdr-replies">${replies}</div>` : ''}
     <div class="mdr-actions">${actions}</div>
@@ -354,14 +367,22 @@ function placePop(rect: DOMRect) {
 function selectionRange(): Range | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount || editing || inline || editMode) return null;
-  const range = sel.getRangeAt(0);
+  const range = snapToWords(sel.getRangeAt(0));
   if (!doc.contains(range.commonAncestorContainer)) return null;
+  // Show the snapped range, so what's highlighted is what gets quoted.
+  const cur = sel.getRangeAt(0);
+  if (range.compareBoundaryPoints(Range.START_TO_START, cur) || range.compareBoundaryPoints(Range.END_TO_END, cur)) {
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
   const cap = capture(buildTextMap(doc), range);
   if (!cap) return null;
   const a = blockRange(range.startContainer);
   const b = blockRange(range.endContainer) || a;
   pendingAnchor = {
-    ...cap,
+    quote: cap.quote,
+    prefix: cap.prefix,
+    suffix: cap.suffix,
     lineStart: a ? a[0] + 1 : 0,
     lineEnd: b ? b[1] : a ? a[1] : 0,
   };
@@ -383,8 +404,16 @@ document.addEventListener('mouseup', (ev) => {
   }, 0);
 });
 
+const altDigit = (n: number) => keyLabel(`Alt+${n}`);
+
 function openCommentBox(top: number) {
-  pop.innerHTML = `<div class="mdr-quote small">${esc(pendingAnchor!.quote.slice(0, 140))}${pendingAnchor!.quote.length > 140 ? '…' : ''}</div>
+  const a = pendingAnchor!;
+  const what =
+    a.scope === 'document'
+      ? `<div class="mdr-quote small mdr-scope-note">The whole document</div>`
+      : `<div class="mdr-quote small">${a.scope === 'section' ? 'Section: ' : ''}${esc(a.quote.slice(0, 140))}${a.quote.length > 140 ? '…' : ''}</div>`;
+  pop.innerHTML = `${what}
+      ${metaPicker({}, altDigit)}
       <textarea placeholder="Add a comment…  (${keyLabel('Mod+Enter')} to save)"></textarea>
       <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button></div>`;
   pop.style.top = `${top}px`;
@@ -411,6 +440,7 @@ pop.addEventListener('mousedown', (e) => {
 });
 
 pop.addEventListener('click', (e) => {
+  if (pickerClick(e.target as Element)) return;
   const act = (e.target as Element).closest('[data-act]')?.getAttribute('data-act');
   if (act === 'new-comment' && pendingAnchor) {
     openCommentBox(pop.getBoundingClientRect().top + window.scrollY);
@@ -422,6 +452,7 @@ pop.addEventListener('click', (e) => {
 });
 
 pop.addEventListener('keydown', (e) => {
+  if (pickerKey(e, pop)) return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) saveComment();
   if (e.key === 'Escape') hidePop();
 });
@@ -431,8 +462,9 @@ function saveComment() {
   if (!ta || !pendingAnchor) return;
   const body = ta.value.trim();
   if (!body) return ta.focus();
-  const { quote, prefix, suffix, lineStart, lineEnd } = pendingAnchor;
-  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body });
+  const { quote, prefix, suffix, lineStart, lineEnd, scope } = pendingAnchor;
+  const { kind, severity } = readPicker(pop);
+  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope } });
   hidePop();
   window.getSelection()?.removeAllRanges();
 }
@@ -440,7 +472,8 @@ function saveComment() {
 // ---------------------------------------------------------------- sidebar actions
 sidebar.addEventListener('click', (e) => {
   const t = e.target as Element;
-  if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '' });
+  if (pickerClick(t)) return;
+  if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '', severity: '' });
   const cardEl = t.closest('.mdr-card') as HTMLElement | null;
   if (!cardEl) return;
   const id = cardEl.dataset.id!;
@@ -472,8 +505,11 @@ sidebar.addEventListener('click', (e) => {
       return renderSidebar();
     case 'save-body': {
       const body = (cardEl.querySelector('.mdr-body-edit') as HTMLTextAreaElement).value.trim();
+      const { kind, severity } = readPicker(cardEl);
+      const c = comments.find((x) => x.id === id);
       editingBodies.delete(id);
-      if (body) post({ type: 'editBody', id, body });
+      if (c && (kind !== (c.kind || 'comment') || severity !== (c.severity || null))) post({ type: 'setMeta', id, meta: { kind, severity } });
+      if (body && body !== c?.body) post({ type: 'editBody', id, body });
       else renderSidebar();
       return;
     }
@@ -488,6 +524,7 @@ sidebar.addEventListener('click', (e) => {
 
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
+  if (cardEl && pickerKey(e, cardEl)) return;
   // Shift or Alt with Ctrl/Cmd+Enter is Submit review / Send to Claude, not "save".
   if (!cardEl || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
   if ((e.target as Element).classList.contains('mdr-body-edit')) {
@@ -541,12 +578,14 @@ outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
 // ---------------------------------------------------------------- filters & navigation
 function setFilter(f: Partial<FilterState>) {
   Object.assign(filter, f);
-  vscode.setState({ ...(vscode.getState() || {}), filterStatus: filter.status, filterAuthor: filter.author });
+  vscode.setState({ ...(vscode.getState() || {}), filterStatus: filter.status, filterAuthor: filter.author, filterSeverity: filter.severity });
   renderSidebar();
 }
 filtersEl.addEventListener('click', (e) => {
   const st = (e.target as Element).closest('[data-filter-status]')?.getAttribute('data-filter-status') as StatusFilter | undefined;
   if (st) setFilter({ status: st });
+  const sv = (e.target as Element).closest('[data-filter-severity]')?.getAttribute('data-filter-severity') as FilterState['severity'] | undefined;
+  if (sv) setFilter({ severity: filter.severity === sv ? '' : sv });
 });
 filtersEl.addEventListener('change', (e) => {
   const t = e.target as HTMLSelectElement;
@@ -735,6 +774,7 @@ function startEdit(el: HTMLElement, raw = false) {
   if (editing || inline) return;
   hidePop();
   editBtn.hidden = true;
+  secBtn.hidden = true;
   if (!raw && canInline(el)) return startInline(el);
   window.getSelection()?.removeAllRanges();
   post({ type: 'getBlock', ls: Number(el.dataset.ls), le: Number(el.dataset.le) });
@@ -837,17 +877,64 @@ doc.addEventListener('mousemove', (e) => {
   editBtn.hidden = false;
   editBtn.style.top = `${r.top + window.scrollY + 2}px`;
   editBtn.style.left = `${Math.max(4, Math.min(r.left, d.left + 48) - 58)}px`;
+  secBtn.hidden = !/^H[1-6]$/.test(el.tagName);
+  if (!secBtn.hidden) {
+    secBtn.style.top = `${r.top + window.scrollY + Math.max(0, r.height / 2 - 13)}px`;
+    secBtn.style.left = `${Math.min(window.innerWidth - 34, d.right + 6)}px`;
+  }
 });
 doc.addEventListener('mouseleave', (e) => {
-  if ((e as MouseEvent).relatedTarget !== editBtn) {
+  const to = (e as MouseEvent).relatedTarget;
+  if (to !== editBtn && to !== secBtn) {
+    editBtn.hidden = true;
+    secBtn.hidden = true;
+    hoverEl = null;
+  }
+});
+
+/** Open the comment box on a heading, for a thread about its whole section. */
+function commentOnSection(h: HTMLElement) {
+  const range = document.createRange();
+  range.selectNodeContents(h);
+  const cap = capture(buildTextMap(doc), range);
+  if (!cap || !cap.quote.trim()) return toast('This heading has no text to anchor a comment to.');
+  const [lineStart, lineEnd] = sectionLines(h, doc);
+  pendingAnchor = { quote: cap.quote, prefix: cap.prefix, suffix: cap.suffix, lineStart, lineEnd, scope: 'section' };
+  window.getSelection()?.removeAllRanges();
+  placePop(h.getBoundingClientRect());
+  openCommentBox(parseFloat(pop.style.top));
+}
+
+function commentOnDocument() {
+  if (editing || inline) return;
+  pendingAnchor = { quote: '', prefix: '', suffix: '', lineStart: 0, lineEnd: 0, scope: 'document' };
+  window.getSelection()?.removeAllRanges();
+  placePop(docCommentBtn.getBoundingClientRect());
+  openCommentBox(parseFloat(pop.style.top));
+}
+
+const secBtn = document.getElementById('mdr-sec-btn') as HTMLButtonElement;
+secBtn.addEventListener('click', () => {
+  if (!hoverEl || editing || inline) return;
+  secBtn.hidden = true;
+  editBtn.hidden = true;
+  commentOnSection(hoverEl);
+});
+secBtn.addEventListener('mouseleave', (e) => {
+  if (!doc.contains(e.relatedTarget as Node)) {
+    secBtn.hidden = true;
     editBtn.hidden = true;
     hoverEl = null;
   }
 });
+const docCommentBtn = document.getElementById('mdr-doc-comment') as HTMLButtonElement;
+docCommentBtn.addEventListener('click', commentOnDocument);
+
 editBtn.addEventListener('click', () => {
   if (!hoverEl || editing || inline) return;
   const el = hoverEl;
   editBtn.hidden = true;
+  secBtn.hidden = true;
   if (canInline(el)) startInline(el, true);
   else startEdit(el, true);
 });

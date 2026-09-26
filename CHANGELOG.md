@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Comment kinds and severity: mark a thread as a Question (answer, don't edit) or Praise (no action), and as Major, Minor or Nit (Alt+1/2/3 in the comment box). Cards show small tags, severity chips filter the list, and Send to Claude and the CLI's `next` work major first.
+- Comment on a whole section (the icon beside a heading) or the whole document (**Comment on document** in the comments pane). The CLI's `context` shows the whole section.
+- Selections snap to whole words, so quotes no longer end mid-word.
 - Pandoc citations: with `bibliography:` in the front matter (a .bib or CSL-JSON file), `[@key, p. 4]`, `[see @a; -@b]` and `@key` render author-date, link to a References list the viewer adds at the end (or under your closing References heading), and show the full entry on hover. Keys missing from the file get a red squiggle and are listed above the references. Without a bibliography, `@name` stays plain text.
 - pandoc-crossref: `{#fig:x}` on an image, `{#tbl:x}` on a table caption, `$$…$$ {#eq:x}` and `{#sec:x}` on a heading are numbered, `@fig:x` becomes a link ("fig. 1"), and broken references are flagged. Numbered equations show their number beside the equation.
 - GitHub-flavored extras: task lists with checkboxes you can tick (the file changes by one character, and Undo reverts it), GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), `==highlight==`, and syntax colours for code in 19 common languages. Mermaid fences draw as diagrams; Mermaid loads only when a file has one.

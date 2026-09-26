@@ -23,7 +23,8 @@ export type ToWebview =
 
 export type FromWebview =
   | { type: 'ready' }
-  | { type: 'addComment'; anchor: store.Anchor; body: string }
+  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta }
+  | { type: 'setMeta'; id: string; meta: store.CommentMeta }
   | { type: 'reply'; id: string; body: string }
   | { type: 'setStatus'; id: string; status: store.Status }
   | { type: 'editBody'; id: string; body: string }
@@ -145,7 +146,9 @@ export class ReviewSession {
         if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         return;
       case 'addComment':
-        return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body));
+        return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body, msg.meta));
+      case 'setMeta':
+        return this.mutate((d) => store.setMeta(d, msg.id, msg.meta));
       case 'reply':
         return this.mutate((d) => void store.addReply(d, msg.id, author, msg.body));
       case 'setStatus':
