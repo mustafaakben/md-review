@@ -71,6 +71,26 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "mdReview.addComment",
+        "title": "Comment on Selection",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.submitReview",
+        "title": "Submit Review",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.toggleComments",
+        "title": "Toggle Comments Pane",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.showShortcuts",
+        "title": "Keyboard Shortcuts",
+        "category": "MD Review"
+      },
+      {
         "command": "mdReview.sendToClaude",
         "title": "Send Review to Claude",
         "category": "MD Review",
@@ -190,6 +210,22 @@
         {
           "command": "mdReview.addClaudeSkill",
           "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "mdReview.addComment",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.submitReview",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.toggleComments",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.showShortcuts",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
         }
       ]
     },
@@ -243,7 +279,8 @@
       {
         "command": "mdReview.redo",
         "key": "ctrl+shift+z",
-        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus",
+        "mac": "cmd+shift+z"
       },
       {
         "command": "mdReview.find",
@@ -254,12 +291,14 @@
       {
         "command": "mdReview.nextComment",
         "key": "alt+down",
-        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus",
+        "mac": "alt+down"
       },
       {
         "command": "mdReview.previousComment",
         "key": "alt+up",
-        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus",
+        "mac": "alt+up"
       },
       {
         "command": "mdReview.toggleOutline",
@@ -307,6 +346,30 @@
         "command": "mdReview.zoomReset",
         "key": "ctrl+numpad0",
         "mac": "cmd+numpad0",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.addComment",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.submitReview",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.toggleComments",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.sendToClaude",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
         "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       }
     ]

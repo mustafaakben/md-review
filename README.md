@@ -61,7 +61,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 ```
 
 **Commenting.**
-- Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter).
+- Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) or `c` to go straight to the comment box.
 - The sidebar lists threads in document order. Click a quote to jump to its text.
 - Each thread has Reply, Resolve/Reopen, and (for drafts) Delete.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
@@ -73,19 +73,19 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - Bold/italic/link markup around your change is kept. For example, retyping a word inside `**Station function**` keeps the `**`.
 - How it works: the host diffs the rendered text before and after your edit and maps the change onto the Markdown source. It re-renders the candidate and **writes only if the result shows exactly what you typed**. Only that block's source lines are rewritten, and every other byte (including CRLF/LF endings) is left alone.
 - If a change can't be mapped with certainty (blocks with math, images, or code, or typing Markdown syntax), nothing is written. The raw Markdown for that block opens instead.
-- **Alt+double-click** always opens the raw Markdown of a block.
+- **Alt+double-click** (Option+double-click on macOS) always opens the raw Markdown of a block.
 - If the file changed on disk since it was rendered (say, Claude edited it), the edit is refused and the view refreshes.
-- Ctrl+B/I/U are disabled while editing, since formatting isn't a text change. Use Alt+double-click to add markup.
+- Ctrl+B/I/U (⌘B/I/U) are disabled while editing, since formatting isn't a text change. Use Alt+double-click (Option+double-click) to add markup.
 
-**Undo.** Ctrl+Z undoes your last edit in the view and Ctrl+Y (or Ctrl+Shift+Z) redoes it; the undo and redo arrows in the toolbar do the same. They grey out as soon as there is nothing to undo, including right after another program changes the file. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
+**Undo.** Ctrl+Z (⌘Z) undoes your last edit in the view and Ctrl+Y or Ctrl+Shift+Z (⇧⌘Z) redoes it; the undo and redo arrows in the toolbar do the same. They grey out as soon as there is nothing to undo, including right after another program changes the file. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
 
 **Getting around.**
-- **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
-- **Find** (Ctrl+F, or `/`) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
+- **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O / ⇧⌘O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
+- **Find** (Ctrl+F / ⌘F, or `/`) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
 - **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
-**Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0. Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
+**Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0 (⌘ instead of Ctrl on macOS). Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
 
 **Send to Claude.**
 - **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
@@ -95,7 +95,25 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send a whole folder.** Right-click a folder in the Explorer → **Send Open Reviews in Folder to Claude** (or run it from the Command Palette for the workspace). Claude gets the list of files with open threads and works through them one at a time with the CLI's `next` command, which shows each comment with the source lines its quote is on.
 - **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
-**Keyboard.** Tab reaches the toolbar, the outline, and the comments. (Starting a new comment still needs a text selection with the mouse.) In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
+**Keyboard.** Press `?` in the view (or the keyboard icon in the toolbar) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind any of them under **Keyboard Shortcuts** in VS Code (search for "MD Review").
+
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| Comment on the selected text | Ctrl+Alt+M or `c` | ⌥⌘M or `c` |
+| Save a comment or reply | Ctrl+Enter | ⌘↩ |
+| Reply to the current thread | `r` | `r` |
+| Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
+| Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
+| Next / previous comment | Alt+↓ / Alt+↑, or `j` / `k` | ⌥↓ / ⌥↑, or `j` / `k` |
+| Find in document | Ctrl+F or `/` | ⌘F or `/` |
+| Outline | Ctrl+Shift+O | ⇧⌘O |
+| Comments pane | Ctrl+Alt+P | ⌥⌘P |
+| Edit mode on / off | `e` | `e` |
+| Undo / redo edit | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | ⌘Z / ⇧⌘Z |
+| Zoom in / out / reset | Ctrl+= / Ctrl+− / Ctrl+0 | ⌘= / ⌘− / ⌘0 |
+| Keyboard shortcuts | `?` | `?` |
+
+Single-letter keys work when you're not typing in a box. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 

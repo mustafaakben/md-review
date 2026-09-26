@@ -1,6 +1,8 @@
 // Outline pane: the document's headings, with the current section tracked
 // while scrolling and a count of open threads in each section.
 
+import { tip } from './keys';
+
 export interface Outline {
   /** Rebuild from the freshly painted document. */
   rebuild(): void;
@@ -136,7 +138,7 @@ export function createOutline(
         .join('');
       const focused = (document.activeElement as HTMLElement | null)?.closest?.('.mdr-toc-item') as HTMLElement | null;
       const refocus = focused && pane.contains(focused) ? focused.dataset.i : null;
-      pane.innerHTML = `<div class="mdr-pane-head"><span>Outline</span><button data-act="close-outline" title="Hide outline (Ctrl+Shift+O)" aria-label="Hide outline">✕</button></div>
+      pane.innerHTML = `<div class="mdr-pane-head"><span>Outline</span><button data-act="close-outline" title="${tip('Hide outline', 'Mod+Shift+O')}" aria-label="Hide outline">✕</button></div>
         ${items || '<div class="mdr-empty">No headings in this document.</div>'}`;
       current = -1;
       track();
