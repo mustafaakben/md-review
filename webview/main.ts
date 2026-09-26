@@ -727,7 +727,8 @@ editModeBtn.addEventListener('click', () => setEditMode(!editMode));
 
 function canInline(el: HTMLElement): boolean {
   if (!INLINE_KIND[el.tagName]) return false;
-  return !el.querySelector('img, .katex, pre, .mdr-wrap, ul, ol, table, input');
+  // Citations and cross-refs show generated text, so those blocks edit as source.
+  return !el.querySelector('img, .katex, pre, .mdr-wrap, ul, ol, table, input, .mdr-ui');
 }
 
 function startEdit(el: HTMLElement, raw = false) {

@@ -187,8 +187,24 @@ function prepare(src) {
     // Never across $…$ math, where `<`, `>`, and `{k=v}` are LaTeX, not markup.
     .replace(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, (m) => (m.includes('$') ? m : blank(m)))
     .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m) => (m.includes('$') ? m : blank(m)));
-  prepared = { src, ...keyed(masked), lineAt: lineIndex(src) };
+  prepared = { src, ...keyed(maskCitations(masked)), lineAt: lineIndex(src) };
   return prepared;
+}
+
+// Citations and cross-refs render as generated text the viewer leaves out of
+// quotes, so blank them too: `[see @a, p. 4]`, `@a [p. 4]`, `@fig:x`. Bare
+// `@key` is only a citation when the front matter names a bibliography.
+const CITE_KEY = String.raw`[\p{L}\p{N}_]+(?:[:.#$%&\-+?<>~/]+[\p{L}\p{N}_]+)*`;
+const BRACKET_CITE = new RegExp(String.raw`\[(?:[^\[\]]*?[^\p{L}\p{N}_@\[\]])?-?@${CITE_KEY}[^\[\]]*\](?![(\[])`, 'gu');
+const BARE_CITE = new RegExp(String.raw`(?<![\p{L}\p{N}_@.\\/:-])@${CITE_KEY}(?: \[[^\]@\n]*\](?!\())?`, 'gu');
+const XREF_CITE = new RegExp(String.raw`(?<![\p{L}\p{N}_@.\\/:-])@(?:fig|tbl|eq|sec):${CITE_KEY}`, 'giu');
+function maskCitations(src) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(src);
+  if (fm && /^bibliography:/m.test(fm[1])) {
+    const head = fm[0].length;
+    return src.slice(0, head) + src.slice(head).replace(BRACKET_CITE, blank).replace(BARE_CITE, blank);
+  }
+  return src.replace(/\[[^\[\]]*@(?:fig|tbl|eq|sec):[^\[\]]*\](?![(\[])/gi, blank).replace(XREF_CITE, blank);
 }
 
 function locate(src, anchor) {

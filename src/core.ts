@@ -77,7 +77,7 @@ export class ReviewSession {
     this.lastRendered = text;
     let html: string;
     try {
-      html = renderMarkdown(text, this.ctx.resolveImage);
+      html = renderMarkdown(text, this.ctx.resolveImage, { docDir: path.dirname(this.ctx.mdPath) });
     } catch (e: any) {
       html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
     }

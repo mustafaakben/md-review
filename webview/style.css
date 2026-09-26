@@ -287,6 +287,22 @@ button.mdr-side-toggle { padding: 5px; }
 .mdr-doc .mdr-mermaid-out svg { max-width: 100%; height: auto; }
 .mdr-doc .mdr-mermaid-failed > .mdr-mermaid-out { justify-content: flex-start; font-size: 0.82em; color: var(--vscode-errorForeground, #d1242f); margin-top: 0.4em; }
 
+/* citations and cross-references */
+.mdr-doc a.mdr-cite, .mdr-doc a.mdr-xref { color: inherit; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--doc-accent) 60%, transparent); }
+.mdr-doc a.mdr-cite:hover, .mdr-doc a.mdr-xref:hover { color: var(--doc-accent); border-bottom-style: solid; }
+.mdr-doc .mdr-cite-missing, .mdr-doc .mdr-xref-missing { text-decoration: underline wavy var(--vscode-editorError-foreground, #d1242f); text-decoration-skip-ink: none; text-underline-offset: 3px; cursor: help; }
+.mdr-doc .mdr-fig-cap { display: block; text-align: center; margin-top: -0.2em; font-size: 0.9em; color: var(--doc-muted); }
+.mdr-doc .mdr-tbl-cap { font-size: 0.9em; color: var(--doc-muted); }
+.mdr-doc .mdr-xref-label { font-weight: 600; color: var(--doc-fg); }
+.mdr-doc section.eqno { display: flex; align-items: center; }
+.mdr-doc section.eqno > eqn { flex: 1; min-width: 0; }
+.mdr-doc section.eqno > span { flex: none; margin-left: 1em; color: var(--doc-muted); }
+.mdr-doc .mdr-refs { margin-top: 1.2em; }
+.mdr-doc .mdr-ref { padding-left: 1.6em; text-indent: -1.6em; margin: 0 0 0.6em; font-size: 0.95em; }
+.mdr-doc .mdr-ref:target { background: color-mix(in srgb, var(--doc-accent) 10%, transparent); border-radius: 4px; }
+.mdr-doc .mdr-refs-warn { display: flex; gap: 0.45em; align-items: baseline; font-size: 0.9em; color: var(--vscode-editorWarning-foreground, #bf8700); }
+.mdr-doc .mdr-refs-warn::before { content: ""; flex: none; width: 1em; height: 1em; align-self: center; background: currentColor; -webkit-mask: var(--i-warning) center / contain no-repeat; mask: var(--i-warning) center / contain no-repeat; }
+
 /* block edit affordance */
 .mdr-doc [data-ls] { border-radius: 4px; transition: box-shadow 0.15s var(--ease), background-color 0.15s var(--ease), opacity 0.15s; }
 .mdr-doc p[data-ls]:hover, .mdr-doc h1[data-ls]:hover, .mdr-doc h2[data-ls]:hover, .mdr-doc h3[data-ls]:hover,
@@ -412,6 +428,7 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
 /* Forced colors (Windows high contrast) repaints backgrounds as Canvas, which would erase every mask icon. */
 @media (forced-colors: active) {
   .mdr-doc .mdr-alert-title::before { forced-color-adjust: none; background: CanvasText !important; }
+  .mdr-doc .mdr-refs-warn::before { forced-color-adjust: none; background: CanvasText !important; }
   .mdr-doc mark:not(.mdr-hl) { outline: 1px solid Mark; }
   /* !important: the per-icon rules above are id-specific and set background: currentColor. */
   button::before, .mdr-toggle::before { forced-color-adjust: none; background: ButtonText !important; }
