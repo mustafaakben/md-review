@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- GitHub-flavored extras: task lists with checkboxes you can tick (the file changes by one character, and Undo reverts it), GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), `==highlight==`, and syntax colours for code in 19 common languages. Mermaid fences draw as diagrams; Mermaid loads only when a file has one.
 - Long documents open and repaint several times faster: blocks outside the view skip layout until you scroll to them. Your place in the document is kept by block (not pixel offset) across repaints and reopening, and jumps to a far comment, heading, or find match land on target. Zoom and the comment box keep their place too. (The scrollbar thumb can shift after a repaint, because off-screen blocks go back to estimated heights.)
 - YAML front matter (pandoc, Quarto, Jekyll, Hugo, Obsidian) shows as a title card with the title, subtitle, authors, date and keywords, instead of a horizontal rule and a heading full of YAML. The raw YAML is one click away, and Alt+double-click edits it.
 - CriticMarkup renders: {++added++}, {--deleted--}, {~~old~>new~~}, {==highlight==} and {>>note<<}. Deletions used to disappear.

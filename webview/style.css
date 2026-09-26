@@ -43,6 +43,11 @@
   /* Codicons (https://github.com/microsoft/vscode-codicons), CC BY 4.0, used as CSS masks. */
   --i-comment: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 4.5C1 3.11929 2.11929 2 3.5 2H12.5C13.8807 2 15 3.11929 15 4.5V9.5C15 10.8807 13.8807 12 12.5 12H8.68787L5.62533 14.6797C4.99168 15.2342 4 14.7842 4 13.9422V12H3.5C2.11929 12 1 10.8807 1 9.5V4.5ZM3.5 3C2.67157 3 2 3.67157 2 4.5V9.5C2 10.3284 2.67157 11 3.5 11H5V13.8981L8.31213 11H12.5C13.3284 11 14 10.3284 14 9.5V4.5C14 3.67157 13.3284 3 12.5 3H3.5Z'/%3E%3C/svg%3E");
   --i-edit: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M14.236 1.76386C13.2123 0.740172 11.5525 0.740171 10.5289 1.76386L2.65722 9.63549C2.28304 10.0097 2.01623 10.4775 1.88467 10.99L1.01571 14.3755C0.971767 14.5467 1.02148 14.7284 1.14646 14.8534C1.27144 14.9783 1.45312 15.028 1.62432 14.9841L5.00978 14.1151C5.52234 13.9836 5.99015 13.7168 6.36433 13.3426L14.236 5.47097C15.2596 4.44728 15.2596 2.78755 14.236 1.76386ZM11.236 2.47097C11.8691 1.8378 12.8957 1.8378 13.5288 2.47097C14.162 3.10413 14.162 4.1307 13.5288 4.76386L12.75 5.54269L10.4571 3.24979L11.236 2.47097ZM9.75002 3.9569L12.0429 6.24979L5.65722 12.6355C5.40969 12.883 5.10023 13.0595 4.76117 13.1465L2.19447 13.8053L2.85327 11.2386C2.9403 10.8996 3.1168 10.5901 3.36433 10.3426L9.75002 3.9569Z'/%3E%3C/svg%3E");
+  --i-info: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8.49902 7.49998C8.49902 7.22384 8.27517 6.99998 7.99902 6.99998C7.72288 6.99998 7.49902 7.22384 7.49902 7.49998V10.5C7.49902 10.7761 7.72288 11 7.99902 11C8.27517 11 8.49902 10.7761 8.49902 10.5V7.49998ZM8.74807 5.50001C8.74807 5.91369 8.41271 6.24905 7.99903 6.24905C7.58535 6.24905 7.25 5.91369 7.25 5.50001C7.25 5.08633 7.58535 4.75098 7.99903 4.75098C8.41271 4.75098 8.74807 5.08633 8.74807 5.50001ZM8 1C4.13401 1 1 4.13401 1 8C1 11.866 4.13401 15 8 15C11.866 15 15 11.866 15 8C15 4.13401 11.866 1 8 1ZM2 8C2 4.68629 4.68629 2 8 2C11.3137 2 14 4.68629 14 8C14 11.3137 11.3137 14 8 14C4.68629 14 2 11.3137 2 8Z'/%3E%3C/svg%3E");
+  --i-lightbulb: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 1C5.419 1 2.75 2.964 2.75 6.25C2.75 8.167 3.637 9.184 4.224 9.856C4.408 10.067 4.598 10.285 4.628 10.398L5.568 13.889C5.744 14.543 6.34 14.999 7.017 14.999H8.984C9.662 14.999 10.257 14.542 10.432 13.889L11.372 10.397C11.402 10.285 11.593 10.067 11.776 9.856C12.363 9.183 13.25 8.167 13.25 6.25C13.25 3.355 10.895 1 8 1ZM9.467 13.63C9.408 13.848 9.209 14 8.984 14H7.017C6.791 14 6.593 13.848 6.534 13.63L6.095 12H9.906L9.467 13.63ZM11.022 9.199C10.741 9.522 10.497 9.802 10.407 10.137L10.175 10.999H5.826L5.594 10.138C5.503 9.801 5.26 9.522 4.977 9.199C4.43 8.572 3.75 7.792 3.75 6.25C3.75 3.59 5.911 2 8 2C10.344 2 12.25 3.907 12.25 6.25C12.25 7.792 11.569 8.572 11.022 9.199Z'/%3E%3C/svg%3E");
+  --i-report: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12.5 2.00002H3.5C2.119 2.00002 1 3.11902 1 4.50002V9.50002C1 10.881 2.119 12 3.5 12H4V13.942C4 14.784 4.992 15.234 5.625 14.679L8.688 11.999H12.5C13.881 11.999 15 10.88 15 9.49902V4.49902C15 3.11802 13.881 1.99902 12.5 1.99902V2.00002ZM14 9.50002C14 10.328 13.328 11 12.5 11H8.312L5 13.898V11H3.5C2.672 11 2 10.328 2 9.50002V4.50002C2 3.67202 2.672 3.00002 3.5 3.00002H12.5C13.328 3.00002 14 3.67202 14 4.50002V9.50002ZM7.508 7.09002L7.5 7.00002V4.50002L7.508 4.41002C7.55 4.17702 7.754 4.00002 8 4.00002C8.246 4.00002 8.45 4.17702 8.492 4.41002L8.5 4.50002V7.00002L8.492 7.09002C8.45 7.32302 8.246 7.50002 8 7.50002C7.754 7.50002 7.55 7.32302 7.508 7.09002ZM8.75 9.25002C8.75 9.66402 8.414 10 8 10C7.586 10 7.25 9.66402 7.25 9.25002C7.25 8.83602 7.586 8.50002 8 8.50002C8.414 8.50002 8.75 8.83602 8.75 9.25002Z'/%3E%3C/svg%3E");
+  --i-warning: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M14.831 11.965L9.206 1.714C8.965 1.274 8.503 1 8 1C7.497 1 7.035 1.274 6.794 1.714L1.169 11.965C1.059 12.167 1 12.395 1 12.625C1 13.383 1.617 14 2.375 14H13.625C14.383 14 15 13.383 15 12.625C15 12.395 14.941 12.167 14.831 11.965ZM13.625 13H2.375C2.168 13 2 12.832 2 12.625C2 12.561 2.016 12.5 2.046 12.445L7.671 2.195C7.736 2.075 7.863 2 8 2C8.137 2 8.264 2.075 8.329 2.195L13.954 12.445C13.984 12.501 14 12.561 14 12.625C14 12.832 13.832 13 13.625 13ZM8.75 11.25C8.75 11.664 8.414 12 8 12C7.586 12 7.25 11.664 7.25 11.25C7.25 10.836 7.586 10.5 8 10.5C8.414 10.5 8.75 10.836 8.75 11.25ZM7.5 9V5.5C7.5 5.224 7.724 5 8 5C8.276 5 8.5 5.224 8.5 5.5V9C8.5 9.276 8.276 9.5 8 9.5C7.724 9.5 7.5 9.276 7.5 9Z'/%3E%3C/svg%3E");
+  --i-stop: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M6 5C5.44772 5 5 5.44772 5 6V10C5 10.5523 5.44772 11 6 11H10C10.5523 11 11 10.5523 11 10V6C11 5.44772 10.5523 5 10 5H6ZM1 8C1 4.13401 4.13401 1 8 1C11.866 1 15 4.13401 15 8C15 11.866 11.866 15 8 15C4.13401 15 1 11.866 1 8ZM8 2C4.68629 2 2 4.68629 2 8C2 11.3137 4.68629 14 8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2Z'/%3E%3C/svg%3E");
   --i-check: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M13.6572 3.13573C13.8583 2.9465 14.175 2.95614 14.3643 3.15722C14.5535 3.35831 14.5438 3.675 14.3428 3.86425L5.84277 11.8642C5.64597 12.0494 5.33756 12.0446 5.14648 11.8535L1.64648 8.35351C1.45121 8.15824 1.45121 7.84174 1.64648 7.64647C1.84174 7.45121 2.15825 7.45121 2.35351 7.64647L5.50976 10.8027L13.6572 3.13573Z'/%3E%3C/svg%3E");
   --i-reopen: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M8 9C8.55228 9 9 8.55228 9 8C9 7.44772 8.55228 7 8 7C7.44772 7 7 7.44772 7 8C7 8.55228 7.44772 9 8 9Z'/%3E%3Cpath d='M1.5 6H4.5C4.776 6 5 5.776 5 5.5C5 5.224 4.776 5 4.5 5H2.802C3.865 3.156 5.831 2 8 2C11.309 2 14 4.691 14 8C14 8.276 14.224 8.5 14.5 8.5C14.776 8.5 15 8.276 15 8C15 4.141 11.86 1 8 1C5.512 1 3.254 2.302 2 4.391V2.5C2 2.224 1.776 2 1.5 2C1.224 2 1 2.224 1 2.5V5.5C1 5.776 1.224 6 1.5 6Z'/%3E%3Cpath d='M14.5 10H11.5C11.224 10 11 10.224 11 10.5C11 10.776 11.224 11 11.5 11H13.199C12.137 12.844 10.17 14 8 14C4.691 14 2 11.309 2 8C2 7.724 1.776 7.5 1.5 7.5C1.224 7.5 1 7.724 1 8C1 11.859 4.14 15 8 15C10.488 15 12.747 13.697 14 11.61V13.5C14 13.776 14.224 14 14.5 14C14.776 14 15 13.776 15 13.5V10.5C15 10.224 14.776 10 14.5 10Z'/%3E%3C/svg%3E");
   --i-trash: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M14 2H10C10 0.897 9.103 0 8 0C6.897 0 6 0.897 6 2H2C1.724 2 1.5 2.224 1.5 2.5C1.5 2.776 1.724 3 2 3H2.54L3.349 12.708C3.456 13.994 4.55 15 5.84 15H10.159C11.449 15 12.543 13.993 12.65 12.708L13.459 3H13.999C14.275 3 14.499 2.776 14.499 2.5C14.499 2.224 14.275 2 13.999 2H14ZM8 1C8.551 1 9 1.449 9 2H7C7 1.449 7.449 1 8 1ZM11.655 12.625C11.591 13.396 10.934 14 10.16 14H5.841C5.067 14 4.41 13.396 4.346 12.625L3.544 3H12.458L11.656 12.625H11.655ZM7 5.5V11.5C7 11.776 6.776 12 6.5 12C6.224 12 6 11.776 6 11.5V5.5C6 5.224 6.224 5 6.5 5C6.776 5 7 5.224 7 5.5ZM10 5.5V11.5C10 11.776 9.776 12 9.5 12C9.224 12 9 11.776 9 11.5V5.5C9 5.224 9.224 5 9.5 5C9.776 5 10 5.224 10 5.5Z'/%3E%3C/svg%3E");
@@ -268,6 +273,48 @@ button.mdr-side-toggle { padding: 5px; }
 .mdr-doc mark.mdr-critic-mark { background: color-mix(in srgb, #e3b341 35%, transparent); color: inherit; border-radius: 2px; }
 .mdr-doc .mdr-critic-note { font-size: 0.85em; color: var(--doc-muted); font-style: italic; padding: 0 0.35em; border-left: 2px solid var(--doc-rule); margin-left: 0.2em; }
 
+/* task lists */
+.mdr-doc ul.mdr-task-list, .mdr-doc ol.mdr-task-list { padding-left: 1.2em; }
+.mdr-doc li.mdr-task-item { list-style: none; }
+.mdr-doc li.mdr-task-item > input.mdr-task:first-child, .mdr-doc li.mdr-task-item > p:first-child > input.mdr-task:first-child {
+  margin: 0 0.5em 0 -1.25em; vertical-align: -0.1em; width: 0.95em; height: 0.95em; accent-color: var(--doc-accent); cursor: pointer;
+}
+.mdr-doc li.mdr-task-item:has(> input.mdr-task:checked), .mdr-doc li.mdr-task-item:has(> p > input.mdr-task:checked) { color: var(--doc-muted); }
+
+/* GitHub alerts */
+.mdr-doc blockquote.mdr-alert { --alert: var(--doc-accent); color: var(--doc-fg); border-left-color: var(--alert); background: color-mix(in srgb, var(--alert) 6%, transparent); border-radius: 0 6px 6px 0; padding: 0.55em 0.9em 0.55em 1em; }
+.mdr-doc blockquote.mdr-alert > :last-child { margin-bottom: 0; }
+.mdr-doc .mdr-alert-title { display: flex; align-items: center; gap: 0.45em; font-weight: 600; font-size: 0.92em; color: var(--alert); margin: 0 0 0.3em; }
+.mdr-doc .mdr-alert-title::before { content: ""; width: 1.05em; height: 1.05em; flex: none; background: currentColor; -webkit-mask: var(--ico) center / contain no-repeat; mask: var(--ico) center / contain no-repeat; }
+.mdr-doc blockquote.mdr-alert-note { --alert: #2f81f7; --ico: var(--i-info); }
+.mdr-doc blockquote.mdr-alert-tip { --alert: #2da44e; --ico: var(--i-lightbulb); }
+.mdr-doc blockquote.mdr-alert-important { --alert: #8957e5; --ico: var(--i-report); }
+.mdr-doc blockquote.mdr-alert-warning { --alert: #bf8700; --ico: var(--i-warning); }
+.mdr-doc blockquote.mdr-alert-caution { --alert: #d1242f; --ico: var(--i-stop); }
+
+/* ==highlight== */
+.mdr-doc mark:not(.mdr-hl):not(.mdr-critic-mark) { background: color-mix(in srgb, #e3b341 38%, transparent); color: inherit; border-radius: 2px; padding: 0 0.1em; }
+
+/* code highlighting: token hues mixed toward the text colour stay readable on light and dark reading themes */
+.mdr-doc .hljs-keyword, .mdr-doc .hljs-selector-tag, .mdr-doc .hljs-built_in, .mdr-doc .hljs-meta .hljs-keyword { color: color-mix(in srgb, #c678dd 72%, var(--doc-fg)); }
+.mdr-doc .hljs-string, .mdr-doc .hljs-regexp, .mdr-doc .hljs-addition, .mdr-doc .hljs-attr-value { color: color-mix(in srgb, #2da44e 72%, var(--doc-fg)); }
+.mdr-doc .hljs-number, .mdr-doc .hljs-literal, .mdr-doc .hljs-symbol, .mdr-doc .hljs-bullet { color: color-mix(in srgb, #d19a66 78%, var(--doc-fg)); }
+.mdr-doc .hljs-title, .mdr-doc .hljs-section, .mdr-doc .hljs-name, .mdr-doc .hljs-selector-id, .mdr-doc .hljs-selector-class { color: color-mix(in srgb, #3b82f6 75%, var(--doc-fg)); }
+.mdr-doc .hljs-attr, .mdr-doc .hljs-attribute, .mdr-doc .hljs-variable, .mdr-doc .hljs-template-variable, .mdr-doc .hljs-type, .mdr-doc .hljs-params { color: color-mix(in srgb, #0ea5a5 72%, var(--doc-fg)); }
+.mdr-doc .hljs-comment, .mdr-doc .hljs-quote, .mdr-doc .hljs-meta { color: var(--doc-muted); font-style: italic; }
+.mdr-doc .hljs-deletion { color: color-mix(in srgb, #d1242f 75%, var(--doc-fg)); }
+.mdr-doc .hljs-emphasis { font-style: italic; }
+.mdr-doc .hljs-strong { font-weight: 600; }
+
+/* Mermaid: the source shows until the diagram draws (or if it fails) */
+.mdr-doc .mdr-mermaid { margin: 0 0 1.2em; }
+.mdr-doc .mdr-mermaid-src { margin: 0; }
+.mdr-doc .mdr-mermaid-ready > .mdr-mermaid-src { display: none; }
+.mdr-doc .mdr-mermaid-out { display: flex; justify-content: center; overflow-x: auto; }
+.mdr-doc .mdr-mermaid-out:empty { display: none; }
+.mdr-doc .mdr-mermaid-out svg { max-width: 100%; height: auto; }
+.mdr-doc .mdr-mermaid-failed > .mdr-mermaid-out { justify-content: flex-start; font-size: 0.82em; color: var(--vscode-errorForeground, #d1242f); margin-top: 0.4em; }
+
 /* block edit affordance */
 .mdr-doc [data-ls] { border-radius: 4px; transition: box-shadow 0.15s var(--ease), background-color 0.15s var(--ease), opacity 0.15s; }
 .mdr-doc p[data-ls]:hover, .mdr-doc h1[data-ls]:hover, .mdr-doc h2[data-ls]:hover, .mdr-doc h3[data-ls]:hover,
@@ -392,6 +439,8 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
 @keyframes mdr-pulse { 0% { box-shadow: inset 0 -2px 0 var(--c), 0 0 0 0 color-mix(in srgb, var(--c) 45%, transparent); } 100% { box-shadow: inset 0 -2px 0 var(--c), 0 0 0 6px transparent; } }
 /* Forced colors (Windows high contrast) repaints backgrounds as Canvas, which would erase every mask icon. */
 @media (forced-colors: active) {
+  .mdr-doc .mdr-alert-title::before { forced-color-adjust: none; background: CanvasText !important; }
+  .mdr-doc mark:not(.mdr-hl) { outline: 1px solid Mark; }
   /* !important: the per-icon rules above are id-specific and set background: currentColor. */
   button::before, .mdr-toggle::before { forced-color-adjust: none; background: ButtonText !important; }
   .mdr-file::before, .mdr-empty::before { forced-color-adjust: none; background: CanvasText !important; }

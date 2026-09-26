@@ -383,10 +383,12 @@
     "harness": "node test/harness/server.mjs"
   },
   "dependencies": {
+    "highlight.js": "^11.12.0",
     "katex": "^0.16.22",
     "markdown-it": "^14.1.0",
     "markdown-it-attrs": "^4.3.1",
     "markdown-it-footnote": "^4.0.0",
+    "markdown-it-mark": "^4.0.0",
     "markdown-it-sub": "^2.0.0",
     "markdown-it-sup": "^2.0.0",
     "markdown-it-texmath": "^1.0.0"
@@ -397,6 +399,7 @@
     "@types/vscode": "^1.100.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
+    "mermaid": "^12.0.0",
     "typescript": "^5.8.0"
   },
   "author": "Mustafa Akben",

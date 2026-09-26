@@ -67,7 +67,7 @@ const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MD Review
 <script>window.__ready.then(() => { const s = document.createElement('script'); s.src = '/media/webview.js'; document.body.appendChild(s); });</script>
 </body></html>`;
 
-const types = { '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' };
+const types = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' };
 function sendFile(res, base, rel) {
   const p = path.resolve(base, decodeURIComponent(rel));
   if (!p.startsWith(base + path.sep) || !fs.existsSync(p) || !fs.statSync(p).isFile()) return res.writeHead(404).end();
