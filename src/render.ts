@@ -54,8 +54,35 @@ export type ResolveImage = (src: string) => string;
 
 const WRAPPED = ['html_block', 'math_block', 'math_block_eqno', 'code_block'];
 
+/**
+ * Whether `s` starts with a URL scheme (`https:`, `file:`, `vscode:`). A scheme
+ * is two or more characters, so a Windows drive (`C:\x.png`, `C:/x.md`) is a
+ * path, not a URL.
+ */
+export function hasUrlScheme(s: string): boolean {
+  return /^[a-z][a-z0-9+.-]+:/i.test(s);
+}
+
+/** A local path: relative, absolute or on a drive (not a URL, `//host` or `#id`). */
 function isRelative(src: string): boolean {
-  return !!src && !/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src);
+  return !!src && !hasUrlScheme(src) && !/^(\/\/|#)/.test(src);
+}
+
+/**
+ * The local image paths a Markdown text links to with `![alt](path)`, found
+ * without parsing it, so the host can allow their folders before the first
+ * render. Approximate: reference-style images and HTML `<img>` are left out.
+ */
+export function imageSources(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/!\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/g)) {
+    let src = m[1] ?? m[2];
+    try {
+      src = decodeURIComponent(src);
+    } catch {} // a bare % stays as written
+    if (isRelative(src)) out.push(src);
+  }
+  return out;
 }
 
 function cssLength(v: string): string {

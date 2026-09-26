@@ -6,6 +6,7 @@ import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import { runAgent } from './agentRun';
 import { sameName, shouldPoll, folderKey, StampTracker, POLL_MS } from './fileWatch';
+import { hasUrlScheme, imageSources } from './render';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 
@@ -20,13 +21,24 @@ function readDisk(p: string): string | undefined {
 export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdReview.editor';
   /** Every open MD Review panel, so commands can reach the focused one. */
-  private static panels = new Set<vscode.WebviewPanel>();
+  private static panels = new Map<vscode.WebviewPanel, ReviewSession>();
 
   /** Forward a command (undo, find, …) to the focused MD Review webview. */
   static postToActive(msg: unknown): boolean {
-    for (const p of this.panels) {
+    for (const p of this.panels.keys()) {
       if (p.active) {
         void p.webview.postMessage(msg);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Hand a message to the focused panel's session as if its webview sent it (the smoke test's way in). */
+  static handleInActive(msg: FromWebview): boolean {
+    for (const [p, session] of this.panels) {
+      if (p.active) {
+        session.handle(msg);
         return true;
       }
     }
@@ -41,8 +53,28 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const webview = panel.webview;
     const roots = [vscode.Uri.file(dir), vscode.Uri.joinPath(this.context.extensionUri, 'media')];
     for (const f of vscode.workspace.workspaceFolders ?? []) roots.push(f.uri);
-    webview.options = { enableScripts: true, localResourceRoots: roots };
+    // In a trusted folder, images elsewhere on disk (`../figures/a.png` beside a
+    // file opened on its own) are allowed too: their folders join the roots.
+    // Reassigning webview.options reloads the page, so the folders the text
+    // links to are collected before the first load; one a render finds later
+    // (a new image, or trust granted) costs one reload, and the reloaded page
+    // asks for the document again. Restricted Mode keeps the roots above.
+    const imageDirs = new Set<string>();
+    const allowImage = (file: string): boolean => {
+      if (!vscode.workspace.isTrusted) return false;
+      const d = path.dirname(file);
+      if (imageDirs.has(d) || roots.some((r) => isInside(r.fsPath, d))) return false;
+      if (!fs.existsSync(file)) return false; // e.g. a path still being typed
+      imageDirs.add(d);
+      return true;
+    };
+    const setOptions = () => {
+      webview.options = { enableScripts: true, localResourceRoots: [...roots, ...[...imageDirs].map((d) => vscode.Uri.file(d))] };
+    };
+    for (const src of imageSources(document.getText())) allowImage(path.resolve(dir, src));
+    setOptions();
     webview.html = this.shell(webview);
+    let reloadQueued = false;
 
     const cfg = () => vscode.workspace.getConfiguration('mdReview');
     // The bibliography can live anywhere; watch exactly the files the last render read.
@@ -63,7 +95,18 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       author: () => cfg().get<string>('author')?.trim() || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
-      resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
+      resolveImage: (src) => {
+        const file = path.resolve(dir, src);
+        if (allowImage(file) && !reloadQueued) {
+          reloadQueued = true;
+          // After this render has been sent.
+          queueMicrotask(() => {
+            reloadQueued = false;
+            setOptions();
+          });
+        }
+        return webview.asWebviewUri(vscode.Uri.file(file)).toString();
+      },
       // Clean buffer -> render the disk bytes (the source of truth for block
       // edits); dirty buffer -> render what the user is typing.
       getText: () => (document.isDirty ? document.getText() : readDisk(mdPath) ?? document.getText()),
@@ -81,7 +124,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       setPrefs: (prefs) => {
         void this.context.globalState.update(PREFS_KEY, prefs);
         // Keep other open MD Review panels in step.
-        for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+        for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
@@ -92,7 +135,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         });
       },
     });
-    MdReviewEditorProvider.panels.add(panel);
+    MdReviewEditorProvider.panels.set(panel, session);
 
     const subs: vscode.Disposable[] = [];
     let timer: NodeJS.Timeout | undefined;
@@ -249,8 +292,15 @@ function readingPrefs(stored: unknown): { zoom: number; theme: string; font: str
   return { zoom, theme, font };
 }
 
+/** Whether `p` is `root` or inside it (case-insensitively on Windows, as path.relative is). */
+function isInside(root: string, p: string): boolean {
+  const rel = path.relative(root, p);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 function openLink(href: string, dir: string) {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+  // `C:/notes/x.md` is a path on a drive, not a URL with scheme `c`.
+  if (hasUrlScheme(href)) {
     const uri = vscode.Uri.parse(href);
     // file: links open here. In Restricted Mode only web and mail links leave
     // VS Code; other schemes (vscode:, other apps' handlers) need trust.

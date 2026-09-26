@@ -3,6 +3,7 @@ dist/
 *.vsix
 test/tmp/
 test/screens/
+.vscode-test/
 .DS_Store
 
 # Build outputs (npm run build)
