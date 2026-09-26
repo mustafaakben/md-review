@@ -4,6 +4,9 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
+import { BaselineStore } from './baselineStore';
+import { saveSendBaseline } from './redlines';
+import { awaitsAgent, readSidecar, Comment } from './commentStore';
 import { runAgent } from './agentRun';
 import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
 import { hasUrlScheme } from './render';
@@ -35,6 +38,45 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
     return false;
+  }
+
+  /** Changes baselines: files in the extension's storage (never next to the document), details in workspace state. */
+  private baselines: BaselineStore;
+  private static store: BaselineStore | undefined;
+
+  private static baselineStore(context: vscode.ExtensionContext): BaselineStore {
+    return (this.store ||= new BaselineStore(vscode.Uri.joinPath(context.storageUri ?? context.globalStorageUri, 'baselines').fsPath, context.workspaceState));
+  }
+
+  /**
+   * The file's text as a panel would read it: the open document's while it
+   * has unsaved edits, else the disk's. Undefined when it can't be read.
+   */
+  static textOf(mdPath: string): string | undefined {
+    const key = nameKey(mdPath, process.platform);
+    const doc = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && nameKey(d.uri.fsPath, process.platform) === key);
+    return doc?.isDirty ? doc.getText() : readDisk(mdPath) ?? doc?.getText();
+  }
+
+  /**
+   * Claude was sent a file's open threads from outside its panel (a folder's
+   * reviews, the inbox's Send All): save the copy the Changes view compares
+   * against, as Send in the panel does. An open panel's session does it, so
+   * what it holds stays current; otherwise it goes straight to the store.
+   * `text` is the file before Claude started (see textOf).
+   */
+  static snapshotSent(context: vscode.ExtensionContext, mdPath: string, text: string): void {
+    let comments: Comment[];
+    try {
+      comments = readSidecar(mdPath).comments.filter((c) => awaitsAgent(c));
+    } catch {
+      return; // a sidecar mid-write or hand-broken: the send skipped it too
+    }
+    const key = nameKey(mdPath, process.platform);
+    // One panel on the file is enough: the others read the saved baseline when they next compare.
+    const open = [...this.panels.values()].find((s) => s.key === key);
+    if (open) open.session.snapshotSent(comments, text);
+    else saveSendBaseline(this.baselineStore(context).forFile(mdPath), comments, text);
   }
 
   /** Hand a message to the focused panel's session as if its webview sent it (the smoke test's way in). */
@@ -74,7 +116,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.baselines = MdReviewEditorProvider.baselineStore(context);
+  }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const mdPath = document.uri.fsPath;
@@ -133,6 +177,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         // Keep other open MD Review panels in step.
         for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
+      baselines: this.baselines.forFile(mdPath),
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
       notify: (message) => {

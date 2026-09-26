@@ -17,6 +17,15 @@ const build = (name) => {
   esbuild.buildSync({ entryPoints: [path.join(here, '..', 'src', `${name}.ts`)], outfile, bundle: true, format: 'cjs', platform: 'node', external: ['vscode'], logLevel: 'silent' });
   return outfile;
 };
+/** The commands and the editor provider in one bundle, so they share the provider's open panels. */
+const buildCommands = () => {
+  const outfile = path.join(here, 'tmp', 'inboxCommands.cjs');
+  esbuild.buildSync({
+    stdin: { contents: "export * from './agentCommands';\nexport { MdReviewEditorProvider } from './editorProvider';", resolveDir: path.join(here, '..', 'src'), loader: 'ts' },
+    outfile, bundle: true, format: 'cjs', platform: 'node', external: ['vscode'], logLevel: 'silent',
+  });
+  return outfile;
+};
 
 const made = [];
 const mkroot = (name) => {
@@ -81,6 +90,7 @@ const vscode = {
     get isTrusted() {
       return state.trusted;
     },
+    textDocuments: [],
     getWorkspaceFolder: (uri) => state.folders.map(folder).find((f) => uri.fsPath.startsWith(f.uri.fsPath + path.sep)),
     getConfiguration: () => ({
       get: (k, d) => ({ 'agent.mode': state.mode, 'agent.command': process.execPath, 'agent.launch': 'direct' })[k] ?? d,
@@ -99,9 +109,18 @@ const load = Module._load;
 Module._load = function (request, ...rest) {
   return request === 'vscode' ? vscode : load.call(this, request, ...rest);
 };
-const { sendWorkspaceToClaude } = require(build('agentCommands'));
-const { MdReviewEditorProvider } = require(build('editorProvider'));
-const context = { extensionUri: Uri.file(path.join(here, '..')) };
+const { sendWorkspaceToClaude, MdReviewEditorProvider } = require(buildCommands());
+const lib = require('../dist/lib.cjs');
+const storage = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-cmd-store-')));
+made.push(storage);
+/** Workspace state as VS Code keeps it: every value is serialized on write. */
+const memento = () => {
+  const data = new Map();
+  return { get: (k) => (data.has(k) ? JSON.parse(data.get(k)) : undefined), update: (k, v) => (v === undefined ? data.delete(k) : data.set(k, JSON.stringify(v))), keys: () => [...data.keys()] };
+};
+const context = { extensionUri: Uri.file(path.join(here, '..')), storageUri: Uri.file(storage), workspaceState: memento() };
+/** The store the extension keeps baselines in, as a second reader of the same state and folder. */
+const baselineOf = (md) => new lib.BaselineStore(path.join(storage, 'baselines'), context.workspaceState).forFile(md);
 
 function review(dir, rel, status) {
   const md = path.join(dir, rel);
@@ -136,6 +155,50 @@ test('Send All: one Claude per workspace folder with open reviews, each in its o
   assert.match(promptOf(calls.terminals[0]), /- a\.md \(1 open\)/);
   assert.match(promptOf(calls.terminals[1]), /- docs\/b\.md \(1 open\)/);
   assert.deepEqual(calls.info, ['Sent the open reviews in one, two to Claude, each in its own terminal.']);
+});
+
+test('Send All saves the copy the Changes view compares against, as Send in a panel does', async () => {
+  reset();
+  state.folders = [one, two, three];
+  const a = path.join(one, 'a.md');
+  const b = path.join(two, 'docs', 'b.md');
+  // The first Send All saved them already; start from none.
+  baselineOf(a).set(null);
+  baselineOf(b).set(null);
+  // b.md has unsaved edits in an editor: those are what Claude is sent, so they are the copy.
+  vscode.workspace.textDocuments = [{ uri: Uri.file(b), isDirty: true, getText: () => '# Doc, unsaved\n' }];
+  // a.md is open in a panel: its session saves the copy, so what it holds stays current.
+  const posted = [];
+  const mem = lib.memoryBaselines();
+  const session = new lib.ReviewSession({
+    mdPath: a, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage: (x) => x,
+    getText: () => fs.readFileSync(a, 'utf8'), isDirty: () => false, openLink: () => {}, baselines: mem,
+  });
+  session.handle({ type: 'ready' });
+  const panel = {};
+  MdReviewEditorProvider.panels.set(panel, { session, key: lib.nameKey(a, process.platform), ready: true });
+  try {
+    await sendWorkspaceToClaude(context);
+    assert.equal(calls.terminals.length, 2);
+    assert.deepEqual(mem.get().threads, ['c1']);
+    assert.equal(mem.read().toString(), '# Doc\n');
+    assert.ok(posted.some((m) => m.type === 'baseline' && m.info), 'the panel was told');
+    assert.equal(baselineOf(a).get(), undefined, 'the session saved it, not a second copy');
+    const saved = baselineOf(b);
+    assert.deepEqual(saved.get().threads, ['c1']);
+    assert.deepEqual(saved.get().spans, { c1: [0, 1] });
+    assert.equal(saved.read().toString(), '# Doc, unsaved\n');
+    assert.equal(baselineOf(path.join(three, 'c.md')).get(), undefined, 'nothing sent from there');
+    // Claude changes b.md; a second Send keeps the unreviewed copy, so its change stays in view.
+    fs.writeFileSync(b, '# Doc, changed by Claude\n');
+    vscode.workspace.textDocuments = [];
+    await sendWorkspaceToClaude(context);
+    assert.equal(saved.read().toString(), '# Doc, unsaved\n');
+  } finally {
+    MdReviewEditorProvider.panels.delete(panel);
+    vscode.workspace.textDocuments = [];
+    fs.writeFileSync(b, '# Doc\n');
+  }
 });
 
 test('Send All with one folder, or nothing open', async () => {

@@ -38,6 +38,7 @@ const session = new lib.ReviewSession({
   getPrefs: () => prefs,
   cliPath: path.join(root, 'cli', 'mdreview.mjs'),
   setPrefs: (p) => (prefs = p),
+  baselines: lib.memoryBaselines(), // Changes baselines, in memory like prefs
 });
 
 let t1, t2;
