@@ -80,7 +80,7 @@ export interface HostContext {
   watchFiles?(files: string[]): void;
   /**
    * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
-   * a status line for the user. When absent, the prompt goes back to the
+   * a status line for the user (empty when it already told them). When absent, the prompt goes back to the
    * webview, which copies it to the clipboard.
    */
   runAgent?(prompt: string): string;
@@ -417,7 +417,10 @@ export class ReviewSession {
       cliPath: this.ctx.cliPath,
       suggest: this.ctx.suggestMode?.(),
     });
-    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
+    if (this.ctx.runAgent) {
+      const status = this.ctx.runAgent(prompt);
+      if (status) this.ctx.post({ type: 'toast', message: status });
+    }
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
   }
 
