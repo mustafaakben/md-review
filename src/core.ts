@@ -103,13 +103,14 @@ export function roundSummary(r: Round): string {
   return `${r.resolved} resolved${yours.length ? `, ${yours.join(' and ')} for you` : ''}`;
 }
 
+/** A suggestion an edit applied, and the thread's status before it. */
+interface Applied { id: string; from?: string; status: store.Status }
+
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
   private lastRendered = '';
   private watched = '';
   private history = new EditHistory();
-  /** The suggestion the last recorded edit applied, so Undo can reopen it. */
-  private lastApply: { id: string; from?: string; status: store.Status } | null = null;
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
 
@@ -225,10 +226,12 @@ export class ReviewSession {
           const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
           if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
         });
-      case 'applySuggestion':
+      case 'applySuggestion': {
         this.assertEditable();
+        // Kept with the undo entry, so Undo and Redo move the thread along with the text.
+        const applied: Applied = { id: msg.id, from: msg.from, status: 'submitted' };
         try {
-          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText));
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText), applied);
         } catch (e) {
           if (e instanceof InlineMapError) {
             this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: "Couldn't apply that suggestion to the Markdown safely, so nothing was written. Make the change in the source below." });
@@ -240,13 +243,14 @@ export class ReviewSession {
         this.mutate((d) => {
           const c = store.find(d, msg.id);
           const s = store.suggestionOf(c, msg.from);
-          this.lastApply = { id: msg.id, from: msg.from, status: c.status };
+          applied.status = c.status;
           if (s) s.appliedAt = store.now();
           if (c.status !== 'resolved') store.setStatus(d, msg.id, 'resolved');
         });
         this.ctx.post({ type: 'blockSaved', ls: msg.ls });
         this.render();
         return;
+      }
       case 'dismissSuggestion':
         return this.mutate((d) => {
           const s = store.suggestionOf(store.find(d, msg.id), msg.from);
@@ -318,11 +322,10 @@ export class ReviewSession {
   }
 
   /** Run a file edit and remember it for undo. */
-  private recorded(write: () => unknown): void {
-    this.lastApply = null;
+  private recorded(write: () => unknown, tag?: Applied): void {
     const before = fs.readFileSync(this.ctx.mdPath);
     write();
-    this.history.record(before, fs.readFileSync(this.ctx.mdPath));
+    this.history.record(before, fs.readFileSync(this.ctx.mdPath), tag);
     this.postHistory();
   }
 
@@ -339,6 +342,7 @@ export class ReviewSession {
       throw new Error('This file has unsaved changes in another editor. Save or revert them before undoing here.');
     }
     const cur = fs.readFileSync(this.ctx.mdPath);
+    const applied = this.history.nextTag(which) as Applied | undefined;
     let next: Buffer;
     try {
       next = which === 'undo' ? this.history.undo(cur) : this.history.redo(cur);
@@ -348,16 +352,19 @@ export class ReviewSession {
     }
     fs.writeFileSync(this.ctx.mdPath, next);
     this.postHistory();
-    // Undoing an applied suggestion puts the thread back the way it was.
-    const applied = which === 'undo' ? this.lastApply : null;
-    this.lastApply = null;
+    // Undoing an applied suggestion puts the thread back the way it was; Redo applies it again.
     if (applied) {
       try {
         this.mutate((d) => {
           const c = store.find(d, applied.id);
           const s = store.suggestionOf(c, applied.from);
-          if (s) delete s.appliedAt;
-          if (c.status !== applied.status) store.setStatus(d, applied.id, applied.status);
+          if (which === 'undo') {
+            if (s) delete s.appliedAt;
+            if (c.status !== applied.status) store.setStatus(d, applied.id, applied.status);
+          } else {
+            if (s) s.appliedAt = store.now();
+            if (c.status !== 'resolved') store.setStatus(d, applied.id, 'resolved');
+          }
         });
       } catch {
         // the thread is gone; the text is back regardless
