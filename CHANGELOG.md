@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Undo and redo (Ctrl+Z / Ctrl+Y) for edits made in the view, byte-exact and refused if the file changed elsewhere in between.
+- Undo and redo (Ctrl+Z / Ctrl+Y) for edits made in the view, byte-exact and refused if the file changed elsewhere in between (the buttons grey out as soon as that happens).
 - Outline pane with the current section tracked and open-thread counts per heading.
 - Find in document (Ctrl+F) with all matches highlighted.
 - Keyboard navigation between comments (`j`/`k`, Alt+↓/↑) and `r` to reply.
@@ -10,7 +10,6 @@
 - Reading view: zoom the document (Ctrl+wheel, Ctrl+= / Ctrl+−, Ctrl+0), a theme for the reading column that follows VS Code by default (plus Paper, Sepia, Dusk, Night), and a Sans/Serif choice, remembered across files.
 - **Send to Claude**: submit drafts and start Claude Code on the open threads, or send a single thread with **Ask Claude**. The prompt is also copied to the clipboard.
 - Keyboard access for the outline (arrows, Enter, Esc) and the reading panel (arrow keys pick a theme or font, Esc returns focus to the toolbar).
-- The undo and redo buttons grey out as soon as another program changes the file, not only after a click.
 - Esc inside an editor or comment box no longer also closes the find bar.
 - Windows narrower than 620px keep a single column with the outline open, and the floating outline closes after a jump.
 - High-contrast themes get a visible border on the active thread, its highlight, and the current outline entry.

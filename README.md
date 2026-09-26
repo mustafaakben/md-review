@@ -21,7 +21,7 @@ paper.md.comments.json     ← the comment threads (schema below)
 - An outline pane, find in document, `j`/`k` jumps between comments, and status and author filters.
 - Reading themes (Paper, Sepia, Dusk, Night), a serif option, and zoom for the document column.
 - Byte-exact undo and redo of edits made in the view.
-- A collapsible comments pane, full keyboard access, and a browser mode that runs without VS Code.
+- A collapsible comments pane, keyboard access to the outline, reading panel, and threads, and a browser mode that runs without VS Code.
 
 It was built for academic manuscripts, but works for any Markdown: docs, specs, notes, or READMEs.
 
@@ -93,7 +93,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
 
-**Keyboard.** Everything works without a mouse. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
+**Keyboard.** Tab reaches the toolbar, the outline, and the comments. (Starting a new comment still needs a text selection with the mouse.) In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 

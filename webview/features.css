@@ -174,12 +174,13 @@ body.vscode-high-contrast .mdr-card.active, body.vscode-high-contrast-light .mdr
 body.vscode-high-contrast mark.mdr-hl.active, body.vscode-high-contrast-light mark.mdr-hl.active {
   outline: 2px solid var(--vscode-contrastActiveBorder, var(--focus)); outline-offset: 1px;
 }
-body.vscode-high-contrast .mdr-toc-item.current, body.vscode-high-contrast-light .mdr-toc-item.current {
+body.vscode-high-contrast .mdr-toc-item.current:not(:focus-visible), body.vscode-high-contrast-light .mdr-toc-item.current:not(:focus-visible) {
   outline: 1px dashed var(--vscode-contrastActiveBorder, var(--focus)); outline-offset: -1px;
 }
 @media (forced-colors: active) {
   .mdr-card.active { outline: 2px solid Highlight; outline-offset: -2px; }
   mark.mdr-hl.active { outline: 2px solid Highlight; outline-offset: 1px; }
-  .mdr-toc-item.current { outline: 1px solid Highlight; outline-offset: -1px; }
+  .mdr-toc-item.current:not(:focus-visible) { outline: 1px solid Highlight; outline-offset: -1px; }
+  .mdr-toc-item:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   .mdr-card::before { forced-color-adjust: none; }
 }

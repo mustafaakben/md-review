@@ -39,6 +39,7 @@ function swap(buf: Buffer, start: number, from: Buffer, to: Buffer): Buffer {
 export class EditHistory {
   private done: EditEntry[] = [];
   private undone: EditEntry[] = [];
+  private expected: string | undefined; // hash of the file after the last recorded/undone/redone edit
 
   constructor(private limit = 100) {}
 
@@ -55,6 +56,7 @@ export class EditHistory {
     this.done.push(e);
     if (this.done.length > this.limit) this.done.shift();
     this.undone = [];
+    this.expected = e.afterHash;
   }
 
   /**
@@ -63,9 +65,7 @@ export class EditHistory {
    * view can disable its undo/redo buttons without waiting for a click.
    */
   sync(current: Buffer): boolean {
-    const top = this.done[this.done.length - 1];
-    const expected = top ? top.afterHash : this.undone[this.undone.length - 1]?.beforeHash;
-    if (expected === undefined || hash(current) === expected) return false;
+    if (this.expected === undefined || hash(current) === this.expected) return false;
     this.clear();
     return true;
   }
@@ -73,6 +73,7 @@ export class EditHistory {
   clear(): void {
     this.done = [];
     this.undone = [];
+    this.expected = undefined;
   }
 
   /** Returns the file contents with the last edit reverted. */
@@ -85,6 +86,7 @@ export class EditHistory {
     }
     this.done.pop();
     this.undone.push(e);
+    this.expected = e.beforeHash;
     return swap(current, e.start, e.inserted, e.removed);
   }
 
@@ -98,6 +100,7 @@ export class EditHistory {
     }
     this.undone.pop();
     this.done.push(e);
+    this.expected = e.afterHash;
     return swap(current, e.start, e.removed, e.inserted);
   }
 }

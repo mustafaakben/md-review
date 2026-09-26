@@ -27,7 +27,8 @@ export interface Reading {
   apply(p: Partial<ReadingPrefs>): void;
   zoomBy(dir: 1 | -1): void;
   resetZoom(): void;
-  togglePanel(): void;
+  /** `focus` (default true): move focus into the panel when opening it. */
+  togglePanel(focus?: boolean): void;
 }
 
 export function createReading(
@@ -192,12 +193,12 @@ export function createReading(
     resetZoom() {
       zoomTo(1);
     },
-    togglePanel() {
-      if (!panel.hidden) return close(true);
+    togglePanel(focus = true) {
+      if (!panel.hidden) return close(focus);
       panel.hidden = false;
       button.setAttribute('aria-expanded', 'true');
       // Focus the selected theme so the panel is usable from the keyboard.
-      (panel.querySelector('.mdr-swatch[aria-checked="true"]') as HTMLElement | null)?.focus();
+      if (focus) (panel.querySelector('.mdr-swatch[aria-checked="true"]') as HTMLElement | null)?.focus();
     },
   };
   render();

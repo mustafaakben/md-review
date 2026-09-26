@@ -86,6 +86,7 @@ export class ReviewSession {
 
   /** Every render follows a file change, so check undo history still applies. */
   private syncHistory(): void {
+    if (!this.history.canUndo && !this.history.canRedo) return;
     let disk: Buffer;
     try {
       disk = fs.readFileSync(this.ctx.mdPath);

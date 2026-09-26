@@ -50,7 +50,7 @@ app.innerHTML = `
     <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
       <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled></button></span>
-      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false"></button>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
@@ -535,7 +535,8 @@ function runCommand(cmd: string) {
       if (isTyping(document.activeElement)) return;
       return navigate(cmd === 'next' ? 1 : -1);
     case 'outline':
-      return outline.setOpen(!outline.isOpen(), true);
+      // Never pull focus out of a text box or editor: that would commit a half-typed edit.
+      return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
     case 'send':
       return post({ type: 'sendToAgent' });
     case 'zoomIn':
@@ -545,7 +546,7 @@ function runCommand(cmd: string) {
     case 'zoomReset':
       return reading.resetZoom();
     case 'reading':
-      return reading.togglePanel();
+      return reading.togglePanel(!isTyping(document.activeElement) && !editing && !inline);
   }
 }
 

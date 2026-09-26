@@ -78,6 +78,7 @@ export function createOutline(
 
   // Keyboard: arrows move between entries, Enter/Space jumps, Escape closes.
   pane.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // Alt+arrows jump between comments
     const item = (e.target as Element).closest('.mdr-toc-item') as HTMLElement | null;
     const items = Array.from(pane.querySelectorAll('.mdr-toc-item')) as HTMLElement[];
     const at = item ? items.indexOf(item) : -1;
@@ -149,8 +150,9 @@ export function createOutline(
       if (open) {
         current = -1;
         track();
-        if (focus) (pane.querySelector('.mdr-toc-item[tabindex="0"]') as HTMLElement | null)?.focus();
-      } else if (focus || wasInside) toggleBtn?.focus();
+        if (focus) ((pane.querySelector('.mdr-toc-item[tabindex="0"]') || pane.querySelector('button')) as HTMLElement | null)?.focus();
+      } else if (focus) toggleBtn?.focus();
+      else if (wasInside) (document.activeElement as HTMLElement | null)?.blur();
     },
     isOpen: () => !document.body.classList.contains('mdr-outline-closed'),
   };
