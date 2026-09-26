@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1' # weekly, for the VS Code smoke test
 
 permissions:
   contents: read
@@ -44,3 +47,35 @@ jobs:
         with:
           name: md-review-vsix
           path: md-review.vsix
+
+  # Opens MD Review in a real VS Code (test/smoke), pinned to the oldest version
+  # package.json supports. It downloads VS Code (about 150 MB, cached), so it
+  # runs on main, weekly and on demand rather than on every pull request.
+  smoke:
+    name: VS Code smoke · ${{ matrix.os }}
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      VSCODE_VERSION: 1.100.0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          key: vscode-${{ runner.os }}-${{ env.VSCODE_VERSION }}
+      - name: Smoke test (Linux, virtual display)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:smoke
+      - name: Smoke test
+        if: runner.os != 'Linux'
+        run: npm run test:smoke

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { MdReviewEditorProvider } from './editorProvider';
 import { addClaudeSkill, sendFolderToClaude } from './agentCommands';
 import { initAgentPrompts } from './agentRun';
+import type { FromWebview } from './core';
 
 export function activate(context: vscode.ExtensionContext) {
   initAgentPrompts(context);
@@ -47,6 +48,8 @@ export function activate(context: vscode.ExtensionContext) {
       ] as const
     ).map(([id, msg]) => vscode.commands.registerCommand(id, () => MdReviewEditorProvider.postToActive(msg))),
   );
+  // Only for test/smoke: drive the focused panel's host side the way its webview would.
+  if (context.extensionMode === vscode.ExtensionMode.Test) return { handle: (msg: FromWebview) => MdReviewEditorProvider.handleInActive(msg) };
 }
 
 export function deactivate() {}
