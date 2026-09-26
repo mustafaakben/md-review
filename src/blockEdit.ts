@@ -65,6 +65,70 @@ export function spliceBlock(buf: Buffer, lineStart: number, lineEnd: number, ori
   return Buffer.concat([buf.subarray(0, from), Buffer.from(replacement, 'utf8'), buf.subarray(to)]);
 }
 
+/**
+ * Replace lines [ts, te) of `target` with lines [ss, se) of `source`, as raw
+ * bytes. Either span may be empty (ts === te inserts), and an end may be the
+ * line count (the end of the file). Every byte outside the span is kept. The
+ * copied lines take the target's line endings when the two files differ, and
+ * a line break is added where the copy would otherwise run into its neighbour.
+ * Where the copy would touch text here that it didn't touch in the source, a
+ * blank line keeps it apart.
+ */
+export function spliceLines(target: Buffer, ts: number, te: number, source: Buffer, ss: number, se: number): Buffer {
+  const ti = indexLines(target);
+  const si = indexLines(source);
+  const span = (buf: Buffer, { starts }: LineIndex, from: number, to: number) => {
+    if (!(from >= 0 && to >= from && to <= starts.length)) {
+      throw new BlockEditError(`Line range ${from}-${to} is outside the file (${starts.length} lines).`);
+    }
+    const at = (l: number) => (l < starts.length ? starts[l] : buf.length);
+    const end = at(to);
+    return [at(from), end, /^[\r\n]*$/.test(buf.subarray(end).toString('latin1')) ? 1 : 0]; // 1: nothing but line breaks follows
+  };
+  // Line l's text, or undefined past either end (an empty last line is the end too).
+  const line = (buf: Buffer, { starts }: LineIndex, l: number) => {
+    if (l < 0 || l >= starts.length) return undefined;
+    const s = buf.subarray(starts[l], l + 1 < starts.length ? starts[l + 1] : buf.length).toString('utf8').replace(/\r?\n$/, '');
+    return l === starts.length - 1 && !s ? undefined : s;
+  };
+  const text = (s: string | undefined) => s !== undefined && /[^\s>]/.test(s); // a quote's bare `>` separates too
+  const [tf, tt, tEnd] = span(target, ti, ts, te);
+  const [sf, st, sEnd] = span(source, si, ss, se);
+  let seg = source.subarray(sf, st);
+  // A file with no line break yet takes the source's.
+  const eol = target.includes(0x0a) ? detectEol(target) : detectEol(source);
+  if (seg.length && detectEol(source) !== eol) seg = Buffer.from(seg.toString('utf8').replace(/\r?\n/g, eol), 'utf8');
+  const nl = (b: Buffer) => b.length > 0 && b[b.length - 1] === 0x0a;
+  // Replacing text: keep the copy apart where the source had it apart. Filling a gap next to other
+  // text than in the source: also where the lower line would run into the paragraph above it.
+  let fills = true;
+  for (let l = ts; l < te && fills; l++) fills = !text(line(target, ti, l));
+  const apart = (inSource: string | undefined, here: string | undefined, upper: string | undefined, lower: string | undefined) =>
+    text(upper) && text(lower) && (!text(inSource) || (fills && inSource !== here && !INTERRUPTS.test(lower!)));
+  const parts = [target.subarray(0, tf)];
+  // Inserting after a last line that has no line break.
+  if (seg.length && tf === target.length && tf > ti.bom && !nl(target)) parts.push(Buffer.from(eol));
+  const first = line(source, si, ss);
+  const last = line(source, si, se - 1);
+  const before = line(target, ti, ts - 1);
+  const after = line(target, ti, te);
+  // The separator is the source's own line there when it has one (a quote's bare `>`), else a blank line.
+  const gap = (l: string | undefined) => Buffer.from((l !== undefined && !text(l) ? l : '') + eol);
+  if (seg.length && apart(line(source, si, ss - 1), before, before, first)) parts.push(gap(line(source, si, ss - 1)));
+  parts.push(seg);
+  // The copy ends the source file without a break, but lines follow it here.
+  if (seg.length && !nl(seg) && tt < target.length) parts.push(Buffer.from(eol));
+  if (seg.length && apart(line(source, si, se), after, last, after)) parts.push(gap(line(source, si, se)));
+  parts.push(target.subarray(tt));
+  const out = Buffer.concat(parts);
+  // Removing the last block of both files: end with a line break only if the source does.
+  if (!seg.length && tEnd && sEnd && nl(out) && !nl(source)) return out.subarray(0, out.length - (out.length > 1 && out[out.length - 2] === 0x0d ? 2 : 1));
+  return out;
+}
+
+/** A line that starts a block of its own even right under a paragraph: a list item, heading, quote or fence. */
+const INTERRUPTS = /^ {0,3}(?:[-*+][ \t]|\d{1,9}[.)][ \t]|#{1,6}(?:[ \t]|$)|>|```|~~~)/;
+
 function detectEol(buf: Buffer): string {
   const i = buf.indexOf(0x0a);
   return i > 0 && buf[i - 1] === 0x0d ? '\r\n' : '\n';
