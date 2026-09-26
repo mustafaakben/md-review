@@ -227,3 +227,41 @@ test('YAML comments after the bibliography, %-commented entries, and empty bibli
     assert.equal(cliFinds('Ping @bob now'), true, empty);
   }
 });
+
+test('a bibliography that is a device, a folder, or outside the allowed folders is not read', () => {
+  const cite = FM.replace('refs.bib', 'sub') + 'See [@rivera2021].\n';
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(path.join(tmp, 'sub'), { recursive: true });
+  assert.match(renderMarkdown(cite, (x) => x, { docDir: tmp }), /Couldn't read sub: not a file/);
+  if (process.platform !== 'win32') {
+    const dev = FM.replace('refs.bib', '/dev/zero') + 'See [@rivera2021].\n';
+    assert.match(renderMarkdown(dev, (x) => x, { docDir: tmp }), /Couldn't read \/dev\/zero: not a file/);
+  }
+  // Restricted Mode: only the document's own folder (and workspace folders).
+  setup(FM + 'x\n');
+  const outside = path.join(here, 'tmp', 'cite-outside.bib');
+  fs.writeFileSync(outside, BIB);
+  const md = FM.replace('refs.bib', outside) + 'See [@rivera2021].\n';
+  const env = { docDir: tmp, bibRoots: [tmp] };
+  const html = renderMarkdown(md, (x) => x, env);
+  assert.match(html, /not read in Restricted Mode/);
+  assert.equal(env.bibFiles, undefined, 'nothing to watch');
+  assert.match(renderMarkdown(FM + 'See [@rivera2021].\n', (x) => x, { docDir: tmp, bibRoots: [tmp] }), /Rivera and Chen/);
+  assert.match(renderMarkdown(md, (x) => x, { docDir: tmp }), /Rivera and Chen/, 'trusted: read from anywhere');
+  fs.rmSync(outside, { force: true });
+});
+
+test('Windows network paths are never opened for a bibliography', () => {
+  const { loadBibliography } = require('../dist/lib.cjs');
+  assert.equal(loadBibliography('\\\\server\\share\\refs.bib', 'win32').error, 'network paths are not read');
+  assert.equal(loadBibliography('//server/share/refs.bib', 'win32').error, 'network paths are not read');
+  assert.equal(loadBibliography('\\\\.\\pipe\\x', 'win32').error, 'network paths are not read');
+});
+
+test('refused bibliographies (devices, folders) are not watched; missing ones are', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(path.join(tmp, 'sub'), { recursive: true });
+  const env = { docDir: tmp };
+  renderMarkdown('---\nbibliography: [sub, missing.bib]\n---\n\n[@a]\n', (x) => x, env);
+  assert.deepEqual(env.bibFiles, [path.join(tmp, 'missing.bib')]);
+});

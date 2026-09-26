@@ -6,5 +6,5 @@ export * from './render';
 export * from './inlineEdit';
 export * from './editHistory';
 export * from './agentPrompt';
-export { parseBibTeX, parseCslJson } from './bibliography';
+export { loadBibliography, parseBibTeX, parseCslJson } from './bibliography';
 export * from './agentLaunch';
