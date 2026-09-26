@@ -59,7 +59,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const session = new ReviewSession({
       mdPath,
-      author: () => cfg().get<string>('author') || os.userInfo().username,
+      author: () => cfg().get<string>('author')?.trim() || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
       resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
@@ -69,6 +69,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       isDirty: () => document.isDirty,
       openLink: (href) => openLink(href, dir),
       watchFiles: watchBibs,
+      // In Restricted Mode a document can't make us read files elsewhere on the
+      // machine. (A document at a drive root or in the home folder allows that folder.)
+      readableRoots: () => (vscode.workspace.isTrusted ? undefined : [dir, ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)]),
       suggestMode: () => cfg().get<string>('agent.editMode') === 'suggest',
       reviewComments: () => cfg().get<number>('agent.reviewComments', 12),
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
@@ -112,6 +115,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
       }),
+      vscode.workspace.onDidGrantWorkspaceTrust(() => rerender(true)),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.workspace.isTrusted || rerender(true)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('mdReview')) session.sendComments();
       }),
@@ -171,6 +176,20 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
+/**
+ * The OS user name. os.userInfo() throws when the user has no passwd entry,
+ * as in many dev containers and CI images that run under an arbitrary uid.
+ */
+function systemUser(): string {
+  try {
+    const name = os.userInfo().username;
+    if (name) return name;
+  } catch {
+    // fall through
+  }
+  return process.env.USER || process.env.USERNAME || 'Reviewer';
+}
+
 /** Stored reading preferences, with anything unexpected replaced by the default. */
 function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string } {
   const p = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
@@ -182,7 +201,13 @@ function readingPrefs(stored: unknown): { zoom: number; theme: string; font: str
 
 function openLink(href: string, dir: string) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    void vscode.env.openExternal(vscode.Uri.parse(href));
+    const uri = vscode.Uri.parse(href);
+    // file: links open here. In Restricted Mode only web and mail links leave
+    // VS Code; other schemes (vscode:, other apps' handlers) need trust.
+    const scheme = uri.scheme.toLowerCase();
+    if (scheme === 'file') void vscode.commands.executeCommand('vscode.open', uri);
+    else if (vscode.workspace.isTrusted || ['http', 'https', 'mailto'].includes(scheme)) void vscode.env.openExternal(uri);
+    else void vscode.window.showInformationMessage(`Trust this folder to open ${uri.scheme}: links.`);
     return;
   }
   const [p] = href.split('#');

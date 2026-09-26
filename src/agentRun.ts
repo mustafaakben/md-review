@@ -29,6 +29,8 @@ export function runAgent(prompt: string, fileName: string, cwd: string): string 
   const command = (cfg.get<string>('agent.command') || 'claude').trim();
   void vscode.env.clipboard.writeText(prompt);
   if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
+  // Claude Code started here would load the folder's own settings and hooks.
+  if (!vscode.workspace.isTrusted) return "This folder isn't trusted, so Claude Code wasn't started. The review prompt is on your clipboard.";
 
   const [program = 'claude', ...extra] = parseCommand(command, process.platform === 'win32');
   let home = '';

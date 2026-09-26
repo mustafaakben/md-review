@@ -65,6 +65,10 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
 }
 
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {
+  if (!vscode.workspace.isTrusted) {
+    void vscode.window.showInformationMessage('Trust this folder first; the skill is for running Claude Code in it.');
+    return;
+  }
   const ws = await pickWorkspaceFolder('Add the MD Review skill to which folder?');
   if (ws === null) return;
   if (!ws) {
