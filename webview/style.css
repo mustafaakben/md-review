@@ -225,6 +225,34 @@ button.mdr-side-toggle { padding: 5px; }
 .mdr-doc tbody tr:nth-child(even) { background: var(--doc-softer); }
 .mdr-doc .footnotes { font-size: 0.9em; color: var(--doc-muted); }
 .mdr-doc .katex-display { overflow-x: auto; overflow-y: hidden; }
+/* Off-screen blocks skip style, layout and paint until they scroll near the
+   viewport, so a long document lays out only what is visible. `auto` remembers
+   each block's real height once seen. The clip margin keeps hover bars and
+   highlight pulses that reach past a block's edge from being cut off.
+   Containment also stops a child's edge margins from merging with the block's
+   own, which would change the spacing, so blocks whose children can carry such
+   margins are left alone: wrapped blocks (display math, raw HTML, indented
+   code; only the math inside is contained), paragraphs holding an image,
+   lists holding blocks with margins of their own or nested deeper than three,
+   and the footnotes and references lists. */
+.mdr-doc > :not(.mdr-wrap, .mdr-block-editor, .footnotes, .mdr-refs, p:has(img), :is(ul, ol):has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)),
+.mdr-doc > .mdr-wrap .katex-display {
+  content-visibility: auto; contain-intrinsic-size: auto 4em; overflow-clip-margin: 16px;
+}
+/* A contained list keeps the edge margins of its items inside. Its own bottom
+   margin is as large as any of theirs, so the inner ones can go. */
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:first-child { margin-top: 0; }
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child,
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child > :last-child,
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child > :is(ul, ol):last-child > li:last-child,
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child > :is(ul, ol):last-child > li:last-child > :last-child,
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child > :is(ul, ol):last-child > li:last-child > :is(ul, ol):last-child > li:last-child,
+.mdr-doc > :is(ul, ol):not(:has(table, pre, img, blockquote, hr, .mdr-wrap, li li li li)) > li:last-child > :is(ul, ol):last-child > li:last-child > :is(ul, ol):last-child > li:last-child > :last-child {
+  margin-bottom: 0;
+}
+/* Contained blocks clip what overflows them, so let long words and URLs wrap
+   instead of running out of the column. */
+.mdr-doc :is(p, li, h1, h2, h3, h4, h5, h6, blockquote) { overflow-wrap: break-word; }
 .mdr-doc eq { display: inline; }
 .mdr-doc section.eqno, .mdr-doc eqn { display: block; }
 

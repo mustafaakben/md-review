@@ -6,6 +6,7 @@ import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { Round, roundBanner, isWorking, nextExpiry } from './round';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
+import { blockAtY, reveal, settle, viewTop } from './reveal';
 import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
@@ -153,7 +154,7 @@ function paint() {
   editBtn.hidden = true;
   secBtn.hidden = true;
   hoverEl = null;
-  const y = window.scrollY;
+  const at = readingPosition();
   doc.innerHTML = html;
   const text = buildTextMap(doc).text;
   if (text !== paintedText) anchorCache.clear();
@@ -168,11 +169,60 @@ function paint() {
   wrapRanges(doc, specs);
   renderSidebar();
   afterPaint();
-  window.scrollTo(0, y);
+  restorePosition(at);
   if (focusTask !== null) {
     (doc.querySelector(`input.mdr-task[data-task-line="${focusTask}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
     focusTask = null;
   }
+}
+
+// Off-screen blocks use an estimated height until they are first shown (see
+// content-visibility in style.css), so a pixel offset does not survive a repaint
+// or a reopen. Remember the block at the top of the view and where it sat instead.
+type BlockRef = { i: number; key?: string };
+type Position = (BlockRef & { dy: number }) | null;
+
+const blockKey = (el: Element) => (el.textContent || '').slice(0, 80);
+const refOf = (el: Element): BlockRef => ({ i: Array.prototype.indexOf.call(doc.children, el), key: blockKey(el) });
+
+/** The block `ref` points at: by its text near its old index, else by index. */
+function findBlock(ref: BlockRef): Element | undefined {
+  const kids = doc.children;
+  if (!kids.length) return undefined;
+  const i = Math.min(ref.i, kids.length - 1);
+  if (ref.key !== undefined) {
+    for (let d = 0; d <= 20; d++) {
+      for (const j of d ? [i - d, i + d] : [i]) if (kids[j] && blockKey(kids[j]) === ref.key) return kids[j];
+    }
+  }
+  return kids[i];
+}
+
+// While a restore is still correcting, the layout is not yet where it is going,
+// so another repaint (or a save of the position) uses the restore's target.
+let restoring: Position | undefined;
+
+function readingPosition(): Position {
+  if (restoring !== undefined) return restoring;
+  if (window.scrollY <= 0) return null;
+  const top = viewTop();
+  const el = blockAtY(doc.children, top);
+  return el ? { ...refOf(el), dy: el.getBoundingClientRect().top - top } : null;
+}
+
+function restorePosition(at: Position) {
+  const el = at && findBlock(at);
+  if (!el) {
+    restoring = undefined;
+    return window.scrollTo(0, 0);
+  }
+  restoring = at;
+  settle(
+    () => (el.isConnected ? el.getBoundingClientRect().top - viewTop() - at!.dy : null),
+    8,
+    () => restoring === at && (restoring = undefined),
+  );
+  syncPop();
 }
 
 /**
@@ -386,8 +436,12 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   marks.forEach((m) => m.classList.add('active'));
   const cardEl = sidebar.querySelector(`.mdr-card[data-id="${id}"]`);
   cardEl?.classList.add('active');
-  if (scrollDoc && marks[0]) marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
-  if (scrollCard && cardEl) cardEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  if (scrollDoc) reveal(marks[0], 'center');
+  // In one column the thread list is below the document, in the same scroll:
+  // there the highlight wins.
+  if (scrollCard && cardEl && !(scrollDoc && matchMedia('(max-width: 620px)').matches)) {
+    cardEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 }
 
 // ---------------------------------------------------------------- selection -> comment
@@ -400,6 +454,7 @@ function hidePop() {
   pop.hidden = true;
   pop.innerHTML = '';
   pendingAnchor = null;
+  popAnchor = null;
   returnFocus = null;
 }
 
@@ -413,12 +468,31 @@ function closeBox() {
   back?.focus({ preventScroll: true });
 }
 
-function placePop(rect: DOMRect) {
+// The comment box sits in page coordinates, but blocks above it change height
+// (off-screen blocks take their real size when shown, and a repaint resets
+// them), so it follows the block holding the selection instead.
+let popAnchor: { ref: BlockRef; el: Element; dy: number } | null = null;
+
+function placePop(at: Range | Element) {
+  const rect = at.getBoundingClientRect();
   pop.hidden = false;
   const w = pop.offsetWidth || 320;
   const left = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), window.innerWidth - w - 8);
   pop.style.left = `${left + window.scrollX}px`;
   pop.style.top = `${rect.bottom + window.scrollY + 8}px`;
+  let el: Node | null = at instanceof Range ? at.startContainer : at;
+  while (el && el.parentNode !== doc) el = el.parentNode;
+  popAnchor = el instanceof Element ? { ref: refOf(el), el, dy: rect.bottom + 8 - el.getBoundingClientRect().top } : null;
+}
+
+function syncPop() {
+  if (pop.hidden || !popAnchor) return;
+  if (!popAnchor.el.isConnected) {
+    const el = findBlock(popAnchor.ref);
+    if (!el) return;
+    popAnchor.el = el;
+  }
+  pop.style.top = `${popAnchor.el.getBoundingClientRect().top + window.scrollY + popAnchor.dy}px`;
 }
 
 /** Anchor the current document selection, or return null when there is none to comment on. */
@@ -458,7 +532,7 @@ document.addEventListener('mouseup', (ev) => {
     const range = selectionRange();
     if (!range) return;
     pop.innerHTML = `<button class="mdr-primary" data-act="new-comment" title="${tip('Comment', 'Mod+Alt+M', 'C')}">Comment</button>`;
-    placePop(range.getBoundingClientRect());
+    placePop(range);
   }, 0);
 });
 
@@ -507,7 +581,7 @@ function commentOnSelection() {
   }
   if (!range) return toast('Select some text first, then press ' + keyLabel('Mod+Alt+M') + ' to comment on it.');
   pop.innerHTML = '';
-  placePop(range.getBoundingClientRect());
+  placePop(range);
   openCommentBox(parseFloat(pop.style.top));
 }
 
@@ -653,7 +727,7 @@ doc.addEventListener('click', (e) => {
       try {
         id = decodeURIComponent(id);
       } catch {} // a citation key may hold a bare %
-      document.getElementById(id)?.scrollIntoView({ block: 'center' });
+      reveal(document.getElementById(id), 'center', false);
     } else if (href) post({ type: 'openLink', href });
     return;
   }
@@ -1005,7 +1079,7 @@ function commentOnSection(h: HTMLElement) {
   const [lineStart, lineEnd] = sectionLines(h, doc);
   pendingAnchor = { quote: cap.quote, prefix: cap.prefix, suffix: cap.suffix, lineStart, lineEnd, scope: 'section' };
   window.getSelection()?.removeAllRanges();
-  placePop(h.getBoundingClientRect());
+  placePop(range);
   openCommentBox(parseFloat(pop.style.top));
 }
 
@@ -1013,7 +1087,7 @@ function commentOnDocument() {
   if (editing || inline) return;
   pendingAnchor = { quote: '', prefix: '', suffix: '', lineStart: 0, lineEnd: 0, scope: 'document' };
   window.getSelection()?.removeAllRanges();
-  placePop(docCommentBtn.getBoundingClientRect());
+  placePop(docCommentBtn);
   openCommentBox(parseFloat(pop.style.top));
   returnFocus = docCommentBtn;
 }
@@ -1115,9 +1189,10 @@ window.addEventListener('message', (ev) => {
         fileName = m.fileName;
         paint();
       }
-      if (saved.scrollY && !(saved as any)._restored) {
+      if (!(saved as any)._restored) {
         (saved as any)._restored = true;
-        window.scrollTo(0, saved.scrollY);
+        if (saved.position) restorePosition(saved.position);
+        else if (saved.scrollY) window.scrollTo(0, saved.scrollY);
       }
       break;
     case 'comments':
@@ -1192,8 +1267,9 @@ async function copyText(text: string): Promise<boolean> {
 
 let scrollT: any;
 window.addEventListener('scroll', () => {
+  syncPop();
   clearTimeout(scrollT);
-  scrollT = setTimeout(() => vscode.setState({ ...(vscode.getState() || {}), scrollY: window.scrollY }), 200);
+  scrollT = setTimeout(() => vscode.setState({ ...(vscode.getState() || {}), scrollY: window.scrollY, position: readingPosition() }), 200);
 });
 
 void author;
