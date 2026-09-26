@@ -105,3 +105,66 @@ test('rendered HTML carries source line ranges and resolves pandoc image widths'
   assert.match(html, /<th style="text-align:left"/);
   assert.match(html, /<tr data-ls="32" data-le="33">/);
 });
+
+test('fields this version does not know survive viewer writes', () => {
+  fs.mkdirSync(tmp, { recursive: true });
+  const md = path.join(tmp, 'extra.md');
+  fs.writeFileSync(md, '# T\n\nA claim here.\n');
+  const side = md + '.comments.json';
+  fs.writeFileSync(
+    side,
+    JSON.stringify({
+      schemaVersion: 1,
+      file: 'extra.md',
+      tool: { name: 'future' },
+      comments: [
+        {
+          id: 'c_1',
+          author: 'Reviewer',
+          createdAt: '2026-09-26T10:00:00.000Z',
+          anchor: { quote: 'A claim', prefix: '', suffix: ' here.', lineStart: 3, lineEnd: 3, blockId: 'p3' },
+          body: 'Cite this.',
+          status: 'submitted',
+          submittedAt: '2026-09-26T10:00:00.000Z',
+          resolvedAt: null,
+          severity: 'major',
+          suggestion: { kind: 'replace', text: 'A cited claim' },
+          replies: [{ id: 'r_1', author: 'Claude', createdAt: '2026-09-26T10:01:00.000Z', body: 'Done.', change: { lines: [3, 3] } }],
+        },
+      ],
+    }),
+  );
+  const { s } = session(md);
+  s.handle({ type: 'ready' });
+  s.handle({ type: 'reply', id: 'c_1', body: 'Thanks' });
+  s.handle({ type: 'setStatus', id: 'c_1', status: 'resolved' });
+  const d = JSON.parse(fs.readFileSync(side, 'utf8'));
+  assert.deepEqual(d.tool, { name: 'future' });
+  const c = d.comments[0];
+  assert.equal(c.severity, 'major');
+  assert.deepEqual(c.suggestion, { kind: 'replace', text: 'A cited claim' });
+  assert.equal(c.anchor.blockId, 'p3');
+  assert.deepEqual(c.replies[0].change, { lines: [3, 3] });
+  assert.equal(c.replies.length, 2);
+  assert.equal(c.status, 'resolved');
+  assert.ok(!('reopenedAt' in c));
+});
+
+test('hand-damaged values read as defaults, and the legacy quote moves into the anchor', () => {
+  fs.mkdirSync(tmp, { recursive: true });
+  const md = path.join(tmp, 'damaged.md');
+  fs.writeFileSync(md, '# T\n\nhello world\n');
+  const side = md + '.comments.json';
+  fs.writeFileSync(
+    side,
+    JSON.stringify({ schemaVersion: 1, file: 'damaged.md', comments: [{ id: 'c_a', anchor: 'hello', replies: ['ok'] }, { id: 'c_b', quote: 'world' }] }),
+  );
+  const { s } = session(md);
+  s.handle({ type: 'ready' });
+  s.handle({ type: 'reply', id: 'c_b', body: 'x' });
+  const d = JSON.parse(fs.readFileSync(side, 'utf8'));
+  assert.deepEqual(Object.keys(d.comments[0].anchor).sort(), ['lineEnd', 'lineStart', 'prefix', 'quote', 'suffix']);
+  assert.deepEqual(Object.keys(d.comments[0].replies[0]).sort(), ['author', 'body', 'createdAt', 'id']);
+  assert.equal(d.comments[1].anchor.quote, 'world');
+  assert.ok(!('quote' in d.comments[1]));
+});

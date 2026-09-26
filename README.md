@@ -180,7 +180,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
    - Change only the comments you touch, and keep every other field and comment as it is.
    - Never change `id`s. Don't delete other people's comments.
    - The viewer merges by re-reading on every write, so a quick read-modify-write is safe.
-5. **Anchoring.** If your edit changes the quoted text itself, the comment may show as *orphaned* in the viewer. That's fine once it's resolved; the thread is kept.
+5. **Extra fields are kept.** MD Review and the CLI keep any field they don't know, on the file, on each comment, its anchor, and each reply. A tool can add its own data (for example `"x-tool": {…}`) without it being erased by the viewer's next write.
+6. **Anchoring.** If your edit changes the quoted text itself, the comment may show as *orphaned* in the viewer. That's fine once it's resolved; the thread is kept.
 
 ### CLI (zero dependencies)
 
