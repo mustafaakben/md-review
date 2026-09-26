@@ -43,7 +43,7 @@ export function createReading(
   function render() {
     document.body.dataset.readingTheme = prefs.theme;
     document.body.dataset.readingFont = prefs.font;
-    document.documentElement.style.setProperty('--mdr-zoom', String(prefs.zoom));
+    document.documentElement.style.setProperty('--doc-zoom', String(prefs.zoom));
     const pct = `${Math.round(prefs.zoom * 100)}%`;
     button.title = `Reading view: theme, font, and zoom (${pct})`;
     panel.innerHTML = `

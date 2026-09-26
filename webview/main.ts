@@ -47,14 +47,14 @@ const standalone = !!(window as any).__mdrStandalone;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline">☰</button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
-      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled>↶</button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled>↷</button></span>
- <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false">Aa</button>
-      <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document">⌕</button>
+      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled></button></span>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false"></button>
+      <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
-      <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">✎ Edit</button>
-      <label class="mdr-toggle"><input type="checkbox" id="mdr-show-resolved"> Show resolved</label>
+      <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
+      <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
       <button id="mdr-submit" class="mdr-primary" disabled>Submit review</button>
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
     </div>
@@ -67,14 +67,14 @@ app.innerHTML = `
     <aside class="mdr-sidebar mdr-ui">
       <div class="mdr-side-head">
         <div class="mdr-filters"></div>
-        <button id="mdr-send" class="mdr-send" title="Submit drafts and hand the open threads to Claude Code">✦ Send to Claude</button>
+        <button id="mdr-send" class="mdr-send" title="Submit drafts and hand the open threads to Claude Code">Send to Claude</button>
       </div>
       <div id="mdr-threads"></div>
     </aside>
   </div>
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
-  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). Alt+double-click edits the raw Markdown." hidden>✎</button>`;
+  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). Alt+double-click edits the raw Markdown." aria-label="Edit" hidden></button>`;
 const doc = document.getElementById('mdr-doc')!;
 const sidebar = document.getElementById('mdr-threads')!;
 const pop = document.getElementById('mdr-pop')!;
@@ -248,7 +248,7 @@ function renderSidebar() {
   filtersEl.innerHTML = filterBar(filter, authorsOf(comments), fc);
   const sendable = n.draft + n.submitted;
   sendBtn.disabled = sendable === 0;
-  sendBtn.textContent = sendable ? `✦ Send to Claude (${sendable})` : '✦ Send to Claude';
+  sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
 
   const visible = comments.filter((c) => passes(c, filter, showResolved));
   const anchored = visible.filter((c) => !orphans.has(c.id)).sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
@@ -258,7 +258,7 @@ function renderSidebar() {
   if (!visible.length && comments.length) {
     out = `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`;
   } else if (!visible.length) {
-    out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>✎ Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
+    out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
   out += anchored.map(card).join('');
   if (orphaned.length) {
@@ -276,7 +276,7 @@ function card(c: Comment): string {
     `<button data-act="reply">Reply</button>`,
     mine && c.status !== 'resolved' ? `<button data-act="edit-body">Edit</button>` : '',
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
-    c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">✦ Ask Claude</button>` : '',
+    c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
     c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
   ].join('');
   const replyBox = openReplies.has(c.id)
@@ -347,7 +347,7 @@ document.addEventListener('mouseup', (ev) => {
       lineStart: a ? a[0] + 1 : 0,
       lineEnd: b ? b[1] : a ? a[1] : 0,
     };
-    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment">💬 Comment</button>`;
+    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment">Comment</button>`;
     placePop(range.getBoundingClientRect());
   }, 0);
 });
@@ -588,7 +588,8 @@ showResolvedBox.addEventListener('change', () => {
 // Collapsible comments pane; the choice is remembered per editor.
 function setSidebarOpen(open: boolean) {
   document.body.classList.toggle('mdr-side-collapsed', !open);
-  sideToggle.textContent = open ? '⟩' : '⟨ Comments';
+  sideToggle.textContent = open ? '' : 'Comments';
+  sideToggle.setAttribute('aria-label', open ? 'Hide comments' : 'Show comments');
   sideToggle.title = open ? 'Hide the comments pane' : 'Show the comments pane';
   sideToggle.setAttribute('aria-expanded', String(open));
   vscode.setState({ ...(vscode.getState() || {}), sidebarOpen: open });
@@ -611,7 +612,7 @@ function setEditMode(on: boolean) {
   editMode = on;
   document.body.classList.toggle('mdr-edit-mode', on);
   editModeBtn.classList.toggle('on', on);
-  editModeBtn.textContent = on ? '✎ Editing: click text to change it' : '✎ Edit';
+  editModeBtn.textContent = on ? 'Done editing' : 'Edit';
   vscode.setState({ ...(vscode.getState() || {}), editMode: on });
   if (!on) commitInline();
   hidePop();
@@ -634,6 +635,7 @@ function startEdit(el: HTMLElement, raw = false) {
 }
 
 function startInline(el: HTMLElement, caretAtEnd = false) {
+  if (editing || inline) return;
   docStale = true;
   inline = { el, ls: Number(el.dataset.ls), le: Number(el.dataset.le), kind: INLINE_KIND[el.tagName], oldText: el.textContent || '', oldHtml: el.innerHTML, saving: false };
   el.contentEditable = 'true';
@@ -713,7 +715,7 @@ doc.addEventListener('dblclick', (e) => {
   startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
 });
 
-// Hover "✎" button in the left gutter of the block under the pointer.
+// Hover edit (pencil) button in the left gutter of the block under the pointer.
 const editBtn = document.getElementById('mdr-edit-btn') as HTMLButtonElement;
 let hoverEl: HTMLElement | null = null;
 doc.addEventListener('mousemove', (e) => {
@@ -734,7 +736,7 @@ doc.addEventListener('mouseleave', (e) => {
   }
 });
 editBtn.addEventListener('click', () => {
-  if (!hoverEl) return;
+  if (!hoverEl || editing || inline) return;
   const el = hoverEl;
   editBtn.hidden = true;
   if (canInline(el)) startInline(el, true);
