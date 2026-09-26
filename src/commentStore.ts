@@ -7,18 +7,14 @@ import * as crypto from 'crypto';
 
 export type Status = 'draft' | 'submitted' | 'resolved';
 
-// Fields this version doesn't know (written by an agent, the CLI, or a newer
-// MD Review) are kept as they are on every read and write.
-type Extra = { [key: string]: unknown };
-
-export interface Reply extends Extra {
+export interface Reply {
   id: string;
   author: string;
   createdAt: string;
   body: string;
 }
 
-export interface Anchor extends Extra {
+export interface Anchor {
   quote: string;
   prefix: string;
   suffix: string;
@@ -26,7 +22,7 @@ export interface Anchor extends Extra {
   lineEnd: number; // 1-based, inclusive
 }
 
-export interface Comment extends Extra {
+export interface Comment {
   id: string;
   author: string;
   createdAt: string;
@@ -40,7 +36,7 @@ export interface Comment extends Extra {
   replies: Reply[];
 }
 
-export interface Sidecar extends Extra {
+export interface Sidecar {
   schemaVersion: 1;
   file: string;
   comments: Comment[];
@@ -62,7 +58,14 @@ export function emptySidecar(mdPath: string): Sidecar {
   return { schemaVersion: 1, file: path.basename(mdPath), comments: [] };
 }
 
-/** Read the sidecar; missing file -> empty. Tolerates missing optional fields. */
+/** Plain JSON objects only; anything else (a hand-damaged value) reads as empty. */
+const obj = (x: unknown): Record<string, any> => (x && typeof x === 'object' && !Array.isArray(x) ? (x as Record<string, any>) : {});
+
+/**
+ * Read the sidecar; missing file -> empty. Tolerates missing optional fields.
+ * Fields this version doesn't know (written by an agent, the CLI, or a newer
+ * MD Review) are kept as they are, on the file, comments, anchors and replies.
+ */
 export function readSidecar(mdPath: string): Sidecar {
   const p = sidecarPath(mdPath);
   let raw: string;
@@ -72,28 +75,31 @@ export function readSidecar(mdPath: string): Sidecar {
     return emptySidecar(mdPath);
   }
   if (!raw.trim()) return emptySidecar(mdPath);
-  const data = JSON.parse(raw.replace(/^﻿/, ''));
+  const data = obj(JSON.parse(raw.replace(/^﻿/, '')));
   const out: Sidecar = { ...data, schemaVersion: 1, file: data.file || path.basename(mdPath), comments: [] };
-  for (const c of data.comments || []) {
+  for (const item of data.comments || []) {
+    const c = obj(item);
+    const a = obj(c.anchor);
+    const { quote: legacyQuote, ...rest } = c; // pre-anchor files kept the quote here
     out.comments.push({
-      ...c,
+      ...rest,
       id: c.id || newId('c'),
       author: c.author || 'unknown',
       createdAt: c.createdAt || now(),
       anchor: {
-        ...c.anchor,
-        quote: c.anchor?.quote ?? c.quote ?? '',
-        prefix: c.anchor?.prefix ?? '',
-        suffix: c.anchor?.suffix ?? '',
-        lineStart: c.anchor?.lineStart ?? 0,
-        lineEnd: c.anchor?.lineEnd ?? 0,
+        ...a,
+        quote: a.quote ?? legacyQuote ?? '',
+        prefix: a.prefix ?? '',
+        suffix: a.suffix ?? '',
+        lineStart: a.lineStart ?? 0,
+        lineEnd: a.lineEnd ?? 0,
       },
       body: c.body ?? '',
       status: (['draft', 'submitted', 'resolved'].includes(c.status) ? c.status : 'submitted') as Status,
       submittedAt: c.submittedAt ?? null,
       resolvedAt: c.resolvedAt ?? null,
       ...(c.reopenedAt ? { reopenedAt: c.reopenedAt } : { reopenedAt: undefined }),
-      replies: (c.replies || []).map((r: any) => ({
+      replies: (c.replies || []).map(obj).map((r: Record<string, any>) => ({
         ...r,
         id: r.id || newId('r'),
         author: r.author || 'unknown',

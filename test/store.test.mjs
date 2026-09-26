@@ -149,3 +149,22 @@ test('fields this version does not know survive viewer writes', () => {
   assert.equal(c.status, 'resolved');
   assert.ok(!('reopenedAt' in c));
 });
+
+test('hand-damaged values read as defaults, and the legacy quote moves into the anchor', () => {
+  fs.mkdirSync(tmp, { recursive: true });
+  const md = path.join(tmp, 'damaged.md');
+  fs.writeFileSync(md, '# T\n\nhello world\n');
+  const side = md + '.comments.json';
+  fs.writeFileSync(
+    side,
+    JSON.stringify({ schemaVersion: 1, file: 'damaged.md', comments: [{ id: 'c_a', anchor: 'hello', replies: ['ok'] }, { id: 'c_b', quote: 'world' }] }),
+  );
+  const { s } = session(md);
+  s.handle({ type: 'ready' });
+  s.handle({ type: 'reply', id: 'c_b', body: 'x' });
+  const d = JSON.parse(fs.readFileSync(side, 'utf8'));
+  assert.deepEqual(Object.keys(d.comments[0].anchor).sort(), ['lineEnd', 'lineStart', 'prefix', 'quote', 'suffix']);
+  assert.deepEqual(Object.keys(d.comments[0].replies[0]).sort(), ['author', 'body', 'createdAt', 'id']);
+  assert.equal(d.comments[1].anchor.quote, 'world');
+  assert.ok(!('quote' in d.comments[1]));
+});
