@@ -261,3 +261,33 @@ button.mdr-doc-comment::before { width: 14px; height: 14px; --ico: var(--i-discu
   .mdr-tag-question::before, .mdr-tag-praise::before, .mdr-kind-question::before, .mdr-kind-praise::before, button.mdr-doc-comment::before, .mdr-sec-btn::before { forced-color-adjust: none; background: CanvasText; }
   .mdr-tag { border: 1px solid CanvasText; }
 }
+
+/* Live agent status: progress over the threads, a pulse on what Claude is on. */
+.mdr-round { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); font-size: 12px; }
+.mdr-round[hidden] { display: none; }
+.mdr-round-row { display: flex; align-items: center; gap: 8px; }
+.mdr-round-text { flex: 1; min-width: 0; }
+.mdr-round-actions { justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.mdr-round-actions button { font-size: 12px; }
+.mdr-round-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.mdr-round-dot.live { background: var(--accent); animation: mdr-blink 1.4s ease-in-out infinite; }
+.mdr-round-icon { flex: none; width: 14px; height: 14px; background: var(--accent); -webkit-mask: var(--i-check) center / contain no-repeat; mask: var(--i-check) center / contain no-repeat; }
+.mdr-round-x { flex: none; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.mdr-round-x:hover { color: var(--fg); }
+.mdr-round-x::before { content: ''; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--i-close) center / contain no-repeat; mask: var(--i-close) center / contain no-repeat; }
+.mdr-round-bar { height: 3px; margin-top: 6px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.mdr-round-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.mdr-working-line { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--accent); }
+.mdr-card.mdr-working { border-color: var(--accent); }
+mark.mdr-hl.mdr-working { animation: mdr-glow 1.4s ease-in-out infinite; }
+@keyframes mdr-blink { 50% { opacity: 0.3; } }
+@keyframes mdr-glow { 50% { box-shadow: inset 0 -2px 0 var(--c, var(--accent)), 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .mdr-round-dot.live, mark.mdr-hl.mdr-working { animation: none; }
+  .mdr-round-bar > span { transition: none; }
+}
+@media (forced-colors: active) {
+  .mdr-round { border-color: CanvasText; }
+  .mdr-round-dot, .mdr-round-icon, .mdr-round-x::before, .mdr-round-bar > span { forced-color-adjust: none; background: Highlight; }
+  .mdr-round-bar { border: 1px solid CanvasText; }
+}

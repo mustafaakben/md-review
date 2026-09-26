@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Live agent status: after **Send to Claude**, the comments pane shows "Claude is working · 2 of 5" with a progress bar, and the thread Claude is on pulses. When it's done you get one summary (resolved, and questions for you) with **Show questions**; a background panel shows it as a notification. The CLI's `next` and `context` mark the thread they hand out, and `reply` and `resolve` clear the mark.
 - Comment kinds and severity: mark a thread as a Question (answer, don't edit) or Praise (no action), and as Major, Minor or Nit (Alt+1/2/3 in the comment box). Cards show small tags, severity chips filter the list, and Send to Claude and the CLI's `next` work major first.
 - Comment on a whole section (the icon beside a heading) or the whole document (**Comment on document** in the comments pane). The CLI's `context` shows the whole section.
 - Selections snap to whole words, so quotes no longer end mid-word.

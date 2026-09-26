@@ -45,6 +45,9 @@ export interface Comment {
   kind?: Kind;
   severity?: Severity;
   scope?: Scope;
+  /** Set by the CLI while an agent works on this thread; cleared when it replies or resolves. */
+  workingAt?: string;
+  workingBy?: string;
   replies: Reply[];
 }
 

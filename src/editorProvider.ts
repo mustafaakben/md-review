@@ -77,6 +77,13 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
+      // The panel shows the summary itself; only reach out when it's out of sight.
+      notify: (message) => {
+        if (panel.active && panel.visible) return;
+        void vscode.window.showInformationMessage(message, 'Open').then((pick) => {
+          if (pick === 'Open') panel.reveal();
+        });
+      },
     });
     MdReviewEditorProvider.panels.add(panel);
 

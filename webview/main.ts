@@ -4,6 +4,7 @@ import { createOutline } from './outline';
 import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
+import { Round, roundBanner, isWorking, nextExpiry } from './round';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
 import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
 
@@ -15,6 +16,8 @@ interface Reply { id: string; author: string; createdAt: string; body: string }
 interface Comment extends Meta {
   id: string; author: string; createdAt: string; body: string; status: Status;
   submittedAt: string | null; resolvedAt: string | null; replies: Reply[];
+  /** Set by the CLI while an agent is on this thread. */
+  workingAt?: string; workingBy?: string;
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
 }
 
@@ -37,6 +40,9 @@ let paintedText = '';
 let docStale = false;
 /** The task checkbox to refocus after the repaint its click causes. */
 let focusTask: string | null = null;
+let round: Round | null = null;
+let workingTimer: ReturnType<typeof setTimeout> | undefined;
+let lastBanner = '';
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
@@ -76,6 +82,7 @@ app.innerHTML = `
         <button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button>
         <button id="mdr-doc-comment" class="mdr-doc-comment" title="A comment about the whole document, not a passage">Comment on document</button>
       </div>
+      <div id="mdr-round" class="mdr-round" role="status" aria-live="polite" hidden></div>
       <div id="mdr-threads"></div>
     </aside>
   </div>
@@ -92,6 +99,7 @@ const submitBtn = document.getElementById('mdr-submit') as HTMLButtonElement;
 const showResolvedBox = document.getElementById('mdr-show-resolved') as HTMLInputElement;
 const sideToggle = document.getElementById('mdr-side-toggle') as HTMLButtonElement;
 const filtersEl = document.querySelector('.mdr-filters') as HTMLElement;
+const roundEl = document.getElementById('mdr-round')!;
 const sendBtn = document.getElementById('mdr-send') as HTMLButtonElement;
 const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
 const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
@@ -299,6 +307,20 @@ function renderSidebar() {
     out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map(card).join('');
   }
   sidebar.innerHTML = out;
+  showWorking();
+}
+
+/** The round banner, and a pulse on the threads Claude is on right now. */
+function showWorking() {
+  const now = Date.now();
+  const on = new Set(comments.filter((c) => isWorking(c, now)).map((c) => c.id));
+  const banner = roundBanner(round, on.size > 0);
+  if (banner !== lastBanner) roundEl.innerHTML = lastBanner = banner; // unchanged text isn't re-announced
+  roundEl.hidden = !round;
+  doc.querySelectorAll<HTMLElement>('mark.mdr-hl').forEach((m) => m.classList.toggle('mdr-working', on.has(m.dataset.cid!)));
+  clearTimeout(workingTimer);
+  const left = nextExpiry(comments, now);
+  if (left !== null) workingTimer = setTimeout(renderSidebar, left + 50);
 }
 
 function card(c: Comment): string {
@@ -317,7 +339,8 @@ function card(c: Comment): string {
     ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
-  return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}" data-id="${c.id}">
+  const working = isWorking(c);
+  return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}${working ? ' mdr-working' : ''}" data-id="${c.id}">
     <div class="mdr-meta"><span class="mdr-badge ${c.status}">${c.status}</span><b>${esc(c.author)}</b> · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
     ${metaBadges(c) ? `<div class="mdr-tags">${metaBadges(c)}</div>` : ''}
     ${c.scope === 'document' ? '' : `<blockquote class="mdr-quote" data-act="goto" title="Go to text">${esc(c.anchor.quote.length > 180 ? c.anchor.quote.slice(0, 180) + '…' : c.anchor.quote)}</blockquote>`}
@@ -325,6 +348,7 @@ function card(c: Comment): string {
       ? `<div class="mdr-replybox">${metaPicker(c, altDigit)}<textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
       : `<div class="mdr-body">${esc(c.body)}</div>`}
     ${replies ? `<div class="mdr-replies">${replies}</div>` : ''}
+    ${working ? `<div class="mdr-working-line"><span class="mdr-round-dot live" aria-hidden="true"></span>${esc(c.workingBy || 'Claude')} is working on this…</div>` : ''}
     <div class="mdr-actions">${actions}</div>
     ${replyBox}
   </div>`;
@@ -500,6 +524,12 @@ function saveComment() {
 }
 
 // ---------------------------------------------------------------- sidebar actions
+roundEl.addEventListener('click', (e) => {
+  const act = (e.target as Element).closest('[data-round]')?.getAttribute('data-round');
+  if (act === 'questions') setFilter({ status: 'submitted', author: '', severity: '' });
+  else if (act === 'dismiss') post({ type: 'dismissRound' });
+});
+
 sidebar.addEventListener('click', (e) => {
   const t = e.target as Element;
   if (pickerClick(t)) return;
@@ -1089,6 +1119,10 @@ window.addEventListener('message', (ev) => {
       break;
     case 'toast':
       toast(m.message);
+      break;
+    case 'round':
+      round = m.round;
+      showWorking();
       break;
     case 'agentPrompt':
       copyText(m.prompt).then(
