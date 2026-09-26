@@ -27,8 +27,11 @@ export function blockAtY(blocks: HTMLCollection, y: number): Element | undefined
   return blocks[lo];
 }
 
-function wanted(r: DOMRect, place: Place): number {
-  if (place === 'start') return viewTop() + 8;
+function wanted(target: Target, r: DOMRect, place: Place): number {
+  if (place === 'start') {
+    const margin = target instanceof Element ? parseFloat(getComputedStyle(target).scrollMarginTop) || 0 : 0;
+    return Math.max(viewTop() + 8, margin);
+  }
   if (place === 'third') return window.innerHeight / 3;
   return (viewTop() + window.innerHeight) / 2 - Math.min(r.height, window.innerHeight / 2) / 2;
 }
@@ -56,20 +59,39 @@ window.addEventListener(
 );
 
 /**
- * Scroll by `delta()` pixels now, then re-measure and correct on each of the
- * next few frames: blocks that just came into view take their real height a
- * frame after the jump, which moves the target. `delta` reads live layout and
- * returns null once the target is gone. `done` runs when the correction ends,
- * finished or cancelled.
+ * Scroll by `delta()` pixels now, then re-measure and correct over the next few
+ * frames: blocks that just came into view take their real height, which moves
+ * the target. The document's resize is seen before that frame is painted, so
+ * the correction lands in the same frame; a check on each animation frame
+ * catches the rest. `delta` reads live layout and returns null once the target
+ * is gone. `done` runs once when the correction ends, finished or cancelled.
  */
 export function settle(delta: () => number | null, frames = 8, done?: () => void): void {
   const mine = ++generation;
-  const step = (left: number) => {
+  let over = false;
+  const finish = () => {
+    if (over) return;
+    over = true;
+    resized.disconnect();
+    done?.();
+  };
+  const correct = () => {
+    if (over) return false;
     const d = mine === generation ? delta() : null;
-    if (d === null) return done?.();
+    if (d === null) {
+      finish();
+      return false;
+    }
     if (Math.abs(d) >= 1) window.scrollBy(0, d);
+    return true;
+  };
+  const resized = new ResizeObserver(() => void correct());
+  const docEl = document.getElementById('mdr-doc');
+  if (docEl) resized.observe(docEl);
+  const step = (left: number) => {
+    if (!correct()) return;
     if (left > 0) requestAnimationFrame(() => step(left - 1));
-    else done?.();
+    else finish();
   };
   step(frames);
 }
@@ -80,7 +102,7 @@ export function reveal(target: Target | null | undefined, place: Place, smooth =
   const delta = () => {
     if (!node.isConnected) return null;
     const r = target.getBoundingClientRect();
-    return r.top - wanted(r, place);
+    return r.top - wanted(target, r, place);
   };
   const d = delta()!;
   if (smooth && !reducedMotion.matches && Math.abs(d) < window.innerHeight) {
