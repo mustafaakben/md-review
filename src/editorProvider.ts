@@ -88,6 +88,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     subs.push(
       webview.onDidReceiveMessage((m: FromWebview) => {
+        // Alt+1/2/3 are VS Code's "open editor N"; bind them only while a comment box has focus.
+        if (m.type === 'composing') return void vscode.commands.executeCommand('setContext', 'mdReview.composing', m.on);
         session.handle(m);
         if (m.type === 'saveBlock' || m.type === 'undo' || m.type === 'redo') setTimeout(() => void refreshFromDisk(document, session), 400);
       }),
@@ -113,6 +115,11 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     );
     subs.push(mdWatcher, mdWatcher.onDidChange(() => setTimeout(() => void refreshFromDisk(document, session), 300)));
 
+    subs.push(
+      panel.onDidChangeViewState((e) => {
+        if (!e.webviewPanel.active) void vscode.commands.executeCommand('setContext', 'mdReview.composing', false);
+      }),
+    );
     panel.onDidDispose(() => {
       MdReviewEditorProvider.panels.delete(panel);
       subs.forEach((d) => d.dispose());

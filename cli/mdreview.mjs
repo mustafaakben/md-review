@@ -248,12 +248,73 @@ function readSource(md) {
     return null;
   }
 }
+// CommonMark's HTML block tags (type 6): these start a raw HTML block even inside a paragraph.
+const HTML_BLOCK = /^(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)$/i;
+/** Last line (1-based) of the section whose heading is on line `h`: before the next heading at its level or above. */
+function sectionEnd(lines, h) {
+  const atx = (t) => /^ {0,3}(#{1,6})(?:[ \t]|$)/.exec(t);
+  const m = atx(lines[h - 1] || '');
+  const level = m ? m[1].length : /^ {0,3}=+[ \t]*$/.test(lines[h] || '') ? 1 : 2; // ATX, else setext
+  let fence = null;
+  let html = null; // what ends the raw HTML block we're in: a closing tag, '-->', or a blank line
+  let para = 0; // first line of the paragraph just above, which a setext underline turns into a heading
+  for (let n = h + 1; n <= lines.length; n++) {
+    const t = lines[n - 1];
+    if (html) {
+      if (html === 'blank' ? !t.trim() : t.toLowerCase().includes(html)) html = null;
+      continue;
+    }
+    const raw = /^ {0,3}<(?:(!--)|(script|pre|style|textarea)(?=[\s>]|$)|\/?([a-z][a-z0-9-]*)(?=[\s/>]|$))/i.exec(t);
+    if (raw && (raw[1] || raw[2] || !para || HTML_BLOCK.test(raw[3]))) {
+      const close = raw[1] ? '-->' : raw[2] ? `</${raw[2].toLowerCase()}>` : 'blank';
+      if (close === 'blank' || !t.toLowerCase().includes(close, raw.index + 4)) html = close;
+      para = 0;
+      continue;
+    }
+    if (fence) {
+      // Closed only by the same character, at least as long, and nothing after it.
+      const c = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(t);
+      if (c && c[1][0] === fence[0] && c[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(t);
+    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
+      fence = f[1];
+      para = 0;
+      continue;
+    }
+    const a = atx(t);
+    if (a) {
+      if (a[1].length <= level) return n - 1;
+      para = 0;
+      continue;
+    }
+    const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(t);
+    if (u && para) {
+      if ((u[1][0] === '=' ? 1 : 2) <= level) return para - 1;
+      para = 0;
+      continue;
+    }
+    if (!t.trim() || /^ {0,3}(?:[-*+][ \t]|\d+[.)][ \t]|>)/.test(t) || /^ {4}/.test(t) && !para) para = 0;
+    else if (!para) para = n;
+  }
+  let end = lines.length;
+  while (end > h && !lines[end - 1].trim()) end--;
+  return end;
+}
+const SEVERITY_RANK = { major: 0, minor: 1, nit: 2 };
+const severityRank = (c) => SEVERITY_RANK[c.severity] ?? 3;
+const tagsOf = (c) => [c.scope === 'document' ? 'whole document' : c.scope === 'section' ? 'whole section' : '', c.kind === 'question' || c.kind === 'praise' ? c.kind : '', SEVERITY_RANK[c.severity] != null ? c.severity : ''].filter(Boolean);
+const KIND_HINT = { question: "a question: answer it in a reply, don't edit the document", praise: 'praise: no change needed; resolve it' };
+
 function contextOf(md, c) {
   const src = readSource(md);
+  const lines = src != null ? src.split(/\r?\n/) : [];
+  if (c.scope === 'document') return { file: shown(md), found: true, lineStart: 0, lineEnd: 0, source: [] };
   const hit = src != null ? locate(src, c.anchor) : null;
   const ls = hit?.lineStart || c.anchor?.lineStart || 0;
-  const le = hit?.lineEnd || c.anchor?.lineEnd || ls;
-  const lines = src != null ? src.split(/\r?\n/) : [];
+  let le = hit?.lineEnd || c.anchor?.lineEnd || ls;
+  if (c.scope === 'section' && hit) le = Math.max(le, sectionEnd(lines, ls));
   const from = ls ? Math.max(1, ls - around) : 0;
   const to = ls ? Math.min(lines.length, le + around) : -1;
   const source = [];
@@ -263,7 +324,8 @@ function contextOf(md, c) {
 
 function describe(c) {
   const lines = c.anchor?.lineStart ? `L${c.anchor.lineStart}-${c.anchor.lineEnd}` : 'L?';
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${lines} ${c.author} ${c.createdAt}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
+  const tags = tagsOf(c);
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}${c.scope === 'document' ? '' : `\n  quote: "${c.anchor?.quote}"`}\n  body:  ${c.body}`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}`;
   return s;
 }
@@ -271,7 +333,11 @@ function describeWithContext(c, ctx) {
   const where = ctx.lineStart
     ? `${ctx.file}:${ctx.lineStart}${ctx.lineEnd !== ctx.lineStart ? `-${ctx.lineEnd}` : ''}`
     : ctx.file;
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}\n  comment: ${c.body}\n  quote:   "${c.anchor?.quote}"`;
+  const tags = tagsOf(c);
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}${tags.length ? ` (${tags.join(', ')})` : ''}\n  comment: ${c.body}`;
+  if (c.scope === 'document') s += '\n  about:   the whole document';
+  else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
+  if (KIND_HINT[c.kind]) s += `\n  (${KIND_HINT[c.kind]})`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}`;
   if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
   if (ctx.source.length) {
@@ -363,11 +429,12 @@ switch (cmd) {
             waiting++;
             return false;
           })
-          // Document order by where the quote actually is, not the (possibly stale) hint.
-          .map((c) => ({ md, c, line: (src != null && locate(src, c.anchor)?.lineStart) || c.anchor?.lineStart || 0 }))
-          .sort((a, b) => a.line - b.line)
+          // Major first, then document order by where the quote actually is, not the (possibly stale) hint.
+          .map((c) => ({ md, c, line: c.scope === 'document' ? 0 : (src != null && locate(src, c.anchor)?.lineStart) || c.anchor?.lineStart || 0 }))
+          .sort((a, b) => severityRank(a.c) - severityRank(b.c) || a.line - b.line)
       );
     });
+    open.sort((a, b) => severityRank(a.c) - severityRank(b.c)); // stable: files keep their order
     const also = waiting ? ` (${waiting} waiting on the reviewer's answer; --all includes them)` : '';
     if (!open.length) {
       console.log(asJson ? 'null' : `No open comments.${also}`);
