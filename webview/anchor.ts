@@ -1,7 +1,7 @@
 // Text-quote anchoring (W3C TextQuoteSelector style) over the rendered DOM.
 // Capture and re-anchoring both use the same text-node walk, so offsets agree.
 
-const SKIP = '.katex-mathml, .mdr-ui, .mdr-block-editor, script, style';
+const SKIP = '.katex-mathml, .mdr-ui, .mdr-block-editor, .mdr-front-raw, script, style';
 const CONTEXT = 32;
 
 export interface TextMap {
