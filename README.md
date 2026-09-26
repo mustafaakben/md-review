@@ -62,7 +62,10 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 
 **Commenting.**
 - Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) or `c` to go straight to the comment box.
-- The sidebar lists threads in document order. Click a quote to jump to its text.
+- In the comment box, pick a kind: **Comment** (asks for a change), **Question** (asks for an answer, not an edit) or **Praise** (no action). Optionally mark it **Major**, **Minor** or **Nit** (Alt+1/2/3, ⌥1/2/3 on macOS). Plain comments look exactly as before.
+- Selections snap to whole words, so a drag that stops mid-word quotes the whole word.
+- **Whole sections and the whole document.** Hover a heading and click the comment icon at its right to comment on that section. **Comment on document** in the comments pane is for notes about the whole file.
+- The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
 - Each thread has Reply, Resolve/Reopen, and (for drafts) Delete.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
 - The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. The choice is remembered, and clicking a highlighted comment in the text reopens the pane.
@@ -157,6 +160,9 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "submittedAt": "2026-09-25T20:17:31.002Z",  // batch time of the Submit that sent it, else null
       "resolvedAt": null,                    // set when resolved, else null
       "reopenedAt": null,                    // optional: set when a resolved thread is reopened
+      "kind": "question",                    // optional: "question" (answer, don't edit) | "praise" (no action); absent = a plain comment
+      "severity": "major",                   // optional: "major" | "minor" | "nit"
+      "scope": "section",                    // optional: "section" (quote is a heading; about the whole section) | "document" (empty quote)
       "replies": [
         { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }
       ]
@@ -172,6 +178,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
    - `quote` is the rendered text, so Markdown markup is stripped. It won't grep-match source that has `**bold**`, link syntax, or `*italics*` inside the quote.
    - Start with `lineStart`–`lineEnd`, then search that area for the quote's words.
 3. **Act.**
+   - Work `major` before `minor` before `nit`. A `question` gets an answer in a reply and no edit. `praise` needs no change.
+   - `scope: "section"` means the whole section under the quoted heading; `scope: "document"` means the whole file.
    - Edit the `.md` directly with minimal, targeted edits.
    - Add a reply with `"author": "Claude"`.
    - Set `"status": "resolved"` and `resolvedAt` when done. Or leave the comment `submitted` and ask a question in a reply.

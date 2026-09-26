@@ -248,12 +248,36 @@ function readSource(md) {
     return null;
   }
 }
+/** Last line (1-based) of the section whose heading is on line `h`: before the next heading at its level or above. */
+function sectionEnd(lines, h) {
+  const m = /^(#{1,6})[ \t]/.exec(lines[h - 1] || '');
+  const level = m ? m[1].length : /^=+\s*$/.test(lines[h] || '') ? 1 : 2; // ATX, else setext
+  let fence = null;
+  for (let n = h + 1; n <= lines.length; n++) {
+    const t = lines[n - 1];
+    const f = /^ {0,3}(`{3,}|~{3,})/.exec(t);
+    if (f && (!fence || f[1][0] === fence[0])) fence = fence ? null : f[1];
+    if (fence) continue;
+    const a = /^ {0,3}(#{1,6})[ \t]/.exec(t);
+    if (a && a[1].length <= level) return n - 1;
+    const setext = /^ {0,3}(=+|-+)\s*$/.exec(lines[n] || '');
+    if (setext && t.trim() && (setext[1][0] === '=' ? 1 : 2) <= level && !/^\s*[-*+]\s/.test(t)) return n - 1;
+  }
+  return lines.length;
+}
+const SEVERITY_RANK = { major: 0, minor: 1, nit: 2 };
+const severityRank = (c) => SEVERITY_RANK[c.severity] ?? 3;
+const tagsOf = (c) => [c.scope === 'document' ? 'whole document' : c.scope === 'section' ? 'whole section' : '', c.kind === 'question' || c.kind === 'praise' ? c.kind : '', SEVERITY_RANK[c.severity] != null ? c.severity : ''].filter(Boolean);
+const KIND_HINT = { question: "a question: answer it in a reply, don't edit the document", praise: 'praise: no change needed; resolve it' };
+
 function contextOf(md, c) {
   const src = readSource(md);
+  const lines = src != null ? src.split(/\r?\n/) : [];
+  if (c.scope === 'document') return { file: shown(md), found: true, lineStart: 0, lineEnd: 0, source: [] };
   const hit = src != null ? locate(src, c.anchor) : null;
   const ls = hit?.lineStart || c.anchor?.lineStart || 0;
-  const le = hit?.lineEnd || c.anchor?.lineEnd || ls;
-  const lines = src != null ? src.split(/\r?\n/) : [];
+  let le = hit?.lineEnd || c.anchor?.lineEnd || ls;
+  if (c.scope === 'section' && hit) le = Math.max(le, sectionEnd(lines, ls));
   const from = ls ? Math.max(1, ls - around) : 0;
   const to = ls ? Math.min(lines.length, le + around) : -1;
   const source = [];
@@ -263,7 +287,8 @@ function contextOf(md, c) {
 
 function describe(c) {
   const lines = c.anchor?.lineStart ? `L${c.anchor.lineStart}-${c.anchor.lineEnd}` : 'L?';
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${lines} ${c.author} ${c.createdAt}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
+  const tags = tagsOf(c);
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}`;
   return s;
 }
@@ -271,7 +296,11 @@ function describeWithContext(c, ctx) {
   const where = ctx.lineStart
     ? `${ctx.file}:${ctx.lineStart}${ctx.lineEnd !== ctx.lineStart ? `-${ctx.lineEnd}` : ''}`
     : ctx.file;
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}\n  comment: ${c.body}\n  quote:   "${c.anchor?.quote}"`;
+  const tags = tagsOf(c);
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}${tags.length ? ` (${tags.join(', ')})` : ''}\n  comment: ${c.body}`;
+  if (c.scope === 'document') s += '\n  about:   the whole document';
+  else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
+  if (KIND_HINT[c.kind]) s += `\n  (${KIND_HINT[c.kind]})`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}`;
   if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
   if (ctx.source.length) {
@@ -363,11 +392,12 @@ switch (cmd) {
             waiting++;
             return false;
           })
-          // Document order by where the quote actually is, not the (possibly stale) hint.
-          .map((c) => ({ md, c, line: (src != null && locate(src, c.anchor)?.lineStart) || c.anchor?.lineStart || 0 }))
-          .sort((a, b) => a.line - b.line)
+          // Major first, then document order by where the quote actually is, not the (possibly stale) hint.
+          .map((c) => ({ md, c, line: c.scope === 'document' ? 0 : (src != null && locate(src, c.anchor)?.lineStart) || c.anchor?.lineStart || 0 }))
+          .sort((a, b) => severityRank(a.c) - severityRank(b.c) || a.line - b.line)
       );
     });
+    open.sort((a, b) => severityRank(a.c) - severityRank(b.c)); // stable: files keep their order
     const also = waiting ? ` (${waiting} waiting on the reviewer's answer; --all includes them)` : '';
     if (!open.length) {
       console.log(asJson ? 'null' : `No open comments.${also}`);
