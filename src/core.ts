@@ -32,14 +32,19 @@ export interface Round {
   done: number;
   resolved: number;
   questions: number;
-  /** The sent threads now waiting on the reviewer's answer. */
+  /** Threads where the agent proposed an edit for the reviewer to apply. */
+  suggestions: number;
+  /** The sent threads now waiting on the reviewer (questions and suggested edits). */
   questionIds: string[];
   finished: boolean;
 }
 
 export type FromWebview =
   | { type: 'ready' }
-  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta }
+  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta; suggestion?: string }
+  /** Apply a suggestion: the block's rendered text before and after, as for saveInline. */
+  | { type: 'applySuggestion'; id: string; from?: string; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
+  | { type: 'dismissSuggestion'; id: string; from?: string }
   | { type: 'setMeta'; id: string; meta: store.CommentMeta }
   | { type: 'reply'; id: string; body: string }
   | { type: 'setStatus'; id: string; status: store.Status }
@@ -69,6 +74,8 @@ export interface HostContext {
   /** True if the document has unsaved changes in an editor. */
   isDirty(): boolean;
   openLink(href: string): void;
+  /** True when Send to Claude should ask for suggestions instead of edits. */
+  suggestMode?(): boolean;
   /** Re-render when any of these files (the bibliography) changes. */
   watchFiles?(files: string[]): void;
   /**
@@ -87,6 +94,17 @@ export interface HostContext {
   /** Tell the user something happened while they may be looking elsewhere (the view isn't focused). */
   notify?(message: string): void;
 }
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** "2 resolved, 1 suggested edit and 1 question for you" */
+export function roundSummary(r: Round): string {
+  const yours = [r.suggestions && count(r.suggestions, 'suggested edit', 'suggested edits'), r.questions && count(r.questions, 'question', 'questions')].filter(Boolean);
+  return `${r.resolved} resolved${yours.length ? `, ${yours.join(' and ')} for you` : ''}`;
+}
+
+/** A suggestion an edit applied, and the thread's status before it. */
+interface Applied { id: string; from?: string; status: store.Status }
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
@@ -155,21 +173,23 @@ export class ReviewSession {
     if (!this.round) return;
     if (this.round.summary) return this.ctx.post({ type: 'round', round: this.round.summary });
     const by = new Map(data.comments.map((c) => [c.id, c]));
-    const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, questionIds: [], finished: false };
+    const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, suggestions: 0, questionIds: [], finished: false };
     for (const id of this.round.ids) {
       const c = by.get(id);
       if (!c) continue; // deleted: no longer part of the round
       round.total++;
       if (c.status === 'resolved') round.resolved++;
-      else if (c.status === 'submitted' && !store.awaitsAgent(c)) round.questionIds.push(c.id);
+      else if (c.status === 'submitted' && !store.awaitsAgent(c)) {
+        round.questionIds.push(c.id);
+        if (store.openSuggestion(c)) round.suggestions++;
+      }
       else if (c.status === 'submitted') continue;
       round.done++; // a draft again (reviewer took it back) counts as done
     }
-    round.questions = round.questionIds.length;
+    round.questions = round.questionIds.length - round.suggestions;
     round.finished = round.done === round.total;
     if (round.finished && round.total) {
-      const q = round.questions ? `, ${round.questions} question${round.questions === 1 ? '' : 's'} for you` : '';
-      this.ctx.notify?.(`Claude finished ${path.basename(this.ctx.mdPath)}: ${round.resolved} resolved${q}.`);
+      this.ctx.notify?.(`Claude finished ${path.basename(this.ctx.mdPath)}: ${roundSummary(round)}.`);
       this.round.summary = round;
     }
     this.ctx.post({ type: 'round', round: round.total ? round : null });
@@ -212,7 +232,40 @@ export class ReviewSession {
         if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         return;
       case 'addComment':
-        return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body, msg.meta));
+        return this.mutate((d) => {
+          const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
+          if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
+        });
+      case 'applySuggestion': {
+        this.assertEditable();
+        // Kept with the undo entry, so Undo and Redo move the thread along with the text.
+        const applied: Applied = { id: msg.id, from: msg.from, status: 'submitted' };
+        try {
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText, this.lastParse), applied);
+        } catch (e) {
+          if (e instanceof InlineMapError) {
+            this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: "Couldn't apply that suggestion to the Markdown safely, so nothing was written. Make the change in the source below." });
+            return;
+          }
+          throw e;
+        }
+        // Applied is done: the thread resolves, like accepting a suggestion in Docs.
+        this.mutate((d) => {
+          const c = store.find(d, msg.id);
+          const s = store.suggestionOf(c, msg.from);
+          applied.status = c.status;
+          if (s) s.appliedAt = store.now();
+          if (c.status !== 'resolved') store.setStatus(d, msg.id, 'resolved');
+        });
+        this.ctx.post({ type: 'blockSaved', ls: msg.ls });
+        this.render(true);
+        return;
+      }
+      case 'dismissSuggestion':
+        return this.mutate((d) => {
+          const s = store.suggestionOf(store.find(d, msg.id), msg.from);
+          if (s) s.dismissedAt = store.now();
+        });
       case 'setMeta':
         return this.mutate((d) => store.setMeta(d, msg.id, msg.meta));
       case 'reply':
@@ -279,10 +332,10 @@ export class ReviewSession {
   }
 
   /** Run a file edit and remember it for undo. */
-  private recorded(write: () => unknown): void {
+  private recorded(write: () => unknown, tag?: Applied): void {
     const before = fs.readFileSync(this.ctx.mdPath);
     write();
-    this.history.record(before, fs.readFileSync(this.ctx.mdPath));
+    this.history.record(before, fs.readFileSync(this.ctx.mdPath), tag);
     this.postHistory();
   }
 
@@ -299,6 +352,7 @@ export class ReviewSession {
       throw new Error('This file has unsaved changes in another editor. Save or revert them before undoing here.');
     }
     const cur = fs.readFileSync(this.ctx.mdPath);
+    const applied = this.history.nextTag(which) as Applied | undefined;
     let next: Buffer;
     try {
       next = which === 'undo' ? this.history.undo(cur) : this.history.redo(cur);
@@ -308,6 +362,24 @@ export class ReviewSession {
     }
     fs.writeFileSync(this.ctx.mdPath, next);
     this.postHistory();
+    // Undoing an applied suggestion puts the thread back the way it was; Redo applies it again.
+    if (applied) {
+      try {
+        this.mutate((d) => {
+          const c = store.find(d, applied.id);
+          const s = store.suggestionOf(c, applied.from);
+          if (which === 'undo') {
+            if (s) delete s.appliedAt;
+            if (c.status !== applied.status) store.setStatus(d, applied.id, applied.status);
+          } else {
+            if (s) s.appliedAt = store.now();
+            if (c.status !== 'resolved') store.setStatus(d, applied.id, 'resolved');
+          }
+        });
+      } catch {
+        // the thread is gone; the text is back regardless
+      }
+    }
     this.ctx.post({ type: 'toast', message: which === 'undo' ? 'Undid the last edit.' : 'Redid the edit.' });
     this.render(true);
   }
@@ -342,6 +414,7 @@ export class ReviewSession {
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
       comments,
       cliPath: this.ctx.cliPath,
+      suggest: this.ctx.suggestMode?.(),
     });
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });

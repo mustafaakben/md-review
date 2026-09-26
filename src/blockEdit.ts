@@ -51,15 +51,16 @@ export function spliceBlock(buf: Buffer, lineStart: number, lineEnd: number, ori
   const idx = indexLines(buf);
   const { from, to } = regionBounds(buf, idx, lineStart, lineEnd);
   const region = buf.subarray(from, to).toString('utf8');
-  if (norm(region) !== norm(original)) {
+  // A list's last item owns the blank line after it, so compare and keep every trailing line break.
+  if (norm(region).replace(/\n+$/, '') !== norm(original).replace(/\n+$/, '')) {
     throw new BlockEditError('The file changed on disk since this block was rendered. The view has been refreshed — please try again.');
   }
   // Line ending of the block's last line (kept verbatim), and the separator
   // used inside the block (taken from the block's own first line).
-  const trailing = region.endsWith('\r\n') ? '\r\n' : region.endsWith('\n') ? '\n' : '';
+  const trailing = /(?:\r?\n)*$/.exec(region)![0];
   const firstEol = /\r?\n/.exec(region)?.[0] ?? (trailing || detectEol(buf));
   let body = newText.replace(/\r\n/g, '\n');
-  if (body.endsWith('\n')) body = body.slice(0, -1);
+  body = body.replace(/\n+$/, '');
   const replacement = body === '' && newText === '' ? '' : body.split('\n').join(firstEol) + trailing;
   return Buffer.concat([buf.subarray(0, from), Buffer.from(replacement, 'utf8'), buf.subarray(to)]);
 }

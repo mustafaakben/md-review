@@ -5,6 +5,7 @@ import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { Round, roundBanner, isWorking, nextExpiry } from './round';
+import { Suggestion, suggestionBlock, suggestionEdit } from './suggest';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
 import { blockAtY, reveal, settle, viewTop } from './reveal';
 import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
@@ -13,10 +14,11 @@ declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState()
 const vscode = acquireVsCodeApi();
 
 type Status = 'draft' | 'submitted' | 'resolved';
-interface Reply { id: string; author: string; createdAt: string; body: string }
+interface Reply { id: string; author: string; createdAt: string; body: string; suggestion?: Suggestion }
 interface Comment extends Meta {
   id: string; author: string; createdAt: string; body: string; status: Status;
   submittedAt: string | null; resolvedAt: string | null; replies: Reply[];
+  suggestion?: Suggestion;
   /** Set by the CLI while an agent is on this thread. */
   workingAt?: string; workingBy?: string;
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
@@ -396,9 +398,20 @@ function showWorking() {
   if (left !== null) workingTimer = setTimeout(showWorking, Math.max(0, left) + 50);
 }
 
+/** The suggestion still waiting on the reviewer: '' for the comment's own, else the reply id. */
+function openSuggestion(c: Comment): string | null {
+  if (c.status === 'resolved') return null;
+  for (let i = c.replies.length - 1; i >= 0; i--) {
+    const s = c.replies[i].suggestion;
+    if (s && !s.appliedAt && !s.dismissedAt) return c.replies[i].id;
+  }
+  return c.suggestion && !c.suggestion.appliedAt && !c.suggestion.dismissedAt ? '' : null;
+}
+
 function card(c: Comment, now = Date.now()): string {
+  const open = orphans.has(c.id) ? null : openSuggestion(c); // no text to apply it to
   const replies = c.replies
-    .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div></div>`)
+    .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div>${r.suggestion ? suggestionBlock(c.anchor.quote, r.suggestion, r.id, r.author, open === r.id) : ''}</div>`)
     .join('');
   const mine = c.author === author;
   const actions = [
@@ -420,6 +433,7 @@ function card(c: Comment, now = Date.now()): string {
     ${editingBodies.has(c.id)
       ? `<div class="mdr-replybox">${metaPicker(c, altDigit)}<textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
       : `<div class="mdr-body">${esc(c.body)}</div>`}
+    ${c.suggestion ? suggestionBlock(c.anchor.quote, c.suggestion, '', c.author === author ? 'You' : c.author, open === '') : ''}
     ${replies ? `<div class="mdr-replies">${replies}</div>` : ''}
     ${working ? `<div class="mdr-working-line"><span class="mdr-round-dot live" aria-hidden="true"></span>${esc(c.workingBy || 'Claude')} is working on this…</div>` : ''}
     <div class="mdr-actions">${actions}</div>
@@ -540,12 +554,12 @@ const altDigit = (n: number) => keyLabel(`Alt+${n}`);
 
 // VS Code binds Alt+1/2/3 to severity only while a comment box has focus (they
 // otherwise switch editor tabs), so tell the host when that changes.
-let composing = false;
+let inPickerBox = false;
 const trackComposing = () =>
   queueMicrotask(() => {
     const on = !!document.activeElement?.closest('.mdr-pop, .mdr-card')?.querySelector('.mdr-meta-pick');
-    if (on !== composing && !standalone) post({ type: 'composing', on });
-    composing = on;
+    if (on !== inPickerBox && !standalone) post({ type: 'composing', on });
+    inPickerBox = on;
   });
 document.addEventListener('focusin', trackComposing);
 document.addEventListener('focusout', trackComposing);
@@ -556,10 +570,15 @@ function openCommentBox(top: number) {
     a.scope === 'document'
       ? `<div class="mdr-quote small mdr-scope-note">The whole document</div>`
       : `<div class="mdr-quote small">${a.scope === 'section' ? 'Section: ' : ''}${esc(a.quote.slice(0, 140))}${a.quote.length > 140 ? '…' : ''}</div>`;
+  // A passage can carry a suggested replacement; a section or the document can't.
+  const suggest = a.scope
+    ? ''
+    : `<div class="mdr-sugg-edit" hidden><label class="mdr-sugg-label" for="mdr-sugg-text">Replace with</label><textarea id="mdr-sugg-text" class="mdr-sugg-text" spellcheck="true">${esc(a.quote)}</textarea></div>`;
   pop.innerHTML = `${what}
       ${metaPicker({}, altDigit)}
-      <textarea placeholder="Add a comment…  (${keyLabel('Mod+Enter')} to save)"></textarea>
-      <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button></div>`;
+      <textarea class="mdr-comment-text" placeholder="Add a comment…  (${keyLabel('Mod+Enter')} to save)"></textarea>
+      ${suggest}
+      <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button>${a.scope ? '' : `<button class="mdr-sugg-toggle" data-act="toggle-sugg" aria-pressed="false" title="Propose replacement text for the selection">Suggest edit</button>`}</div>`;
   pop.style.top = `${top}px`;
   (pop.querySelector('textarea') as HTMLTextAreaElement).focus();
 }
@@ -595,6 +614,16 @@ pop.addEventListener('click', (e) => {
   const act = (e.target as Element).closest('[data-act]')?.getAttribute('data-act');
   if (act === 'new-comment' && pendingAnchor) {
     openCommentBox(pop.getBoundingClientRect().top + window.scrollY);
+  } else if (act === 'toggle-sugg') {
+    const box = pop.querySelector('.mdr-sugg-edit') as HTMLElement;
+    const btn = pop.querySelector('.mdr-sugg-toggle') as HTMLElement;
+    box.hidden = !box.hidden;
+    btn.setAttribute('aria-pressed', String(!box.hidden));
+    if (!box.hidden) {
+      const ta = box.querySelector('textarea') as HTMLTextAreaElement;
+      ta.focus();
+      ta.select();
+    }
   } else if (act === 'save-comment') {
     saveComment();
   } else if (act === 'cancel') {
@@ -609,13 +638,15 @@ pop.addEventListener('keydown', (e) => {
 });
 
 function saveComment() {
-  const ta = pop.querySelector('textarea') as HTMLTextAreaElement | null;
+  const ta = pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null;
   if (!ta || !pendingAnchor) return;
-  const body = ta.value.trim();
-  if (!body) return ta.focus();
   const { quote, prefix, suffix, lineStart, lineEnd, scope } = pendingAnchor;
+  // A suggestion speaks for itself, so the comment text is optional with one.
+  const suggestion = typedSuggestion();
+  const body = ta.value.trim() || (suggestion !== undefined ? (suggestion ? 'Suggested edit.' : 'Suggest deleting this.') : '');
+  if (!body) return ta.focus();
   const { kind, severity } = readPicker(pop);
-  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope } });
+  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope }, suggestion });
   closeBox();
   window.getSelection()?.removeAllRanges();
 }
@@ -681,6 +712,25 @@ sidebar.addEventListener('click', (e) => {
     }
     case 'delete':
       return post({ type: 'deleteComment', id });
+    case 'apply-sugg': {
+      const c = comments.find((x) => x.id === id);
+      const from = (t.closest('[data-from]') as HTMLElement).dataset.from || '';
+      const s = from ? c?.replies.find((r) => r.id === from)?.suggestion : c?.suggestion;
+      if (!c || !s) return;
+      if (editing || inline) return toast('Finish the edit you have open first.', true);
+      const edit = suggestionEdit(doc, id, s.text, (el) => (canInline(el) ? INLINE_KIND[el.tagName] : null));
+      if (typeof edit === 'string') {
+        // Can't map it in place: open the source so the reviewer can make it by hand.
+        const block = doc.querySelector(`mark.mdr-hl[data-cid="${id}"]`)?.closest<HTMLElement>('[data-ls]');
+        toast(`${edit} Make the change in the source.`, true);
+        if (block) startEdit(block, true);
+        return;
+      }
+      docStale = true;
+      return post({ type: 'applySuggestion', id, from: from || undefined, ...edit });
+    }
+    case 'dismiss-sugg':
+      return post({ type: 'dismissSuggestion', id, from: (t.closest('[data-from]') as HTMLElement).dataset.from || undefined });
     case 'ask-claude':
       return post({ type: 'sendToAgent', id });
     default:
@@ -786,9 +836,20 @@ function undoRedo(which: 'undo' | 'redo') {
   else post({ type: which });
 }
 
+/** The replacement in the new-comment box's Suggest edit field, unless it's unchanged from the quote. */
+function typedSuggestion(): string | undefined {
+  const sugg = pop.querySelector('.mdr-sugg-edit:not([hidden]) textarea') as HTMLTextAreaElement | null;
+  const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+  if (!sugg || !pendingAnchor || flat(sugg.value) === flat(pendingAnchor.quote)) return undefined;
+  return sugg.value.replace(/\s*\n\s*/g, ' ');
+}
+
+/** The new-comment box has something to save: text, or a changed suggestion. */
+const composing = () => !!(pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null)?.value.trim() || typedSuggestion() !== undefined;
+
 /** Save a half-typed new comment or reply, so Submit and Send don't leave it behind. */
 function flushTyping() {
-  if ((pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim()) saveComment();
+  if (composing()) saveComment();
   const ta = document.activeElement as HTMLElement | null;
   const cardEl = ta?.closest('.mdr-card') as HTMLElement | null;
   if (cardEl && ta!.tagName === 'TEXTAREA' && !ta!.classList.contains('mdr-body-edit') && (ta as HTMLTextAreaElement).value.trim()) {
@@ -827,7 +888,7 @@ function runCommand(cmd: string) {
     case 'comment':
       return commentOnSelection();
     case 'submit': {
-      const typed = !!(pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim();
+      const typed = composing();
       flushTyping();
       if (submitBtn.disabled && !typed) return toast('No drafts to submit.');
       return post({ type: 'submitReview' });

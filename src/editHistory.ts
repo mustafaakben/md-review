@@ -9,6 +9,8 @@ export interface EditEntry {
   inserted: Buffer; // bytes the edit wrote
   beforeHash: string;
   afterHash: string;
+  /** What else the edit did (a suggestion it applied), for the caller to redo or undo alongside it. */
+  tag?: unknown;
 }
 
 export class HistoryError extends Error {}
@@ -50,9 +52,16 @@ export class EditHistory {
     return this.undone.length > 0;
   }
 
-  record(before: Buffer, after: Buffer): void {
+  /** The tag of the edit an undo (or redo) would revert (or re-apply) next. */
+  nextTag(which: 'undo' | 'redo'): unknown {
+    const list = which === 'undo' ? this.done : this.undone;
+    return list[list.length - 1]?.tag;
+  }
+
+  record(before: Buffer, after: Buffer, tag?: unknown): void {
     const e = diffEntry(before, after);
     if (!e) return;
+    if (tag !== undefined) e.tag = tag;
     this.done.push(e);
     if (this.done.length > this.limit) this.done.shift();
     this.undone = [];
