@@ -71,6 +71,28 @@ test('add → submit → agent reply → resolve round-trip', () => {
   assert.equal(d.comments.find((c) => c.id === c2.id).replies[0].author, 'Reviewer');
 });
 
+test('delete removes a sent or resolved thread with its replies', () => {
+  const dir = path.join(tmp, 'delete');
+  fs.mkdirSync(dir, { recursive: true });
+  const md = path.join(dir, 'del.md');
+  fs.writeFileSync(md, '# Title\n\nSome paragraph with a claim.\n');
+  fs.rmSync(md + '.comments.json', { force: true });
+  const { s, last } = session(md);
+  s.handle({ type: 'ready' });
+  const anchor = { quote: 'a claim', prefix: 'Some paragraph with ', suffix: '.', lineStart: 3, lineEnd: 3 };
+  for (const body of ['one', 'two', 'three']) s.handle({ type: 'addComment', anchor, body });
+  s.handle({ type: 'submitReview' });
+  const [c1, c2, c3] = JSON.parse(fs.readFileSync(md + '.comments.json', 'utf8')).comments;
+  execFileSync(process.execPath, [cli, 'reply', md, c1.id, 'Done.']);
+  execFileSync(process.execPath, [cli, 'resolve', md, c1.id]);
+  s.onSidecarChanged();
+  s.handle({ type: 'deleteComment', id: c1.id }); // resolved, with Claude's reply
+  s.handle({ type: 'deleteComment', id: c2.id }); // submitted
+  const d = JSON.parse(fs.readFileSync(md + '.comments.json', 'utf8'));
+  assert.deepEqual(d.comments.map((c) => c.id), [c3.id]);
+  assert.deepEqual(last('comments').data.comments.map((c) => c.id), [c3.id]);
+});
+
 test('own writes are ignored by the watcher; external ones are not', () => {
   const md = path.join(tmp, 'doc.md');
   const { s, posted } = session(md);

@@ -680,7 +680,7 @@ function card(c: Comment, now = Date.now()): string {
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
     c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
     answered(c) ? `<button data-act="show-change" title="Show what changed in this thread's text since you sent it">Show change</button>` : '',
-    c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
+    `<button data-act="delete" class="danger" title="${c.status === 'draft' ? 'Delete this draft' : 'Delete this thread and its replies'}">Delete</button>`,
   ].join('');
   const replyBox = openReplies.has(c.id)
     ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
@@ -996,8 +996,20 @@ sidebar.addEventListener('click', (e) => {
       else renderSidebar();
       return;
     }
-    case 'delete':
+    case 'delete': {
+      // A draft goes at once; a sent thread (and its replies) takes a second click, since there's no undo.
+      const btn = t.closest('[data-act="delete"]') as HTMLButtonElement;
+      if (comments.find((x) => x.id === id)?.status !== 'draft' && !btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Delete thread?';
+        setTimeout(() => {
+          delete btn.dataset.armed;
+          btn.textContent = 'Delete';
+        }, 4000);
+        return;
+      }
       return post({ type: 'deleteComment', id });
+    }
     case 'apply-sugg': {
       const c = comments.find((x) => x.id === id);
       const from = (t.closest('[data-from]') as HTMLElement).dataset.from || '';
