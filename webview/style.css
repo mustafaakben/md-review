@@ -225,15 +225,16 @@ button.mdr-side-toggle { padding: 5px; }
    Wrapped blocks (display math, raw HTML, indented code) pass their child's
    margins through the wrapper, which containment would stop, so only the math
    inside them is contained. */
-.mdr-doc > :not(.mdr-wrap), .mdr-doc > .mdr-wrap .katex-display {
+.mdr-doc > :not(.mdr-wrap, .mdr-block-editor), .mdr-doc > .mdr-wrap .katex-display {
   content-visibility: auto; contain-intrinsic-size: auto 4em; overflow-clip-margin: 16px;
 }
 /* A contained block keeps its children's edge margins inside instead of merging
    them with its own. Lists and the footnotes carry a bottom margin at least as
    large as any of their items', so drop the inner ones to keep the spacing. */
-.mdr-doc > :is(ul, ol) > li:first-child { margin-top: 0; }
+.mdr-doc > :is(ul, ol) > li:first-child, .mdr-doc > .footnotes > ol > li:first-child { margin-top: 0; }
 .mdr-doc > :is(ul, ol) > li:last-child,
 .mdr-doc > :is(ul, ol) > li:last-child > :last-child,
+.mdr-doc > :is(ul, ol) > li:last-child > .mdr-wrap:last-child > :last-child,
 .mdr-doc > :is(ul, ol) > li:last-child > :is(ul, ol):last-child > li:last-child,
 .mdr-doc > :is(ul, ol) > li:last-child > :is(ul, ol):last-child > li:last-child > :last-child,
 .mdr-doc > :is(ul, ol) > li:last-child > :is(ul, ol):last-child > li:last-child > :is(ul, ol):last-child > li:last-child,

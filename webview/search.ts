@@ -3,7 +3,7 @@
 // editing) and a repaint only has to recompute ranges.
 import { buildTextMap, TextMap } from './anchor';
 import { tip } from './keys';
-import { reveal as scrollTo } from './reveal';
+import { reveal as revealTarget } from './reveal';
 
 const MAX_MATCHES = 5000;
 
@@ -70,7 +70,7 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
     const r = ranges[index];
     if (!r) return;
     const rect = r.getBoundingClientRect();
-    if (rect.top < 70 || rect.bottom > window.innerHeight - 40) scrollTo(r, 'third');
+    if (rect.top < 70 || rect.bottom > window.innerHeight - 40) revealTarget(r, 'third');
   }
 
   function compute(keepIndex: boolean) {

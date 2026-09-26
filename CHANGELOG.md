@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Long documents open and repaint several times faster: blocks outside the view skip layout until you scroll to them. Your place in the document is kept by block (not pixel offset) across repaints and reopening, and jumps to a far comment, heading, or find match land on target.
+- Long documents open and repaint several times faster: blocks outside the view skip layout until you scroll to them. Your place in the document is kept by block (not pixel offset) across repaints and reopening, and jumps to a far comment, heading, or find match land on target. Zoom and the comment box keep their place too. (The scrollbar thumb can shift after a repaint, because off-screen blocks go back to estimated heights.)
 - The viewer no longer drops sidecar fields it doesn't know. Fields an agent, the CLI, or a newer version adds to the file, a comment, its anchor, or a reply now survive every write.
 - Keyboard shortcuts on both Windows/Linux and macOS, with native keys on each (⌘, ⌥, ⇧⌘Z for redo). New: comment on the selection (Ctrl+Alt+M / ⌥⌘M, or `c`), Submit review (Ctrl+Shift+Enter / ⇧⌘↩), Send to Claude (Ctrl+Alt+Enter / ⌥⌘↩), toggle the comments pane (Ctrl+Alt+P / ⌥⌘P), and `e` for edit mode. Tooltips show the keys for your platform, and `?` (or the keyboard icon) opens a shortcuts sheet.
 - **Send Open Reviews in Folder to Claude** (Explorer right-click on a folder, or the Command Palette): one Claude Code session works through every file with open threads.

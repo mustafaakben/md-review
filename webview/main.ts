@@ -4,7 +4,7 @@ import { createOutline } from './outline';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
-import { reveal, settle, viewTop } from './reveal';
+import { blockAtY, reveal, settle, viewTop } from './reveal';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -154,27 +154,50 @@ function paint() {
 // Off-screen blocks use an estimated height until they are first shown (see
 // content-visibility in style.css), so a pixel offset does not survive a repaint
 // or a reopen. Remember the block at the top of the view and where it sat instead.
-type Position = { i: number; dy: number } | null;
+type BlockRef = { i: number; key?: string };
+type Position = (BlockRef & { dy: number }) | null;
+
+const blockKey = (el: Element) => (el.textContent || '').slice(0, 80);
+const refOf = (el: Element): BlockRef => ({ i: Array.prototype.indexOf.call(doc.children, el), key: blockKey(el) });
+
+/** The block `ref` points at: by its text near its old index, else by index. */
+function findBlock(ref: BlockRef): Element | undefined {
+  const kids = doc.children;
+  if (!kids.length) return undefined;
+  const i = Math.min(ref.i, kids.length - 1);
+  if (ref.key !== undefined) {
+    for (let d = 0; d <= 20; d++) {
+      for (const j of d ? [i - d, i + d] : [i]) if (kids[j] && blockKey(kids[j]) === ref.key) return kids[j];
+    }
+  }
+  return kids[i];
+}
+
+// While a restore is still correcting, the layout is not yet where it is going,
+// so another repaint (or a save of the position) uses the restore's target.
+let restoring: Position | undefined;
 
 function readingPosition(): Position {
-  const blocks = doc.children;
-  if (!blocks.length || window.scrollY <= 0) return null;
+  if (restoring !== undefined) return restoring;
+  if (window.scrollY <= 0) return null;
   const top = viewTop();
-  // First block whose bottom is below the top of the view (blocks are in order).
-  let lo = 0;
-  let hi = blocks.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (blocks[mid].getBoundingClientRect().bottom > top) hi = mid;
-    else lo = mid + 1;
-  }
-  return { i: lo, dy: blocks[lo].getBoundingClientRect().top - top };
+  const el = blockAtY(doc.children, top);
+  return el ? { ...refOf(el), dy: el.getBoundingClientRect().top - top } : null;
 }
 
 function restorePosition(at: Position) {
-  const el = at && doc.children[Math.min(at.i, doc.children.length - 1)];
-  if (!el) return window.scrollTo(0, 0);
-  settle(() => el.getBoundingClientRect().top - viewTop() - at!.dy);
+  const el = at && findBlock(at);
+  if (!el) {
+    restoring = undefined;
+    return window.scrollTo(0, 0);
+  }
+  restoring = at;
+  settle(
+    () => (el.isConnected ? el.getBoundingClientRect().top - viewTop() - at!.dy : null),
+    8,
+    () => restoring === at && (restoring = undefined),
+  );
+  syncPop();
 }
 
 /**
@@ -340,7 +363,11 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   const cardEl = sidebar.querySelector(`.mdr-card[data-id="${id}"]`);
   cardEl?.classList.add('active');
   if (scrollDoc) reveal(marks[0], 'center');
-  if (scrollCard && cardEl) cardEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  // In one column the thread list is below the document, in the same scroll:
+  // there the highlight wins.
+  if (scrollCard && cardEl && !(scrollDoc && matchMedia('(max-width: 620px)').matches)) {
+    cardEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
 }
 
 // ---------------------------------------------------------------- selection -> comment
@@ -353,14 +380,34 @@ function hidePop() {
   pop.hidden = true;
   pop.innerHTML = '';
   pendingAnchor = null;
+  popAnchor = null;
 }
 
-function placePop(rect: DOMRect) {
+// The comment box sits in page coordinates, but blocks above it change height
+// (off-screen blocks take their real size when shown, and a repaint resets
+// them), so it follows the block holding the selection instead.
+let popAnchor: { ref: BlockRef; el: Element; dy: number } | null = null;
+
+function placePop(range: Range) {
+  const rect = range.getBoundingClientRect();
   pop.hidden = false;
   const w = pop.offsetWidth || 320;
   const left = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), window.innerWidth - w - 8);
   pop.style.left = `${left + window.scrollX}px`;
   pop.style.top = `${rect.bottom + window.scrollY + 8}px`;
+  let el: Node | null = range.startContainer;
+  while (el && el.parentNode !== doc) el = el.parentNode;
+  popAnchor = el instanceof Element ? { ref: refOf(el), el, dy: rect.bottom + 8 - el.getBoundingClientRect().top } : null;
+}
+
+function syncPop() {
+  if (pop.hidden || !popAnchor) return;
+  if (!popAnchor.el.isConnected) {
+    const el = findBlock(popAnchor.ref);
+    if (!el) return;
+    popAnchor.el = el;
+  }
+  pop.style.top = `${popAnchor.el.getBoundingClientRect().top + window.scrollY + popAnchor.dy}px`;
 }
 
 /** Anchor the current document selection, or return null when there is none to comment on. */
@@ -392,7 +439,7 @@ document.addEventListener('mouseup', (ev) => {
     const range = selectionRange();
     if (!range) return;
     pop.innerHTML = `<button class="mdr-primary" data-act="new-comment" title="${tip('Comment', 'Mod+Alt+M', 'C')}">Comment</button>`;
-    placePop(range.getBoundingClientRect());
+    placePop(range);
   }, 0);
 });
 
@@ -414,7 +461,7 @@ function commentOnSelection() {
   const range = selectionRange();
   if (!range) return toast('Select some text first, then press ' + keyLabel('Mod+Alt+M') + ' to comment on it.');
   pop.innerHTML = '';
-  placePop(range.getBoundingClientRect());
+  placePop(range);
   openCommentBox(parseFloat(pop.style.top));
 }
 
@@ -997,6 +1044,7 @@ async function copyText(text: string): Promise<boolean> {
 
 let scrollT: any;
 window.addEventListener('scroll', () => {
+  syncPop();
   clearTimeout(scrollT);
   scrollT = setTimeout(() => vscode.setState({ ...(vscode.getState() || {}), scrollY: window.scrollY, position: readingPosition() }), 200);
 });
