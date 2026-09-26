@@ -182,8 +182,9 @@ function paint() {
   hoverEl = null;
   const at = readingPosition();
   if (!patchDoc()) {
-    doc.innerHTML = blocks.join('');
-    paintedBlocks = doc.children.length === elementCount(blocks, 0, blocks.length) ? blocks : null;
+    doc.innerHTML = blocks.join('') + END;
+    // Patching needs every block to be its own element(s), with nothing left open.
+    paintedBlocks = closedOff(doc) && doc.children.length === elementCount(blocks, 0, blocks.length) ? blocks : null;
     paintedKeys = [];
   }
   touched.clear();
@@ -220,6 +221,16 @@ const moveKey = (b: string) => {
   const base = firstLine(b);
   return b.replace(/data-(l[se]|task-line)="(\d+)"/g, (_, k, v) => `data-${k}="${Number(v) - base}"`);
 };
+
+/** Appended to HTML before parsing: it lands at the top level only if the HTML closed every element it opened. */
+const END = '<i data-mdr-end></i>';
+/** Whether the END marker is the last top-level element of `root`; removes it either way. */
+function closedOff(root: Element | DocumentFragment): boolean {
+  const last = root.lastElementChild;
+  const ok = !!last && last.hasAttribute('data-mdr-end');
+  root.querySelector('[data-mdr-end]')?.remove();
+  return ok;
+}
 
 /** Remove `count` elements of #mdr-doc from `from`, each with the text (newline) after it. */
 function removeEls(from: number, count: number) {
@@ -275,12 +286,14 @@ function patchDoc(): boolean {
   }
   const keepNotes = notesPrev && notesNext && !notesTouched && prev[n] === next[m];
   const tpl = document.createElement('template');
-  tpl.innerHTML = next.slice(p, m - s).join('');
-  if (tpl.content.children.length !== m - s - p) return false;
+  tpl.innerHTML = next.slice(p, m - s).join('') + END;
+  // A block that leaves an element open (a raw `<div align="center">`) holds the
+  // blocks after it in a full paint: only a full paint gets that right.
+  if (!closedOff(tpl.content) || tpl.content.children.length !== m - s - p) return false;
   const notes = document.createElement('template');
   if (notesNext && !keepNotes) {
-    notes.innerHTML = next[m];
-    if (notes.content.children.length !== 2) return false;
+    notes.innerHTML = next[m] + END;
+    if (!closedOff(notes.content) || notes.content.children.length !== 2) return false;
   }
   // Unwrap highlights first: a highlight can span blocks, and a full paint
   // starts from bare HTML too.
