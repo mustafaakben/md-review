@@ -2,6 +2,8 @@
 // They belong to the user, not the file, so the host keeps them across files
 // and sessions (VS Code globalState); the view just applies and reports them.
 
+import { isMac, keyLabel } from './keys';
+
 export type ReadingTheme = 'auto' | 'paper' | 'sepia' | 'dusk' | 'night';
 export type ReadingFont = 'sans' | 'serif';
 
@@ -60,7 +62,7 @@ export function createReading(
         <button data-font="sans" class="${prefs.font === 'sans' ? 'on' : ''}" aria-checked="${prefs.font === 'sans'}" role="radio">Sans</button>
         <button data-font="serif" class="serif${prefs.font === 'serif' ? ' on' : ''}" aria-checked="${prefs.font === 'serif'}" role="radio">Serif</button>
       </div>
-      <div class="mdr-rp-label">Zoom <span class="mdr-rp-hint">Ctrl+wheel · Ctrl+= / Ctrl+− · Ctrl+0</span></div>
+      <div class="mdr-rp-label">Zoom <span class="mdr-rp-hint">${isMac ? '⌘' : 'Ctrl+'}wheel · ${keyLabel('Mod+=')} / ${keyLabel('Mod+-')} / ${keyLabel('Mod+0')}</span></div>
       <div class="mdr-rp-seg">
         <button data-zoom="-1" aria-label="Zoom out" ${prefs.zoom <= MIN ? 'disabled' : ''}>−</button>
         <button data-zoom="0" class="mdr-rp-pct" title="Reset to 100%">${pct}</button>

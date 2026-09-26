@@ -2,6 +2,7 @@
 // searching never touches the document DOM (no conflict with comment marks or
 // editing) and a repaint only has to recompute ranges.
 import { buildTextMap, TextMap } from './anchor';
+import { tip } from './keys';
 
 const MAX_MATCHES = 5000;
 
@@ -40,8 +41,8 @@ export interface Search {
 export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
   bar.innerHTML = `<input type="search" placeholder="Find in document" aria-label="Find in document" spellcheck="false">
     <span class="mdr-find-count"></span>
-    <button data-find="prev" title="Previous match (Shift+Enter)" aria-label="Previous match">↑</button>
-    <button data-find="next" title="Next match (Enter)" aria-label="Next match">↓</button>
+    <button data-find="prev" title="${tip('Previous match', 'Shift+Enter')}" aria-label="Previous match">↑</button>
+    <button data-find="next" title="${tip('Next match', 'Enter')}" aria-label="Next match">↓</button>
     <button data-find="close" title="Close (Esc)" aria-label="Close">✕</button>`;
   const input = bar.querySelector('input') as HTMLInputElement;
   const countEl = bar.querySelector('.mdr-find-count') as HTMLElement;

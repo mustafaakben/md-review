@@ -3,6 +3,7 @@ import { createSearch } from './search';
 import { createOutline } from './outline';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
+import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -47,15 +48,16 @@ const standalone = !!(window as any).__mdrStandalone;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="${tip('Outline', 'Mod+Shift+O')}" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
-      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled></button></span>
-      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
-      <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document"></button>
+      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="${tip('Undo edit', 'Mod+Z')}" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="${tip('Redo edit', isMac ? 'Mod+Shift+Z' : 'Mod+Y')}" aria-label="Redo edit" disabled></button></span>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
+      <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
+      <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
-      <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
+      <button id="mdr-edit-mode" class="mdr-mode" title="${tip('Edit mode: click any paragraph, heading, list item, or table row and type', 'E')}">Edit</button>
       <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
-      <button id="mdr-submit" class="mdr-primary" disabled>Submit review</button>
+      <button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button>
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
     </div>
   </header>
@@ -67,14 +69,15 @@ app.innerHTML = `
     <aside class="mdr-sidebar mdr-ui">
       <div class="mdr-side-head">
         <div class="mdr-filters"></div>
-        <button id="mdr-send" class="mdr-send" title="Submit drafts and hand the open threads to Claude Code">Send to Claude</button>
+        <button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button>
       </div>
       <div id="mdr-threads"></div>
     </aside>
   </div>
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
-  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). Alt+double-click edits the raw Markdown." aria-label="Edit" hidden></button>`;
+  <div id="mdr-keys" class="mdr-keys mdr-ui" hidden></div>
+  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). ${altName}+double-click edits the raw Markdown." aria-label="Edit" hidden></button>`;
 const doc = document.getElementById('mdr-doc')!;
 const sidebar = document.getElementById('mdr-threads')!;
 const pop = document.getElementById('mdr-pop')!;
@@ -86,6 +89,7 @@ const filtersEl = document.querySelector('.mdr-filters') as HTMLElement;
 const sendBtn = document.getElementById('mdr-send') as HTMLButtonElement;
 const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
 const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
+const keySheet = createShortcutSheet(document.getElementById('mdr-keys')!);
 const search = createSearch(doc, document.getElementById('mdr-find')!);
 const reading = createReading(
   doc,
@@ -284,7 +288,7 @@ function card(c: Comment): string {
     c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
   ].join('');
   const replyBox = openReplies.has(c.id)
-    ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (Ctrl+Enter to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
+    ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
   return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}" data-id="${c.id}">
@@ -332,6 +336,24 @@ function placePop(rect: DOMRect) {
   pop.style.top = `${rect.bottom + window.scrollY + 8}px`;
 }
 
+/** Anchor the current document selection, or return null when there is none to comment on. */
+function selectionRange(): Range | null {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount || editing || inline || editMode) return null;
+  const range = sel.getRangeAt(0);
+  if (!doc.contains(range.commonAncestorContainer)) return null;
+  const cap = capture(buildTextMap(doc), range);
+  if (!cap) return null;
+  const a = blockRange(range.startContainer);
+  const b = blockRange(range.endContainer) || a;
+  pendingAnchor = {
+    ...cap,
+    lineStart: a ? a[0] + 1 : 0,
+    lineEnd: b ? b[1] : a ? a[1] : 0,
+  };
+  return range;
+}
+
 document.addEventListener('mouseup', (ev) => {
   if ((ev.target as Element).closest?.('.mdr-pop')) return;
   setTimeout(() => {
@@ -340,21 +362,34 @@ document.addEventListener('mouseup', (ev) => {
       if (!pop.querySelector('textarea')) hidePop();
       return;
     }
-    const range = sel.getRangeAt(0);
-    if (!doc.contains(range.commonAncestorContainer)) return;
-    const cap = capture(buildTextMap(doc), range);
-    if (!cap) return;
-    const a = blockRange(range.startContainer);
-    const b = blockRange(range.endContainer) || a;
-    pendingAnchor = {
-      ...cap,
-      lineStart: a ? a[0] + 1 : 0,
-      lineEnd: b ? b[1] : a ? a[1] : 0,
-    };
-    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment">Comment</button>`;
+    const range = selectionRange();
+    if (!range) return;
+    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment" title="${tip('Comment', 'Mod+Alt+M', 'C')}">Comment</button>`;
     placePop(range.getBoundingClientRect());
   }, 0);
 });
+
+function openCommentBox(top: number) {
+  pop.innerHTML = `<div class="mdr-quote small">${esc(pendingAnchor!.quote.slice(0, 140))}${pendingAnchor!.quote.length > 140 ? '…' : ''}</div>
+      <textarea placeholder="Add a comment…  (${keyLabel('Mod+Enter')} to save)"></textarea>
+      <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button></div>`;
+  pop.style.top = `${top}px`;
+  (pop.querySelector('textarea') as HTMLTextAreaElement).focus();
+}
+
+/** Keyboard route to a new comment: open the comment box on the current selection. */
+function commentOnSelection() {
+  const box = pop.querySelector('textarea') as HTMLTextAreaElement | null;
+  if (box) return box.focus();
+  // AltGr is Ctrl+Alt on Windows, so AltGr+M (µ) typed in a text box can arrive here: stay quiet.
+  if (isTyping(document.activeElement) || editing || inline) return;
+  if (editMode) return toast('Turn off edit mode to comment.');
+  const range = selectionRange();
+  if (!range) return toast('Select some text first, then press ' + keyLabel('Mod+Alt+M') + ' to comment on it.');
+  pop.innerHTML = '';
+  placePop(range.getBoundingClientRect());
+  openCommentBox(parseFloat(pop.style.top));
+}
 
 pop.addEventListener('mousedown', (e) => {
   // keep the selection alive while clicking the popup button
@@ -364,12 +399,7 @@ pop.addEventListener('mousedown', (e) => {
 pop.addEventListener('click', (e) => {
   const act = (e.target as Element).closest('[data-act]')?.getAttribute('data-act');
   if (act === 'new-comment' && pendingAnchor) {
-    const rect = pop.getBoundingClientRect();
-    pop.innerHTML = `<div class="mdr-quote small">${esc(pendingAnchor.quote.slice(0, 140))}${pendingAnchor.quote.length > 140 ? '…' : ''}</div>
-      <textarea placeholder="Add a comment…  (Ctrl+Enter to save)"></textarea>
-      <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button></div>`;
-    pop.style.top = `${rect.top + window.scrollY}px`;
-    (pop.querySelector('textarea') as HTMLTextAreaElement).focus();
+    openCommentBox(pop.getBoundingClientRect().top + window.scrollY);
   } else if (act === 'save-comment') {
     saveComment();
   } else if (act === 'cancel') {
@@ -378,7 +408,7 @@ pop.addEventListener('click', (e) => {
 });
 
 pop.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveComment();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) saveComment();
   if (e.key === 'Escape') hidePop();
 });
 
@@ -444,7 +474,8 @@ sidebar.addEventListener('click', (e) => {
 
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
-  if (!cardEl || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+  // Shift or Alt with Ctrl/Cmd+Enter is Submit review / Send to Claude, not "save".
+  if (!cardEl || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
   if ((e.target as Element).classList.contains('mdr-body-edit')) {
     (cardEl.querySelector('[data-act="save-body"]') as HTMLButtonElement).click();
   } else sendReply(cardEl.dataset.id!, cardEl);
@@ -475,6 +506,7 @@ doc.addEventListener('click', (e) => {
 });
 
 submitBtn.addEventListener('click', () => post({ type: 'submitReview' }));
+document.getElementById('mdr-keys-btn')!.addEventListener('click', () => keySheet.toggle());
 sendBtn.addEventListener('click', () => post({ type: 'sendToAgent' }));
 undoBtn.addEventListener('click', () => post({ type: 'undo' }));
 redoBtn.addEventListener('click', () => post({ type: 'redo' }));
@@ -522,7 +554,19 @@ function undoRedo(which: 'undo' | 'redo') {
   else post({ type: which });
 }
 
+/** Save a half-typed new comment or reply, so Submit and Send don't leave it behind. */
+function flushTyping() {
+  if ((pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim()) saveComment();
+  const ta = document.activeElement as HTMLElement | null;
+  const cardEl = ta?.closest('.mdr-card') as HTMLElement | null;
+  if (cardEl && ta!.tagName === 'TEXTAREA' && !ta!.classList.contains('mdr-body-edit') && (ta as HTMLTextAreaElement).value.trim()) {
+    sendReply(cardEl.dataset.id!, cardEl);
+  }
+}
+
 function runCommand(cmd: string) {
+  // The shortcuts sheet is modal: any other command closes it first.
+  if (cmd !== 'shortcuts' && keySheet.isOpen()) keySheet.toggle();
   switch (cmd) {
     case 'undo':
     case 'redo':
@@ -538,6 +582,7 @@ function runCommand(cmd: string) {
       // Never pull focus out of a text box or editor: that would commit a half-typed edit.
       return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
     case 'send':
+      flushTyping();
       return post({ type: 'sendToAgent' });
     case 'zoomIn':
       return reading.zoomBy(1);
@@ -547,24 +592,41 @@ function runCommand(cmd: string) {
       return reading.resetZoom();
     case 'reading':
       return reading.togglePanel(!isTyping(document.activeElement) && !editing && !inline);
+    case 'comment':
+      return commentOnSelection();
+    case 'submit': {
+      const typed = !!(pop.querySelector('textarea') as HTMLTextAreaElement | null)?.value.trim();
+      flushTyping();
+      if (submitBtn.disabled && !typed) return toast('No drafts to submit.');
+      return post({ type: 'submitReview' });
+    }
+    case 'comments':
+      return setSidebarOpen(document.body.classList.contains('mdr-side-collapsed'));
+    case 'shortcuts':
+      return keySheet.toggle();
   }
 }
 
 document.addEventListener('keydown', (e) => {
-  const mod = e.ctrlKey || e.metaKey;
+  const mod = hasMod(e);
   const k = e.key.toLowerCase();
+  const code = e.code; // Option on macOS changes e.key (⌥M types µ), so match letters by key position
   if (standalone) {
     // In VS Code these arrive as commands via package.json keybindings.
     const cmd =
-      mod && !e.shiftKey && k === 'z' ? 'undo'
-      : mod && (k === 'y' || (e.shiftKey && k === 'z')) ? 'redo'
+      mod && e.altKey && code === 'KeyM' && !e.getModifierState('AltGraph') ? 'comment'
+      : mod && e.altKey && code === 'KeyP' && !e.getModifierState('AltGraph') ? 'comments'
+      : mod && e.altKey && e.key === 'Enter' ? 'send'
+      : mod && e.shiftKey && e.key === 'Enter' ? 'submit'
+      : mod && !e.shiftKey && k === 'z' ? 'undo'
+      : mod && ((k === 'y' && !isMac) || (e.shiftKey && k === 'z')) ? 'redo'
       : mod && k === 'f' ? 'find'
       : mod && e.shiftKey && k === 'o' ? 'outline'
       : mod && (e.key === '=' || e.key === '+') ? 'zoomIn'
       : mod && (e.key === '-' || e.key === '_') ? 'zoomOut'
       : mod && e.key === '0' ? 'zoomReset'
-      : e.altKey && e.key === 'ArrowDown' ? 'next'
-      : e.altKey && e.key === 'ArrowUp' ? 'prev'
+      : e.altKey && !mod && e.key === 'ArrowDown' ? 'next'
+      : e.altKey && !mod && e.key === 'ArrowUp' ? 'prev'
       : '';
     if (cmd) {
       e.preventDefault();
@@ -573,8 +635,21 @@ document.addEventListener('keydown', (e) => {
   }
   // Escape inside an editor or a comment box belongs to that box, not the find bar.
   if (e.key === 'Escape' && search.isOpen() && !editing && !inline && !isTyping(e.target)) return search.close();
-  if (mod || e.altKey || isTyping(e.target) || editing || inline) return;
-  if (k === 'j' || k === 'n') navigate(1);
+  if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || editing || inline) return;
+  if (e.key === '?') {
+    e.preventDefault();
+    keySheet.toggle();
+  } else if (keySheet.isOpen()) return;
+  else if (k === 'c' && !e.shiftKey) {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount && doc.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      e.preventDefault();
+      commentOnSelection();
+    }
+  } else if (k === 'e' && !e.shiftKey) {
+    e.preventDefault();
+    setEditMode(!editMode);
+  } else if (k === 'j' || k === 'n') navigate(1);
   else if (k === 'k' || k === 'p') navigate(-1);
   else if (e.key === '/') {
     e.preventDefault();
@@ -598,7 +673,7 @@ function setSidebarOpen(open: boolean) {
   document.body.classList.toggle('mdr-side-collapsed', !open);
   sideToggle.textContent = open ? '' : 'Comments';
   sideToggle.setAttribute('aria-label', open ? 'Hide comments' : 'Show comments');
-  sideToggle.title = open ? 'Hide the comments pane' : 'Show the comments pane';
+  sideToggle.title = tip(open ? 'Hide the comments pane' : 'Show the comments pane', 'Mod+Alt+P');
   sideToggle.setAttribute('aria-expanded', String(open));
   vscode.setState({ ...(vscode.getState() || {}), sidebarOpen: open });
 }
@@ -760,7 +835,7 @@ function openEditor(ls: number, le: number, text: string) {
   docStale = true;
   const box: HTMLElement = document.createElement(el.tagName === 'TR' ? 'tr' : 'div');
   box.className = 'mdr-block-editor';
-  const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · Ctrl+Enter to save · Esc to cancel</div>
+  const inner = `<div class="mdr-edit-head">Editing source lines ${ls + 1}–${le} · ${keyLabel('Mod+Enter')} to save · Esc to cancel</div>
     <textarea spellcheck="true"></textarea>
     <div class="mdr-row"><button class="mdr-primary" data-act="save-block">Save</button><button data-act="cancel-block">Cancel</button></div>`;
   box.innerHTML = el.tagName === 'TR' ? `<td colspan="99">${inner}</td>` : inner;
@@ -782,7 +857,7 @@ function openEditor(ls: number, le: number, text: string) {
     if (act === 'cancel-block') closeEditor();
   });
   box.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       saveBlock();
     }
