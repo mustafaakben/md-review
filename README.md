@@ -92,6 +92,8 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
+- **Send a whole folder.** Right-click a folder in the Explorer → **Send Open Reviews in Folder to Claude** (or run it from the Command Palette for the workspace). Claude gets the list of files with open threads and works through them one at a time with the CLI's `next` command, which shows each comment with the source lines its quote is on.
+- **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
 **Keyboard.** Tab reaches the toolbar, the outline, and the comments. (Starting a new comment still needs a text selection with the mouse.) In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
@@ -163,13 +165,23 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
 
 ### CLI (zero dependencies)
 
+Paths can be `.md` files or folders; folders are searched recursively (skipping `node_modules` and hidden folders), and the default is the current folder.
+
 ```bash
-node cli/mdreview.mjs list    path/to/file.md [--status submitted] [--json]
+node cli/mdreview.mjs summary [paths…]                       # open / draft / resolved counts per file
+node cli/mdreview.mjs next    [paths…] [--all] [--json]      # the next open comment + the source lines its quote is on
+node cli/mdreview.mjs context path/to/file.md <id> [--lines 2] [--json]
+node cli/mdreview.mjs list    [paths…] [--status submitted] [--json]
 node cli/mdreview.mjs show    path/to/file.md <id>
 node cli/mdreview.mjs reply   path/to/file.md <id> "text" [--author Claude]
 node cli/mdreview.mjs resolve path/to/file.md <id> ["closing reply"] [--author Claude]
 node cli/mdreview.mjs reopen  path/to/file.md <id>
+node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claude Code skill
 ```
+
+- `next` and `context` find the quote in the Markdown source even when the source has `**bold**`, links, footnote markers, or HTML inside it, and even when the stored line hint is stale. If a quote appears more than once, the prefix and suffix pick the right one. The quoted lines are marked with `>`.
+- `next` goes file by file in document order and skips threads whose last reply is from `--author` (default `Claude`), since those are waiting on the reviewer. `--all` includes them. So an agent can loop: `next`, edit, `resolve` (or `reply` with a question), `next`, until it prints `No open comments.`
+- `list --json` adds a `file` field to each comment.
 
 ## Rendering
 
@@ -191,10 +203,10 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/inlineEdit.ts` | seamless edit: rendered-text diff → verified Markdown splice |
 | `src/commentStore.ts` | sidecar read-merge-write |
 | `src/editHistory.ts` | byte-exact undo/redo of in-view edits |
-| `src/agentPrompt.ts` | the prompt Send to Claude hands to the agent |
+| `src/agentPrompt.ts`, `src/agentCommands.ts` | the prompts Send to Claude hands to the agent; the folder and skill commands |
 | `src/render.ts` | Markdown → HTML with source-line tags |
 | `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts` |
-| `cli/mdreview.mjs` | agent CLI |
+| `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 
 ## Known limits

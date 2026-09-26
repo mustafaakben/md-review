@@ -1,17 +1,27 @@
 #!/usr/bin/env node
 // mdreview — zero-dependency CLI for agents to work MD Review comment sidecars.
 //
-//   node mdreview.mjs list    <file.md> [--status draft|submitted|resolved] [--json]
+//   node mdreview.mjs list    [paths…] [--status draft|submitted|resolved] [--json]
+//   node mdreview.mjs summary [paths…]
+//   node mdreview.mjs next    [paths…] [--all] [--json]
+//   node mdreview.mjs context <file.md> <id> [--lines 2] [--json]
 //   node mdreview.mjs show    <file.md> <id>
 //   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude]
 //   node mdreview.mjs resolve <file.md> <id> ["<closing reply>"] [--author Claude]
 //   node mdreview.mjs reopen  <file.md> <id>
+//   node mdreview.mjs init-claude [folder] [--force]
+//
+// paths can be .md files or folders (searched recursively; default: the current
+// folder). `next` prints the first open comment with the source lines its quote
+// is on, so an agent can loop: next -> edit -> reply/resolve -> next. It skips
+// threads whose last reply is from --author (waiting on the reviewer) unless --all.
 //
 // Every write re-reads the sidecar, applies the change, and writes it back, so
 // it never clobbers comments the viewer added in the meantime.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const flag = (name, def) => {
@@ -30,27 +40,39 @@ const bool = (name) => {
 
 const status = flag('status');
 const author = flag('author', 'Claude');
+const around = Math.max(0, Number(flag('lines', 2)) || 0);
 const asJson = bool('json');
-const [cmd, mdArg, id, text] = args;
+const force = bool('force');
+const includeAll = bool('all');
+const [cmd, ...rest] = args;
 
 function usage(code = 1) {
-  console.error(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 9).join('\n').replace(/^\/\/ ?/gm, ''));
+  const head = fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n');
+  console.error(head.slice(1, head.indexOf("import fs from 'node:fs';")).join('\n').replace(/^\/\/ ?/gm, ''));
   process.exit(code);
 }
-if (!cmd || !mdArg) usage();
+if (!cmd) usage();
 
-const md = path.resolve(mdArg.replace(/\.comments\.json$/, ''));
-const side = md + '.comments.json';
 const now = () => new Date().toISOString();
 const newId = (p) => `${p}_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`;
+const mdOf = (p) => path.resolve(p.replace(/\.comments\.json$/, ''));
+const sideOf = (md) => md + '.comments.json';
+const shown = (md) => {
+  const r = path.relative(process.cwd(), md);
+  return !r || r.startsWith('..') || path.isAbsolute(r) ? md : r.split(path.sep).join('/');
+};
 
-function read() {
-  if (!fs.existsSync(side)) return { schemaVersion: 1, file: path.basename(md), comments: [] };
+function read(md) {
+  const side = sideOf(md);
+  const empty = { schemaVersion: 1, file: path.basename(md), comments: [] };
+  if (!fs.existsSync(side)) return empty;
   const raw = fs.readFileSync(side, 'utf8').replace(/^﻿/, '');
-  return raw.trim() ? JSON.parse(raw) : { schemaVersion: 1, file: path.basename(md), comments: [] };
+  return raw.trim() ? JSON.parse(raw) : empty;
 }
-function mutate(fn) {
-  const data = read();
+function mutate(md, fn) {
+  const side = sideOf(md);
+  const data = read(md);
+  data.comments ||= [];
   fn(data);
   const tmp = `${side}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
@@ -68,32 +90,235 @@ function find(data, cid) {
     console.error(`No comment with id ${cid}`);
     process.exit(2);
   }
+  c.replies ||= [];
   return c;
 }
+
+/** The Markdown files the given paths cover: files as-is, folders searched for sidecars. */
+function collect(paths) {
+  const out = new Set();
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.md.comments.json')) out.add(mdOf(p));
+    }
+  };
+  for (const p of paths.length ? paths : ['.']) {
+    let st;
+    try {
+      st = fs.statSync(p);
+    } catch {
+      st = null;
+    }
+    if (st?.isDirectory()) walk(path.resolve(p));
+    else if (st || fs.existsSync(sideOf(mdOf(p)))) out.add(mdOf(p));
+    else {
+      console.error(`Not found: ${p}`);
+      process.exit(2);
+    }
+  }
+  return [...out].sort();
+}
+
+// ---- locating a comment's quote in the Markdown source ----
+//
+// The quote is rendered text: markup is gone. Compare letters and digits only,
+// after blanking link targets, footnote refs, HTML tags, and {attrs} (same
+// length, so offsets stay put). Several matches are ranked by prefix/suffix
+// agreement, then by distance from the stored line hint.
+const WORD = /[\p{L}\p{N}]/u;
+function keyed(s) {
+  let key = '';
+  const at = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (WORD.test(ch)) {
+      key += ch.toLowerCase();
+      at.push(i);
+    }
+  }
+  return { key, at };
+}
+const blank = (m) => m.replace(/[^\n]/g, ' ');
+const lineAt = (src, i) => src.slice(0, i).split('\n').length;
+
+function locate(src, anchor) {
+  const q = keyed(anchor?.quote || '').key;
+  if (!q) return null;
+  const masked = src
+    .replace(/\]\([^)\n]*\)/g, (m) => ']' + blank(m.slice(1)))
+    .replace(/\[\^[^\]\n]*\]/g, blank)
+    .replace(/<\/?[a-zA-Z][^>\n]*>/g, blank)
+    .replace(/\{[^}\n]*=[^}\n]*\}/g, blank);
+  const { key, at } = keyed(masked);
+  const pre = keyed(anchor.prefix || '').key.slice(-12);
+  const suf = keyed(anchor.suffix || '').key.slice(0, 12);
+  let best = null;
+  let count = 0;
+  for (let i = key.indexOf(q); i >= 0; i = key.indexOf(q, i + 1)) {
+    count++;
+    const start = lineAt(src, at[i]);
+    const score =
+      (pre && key.slice(Math.max(0, i - pre.length), i) === pre ? 2 : 0) +
+      (suf && key.slice(i + q.length, i + q.length + suf.length) === suf ? 2 : 0) -
+      (anchor.lineStart ? Math.min(1, Math.abs(start - anchor.lineStart) / 1000) : 0);
+    if (!best || score > best.score) best = { score, i, start };
+  }
+  if (!best) return null;
+  return { lineStart: best.start, lineEnd: lineAt(src, at[best.i + q.length - 1]), matches: count };
+}
+
+/** The comment plus where its quote is in the source, and those lines. */
+function contextOf(md, c) {
+  let src = null;
+  try {
+    src = fs.readFileSync(md, 'utf8').replace(/^﻿/, '');
+  } catch {}
+  const hit = src != null ? locate(src, c.anchor) : null;
+  const ls = hit?.lineStart || c.anchor?.lineStart || 0;
+  const le = hit?.lineEnd || c.anchor?.lineEnd || ls;
+  const lines = src != null ? src.split(/\r?\n/) : [];
+  const from = ls ? Math.max(1, ls - around) : 0;
+  const to = ls ? Math.min(lines.length, le + around) : -1;
+  const source = [];
+  for (let n = from; n && n <= to; n++) source.push({ line: n, text: lines[n - 1], quoted: n >= ls && n <= le });
+  return { file: shown(md), found: !!hit, lineStart: ls, lineEnd: le, source };
+}
+
 function describe(c) {
   const lines = c.anchor?.lineStart ? `L${c.anchor.lineStart}-${c.anchor.lineEnd}` : 'L?';
-  let s = `[${c.id}] ${c.status.toUpperCase()} ${lines} ${c.author} ${c.createdAt}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${lines} ${c.author} ${c.createdAt}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}`;
   return s;
+}
+function describeWithContext(c, ctx) {
+  const where = ctx.lineStart
+    ? `${ctx.file}:${ctx.lineStart}${ctx.lineEnd !== ctx.lineStart ? `-${ctx.lineEnd}` : ''}`
+    : ctx.file;
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}\n  comment: ${c.body}\n  quote:   "${c.anchor?.quote}"`;
+  for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}`;
+  if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
+  if (ctx.source.length) {
+    const w = String(ctx.source.at(-1).line).length;
+    s += '\n' + ctx.source.map((l) => `${l.quoted ? '>' : ' '} ${String(l.line).padStart(w)} | ${l.text}`).join('\n');
+  }
+  return s;
+}
+const byLine = (a, b) => (a.anchor?.lineStart || 0) - (b.anchor?.lineStart || 0);
+
+function initClaude(dir) {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const dest = path.join(path.resolve(dir || '.'), '.claude', 'skills', 'md-review');
+  const files = [
+    [path.join(here, 'SKILL.md'), path.join(dest, 'SKILL.md')],
+    [path.join(here, 'mdreview.mjs'), path.join(dest, 'mdreview.mjs')],
+  ];
+  const skill = files[0][1];
+  if (!force && fs.existsSync(skill) && fs.readFileSync(skill, 'utf8') !== fs.readFileSync(files[0][0], 'utf8')) {
+    console.error(`${shown(skill)} exists and differs from this version. Re-run with --force to replace it.`);
+    process.exit(2);
+  }
+  fs.mkdirSync(dest, { recursive: true });
+  for (const [from, to] of files) fs.copyFileSync(from, to);
+  console.log(`Wrote ${shown(dest)}/SKILL.md and mdreview.mjs. Claude Code will now pick up MD Review comments in this folder.`);
 }
 
 switch (cmd) {
   case 'list': {
-    const cs = (read().comments || []).filter((c) => !status || c.status === status);
-    if (asJson) console.log(JSON.stringify(cs, null, 2));
-    else console.log(cs.length ? cs.map(describe).join('\n\n') : '(no comments)');
+    const groups = collect(rest).map((md) => ({
+      md,
+      cs: (read(md).comments || []).filter((c) => !status || c.status === status).sort(byLine),
+    }));
+    if (asJson) {
+      console.log(JSON.stringify(groups.flatMap((g) => g.cs.map((c) => ({ ...c, file: shown(g.md) }))), null, 2));
+      break;
+    }
+    const nonEmpty = groups.filter((g) => g.cs.length);
+    if (!nonEmpty.length) console.log('(no comments)');
+    else if (groups.length === 1) console.log(nonEmpty[0].cs.map(describe).join('\n\n'));
+    else console.log(nonEmpty.map((g) => `== ${shown(g.md)}\n\n` + g.cs.map(describe).join('\n\n')).join('\n\n'));
     break;
   }
-  case 'show':
-    console.log(JSON.stringify(find(read(), id), null, 2));
+  case 'summary': {
+    const rows = collect(rest).map((md) => {
+      const n = { draft: 0, submitted: 0, resolved: 0 };
+      for (const c of read(md).comments || []) if (c.status in n) n[c.status]++;
+      return { file: shown(md), ...n };
+    });
+    if (asJson) {
+      console.log(JSON.stringify(rows, null, 2));
+      break;
+    }
+    if (!rows.length) {
+      console.log('(no review files)');
+      break;
+    }
+    const w = Math.max(...rows.map((r) => r.file.length));
+    const total = { draft: 0, submitted: 0, resolved: 0 };
+    for (const r of rows) {
+      for (const k in total) total[k] += r[k];
+      console.log(`${r.file.padEnd(w)}  ${r.submitted} open · ${r.draft} draft · ${r.resolved} resolved`);
+    }
+    if (rows.length > 1) console.log(`${'total'.padEnd(w)}  ${total.submitted} open · ${total.draft} draft · ${total.resolved} resolved`);
     break;
-  case 'reply':
-    if (!text) usage();
-    mutate((d) => find(d, id).replies.push({ id: newId('r'), author, createdAt: now(), body: text }));
+  }
+  case 'next': {
+    const open = collect(rest).flatMap((md) =>
+      (read(md).comments || [])
+        // A thread whose last word is ours is waiting on the reviewer, not us.
+        .filter((c) => c.status === 'submitted' && (includeAll || c.replies?.at(-1)?.author !== author))
+        .sort(byLine)
+        .map((c) => ({ md, c })),
+    );
+    if (!open.length) {
+      console.log(asJson ? 'null' : 'No open comments.');
+      break;
+    }
+    const { md, c } = open[0];
+    const ctx = contextOf(md, c);
+    if (asJson) {
+      console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1 }, null, 2));
+      break;
+    }
+    console.log(describeWithContext(c, ctx));
+    const more = open.length - 1;
+    console.log(`\n${more ? `${more} more open after this one.` : 'This is the last open comment.'} When done: reply/resolve "${ctx.file}" ${c.id}`);
+    break;
+  }
+  case 'context': {
+    const [mdArg, id] = rest;
+    if (!mdArg || !id) usage();
+    const md = mdOf(mdArg);
+    const c = find(read(md), id);
+    const ctx = contextOf(md, c);
+    console.log(asJson ? JSON.stringify({ comment: c, ...ctx }, null, 2) : describeWithContext(c, ctx));
+    break;
+  }
+  case 'show': {
+    const [mdArg, id] = rest;
+    if (!mdArg || !id) usage();
+    console.log(JSON.stringify(find(read(mdOf(mdArg)), id), null, 2));
+    break;
+  }
+  case 'reply': {
+    const [mdArg, id, text] = rest;
+    if (!mdArg || !id || !text) usage();
+    mutate(mdOf(mdArg), (d) => find(d, id).replies.push({ id: newId('r'), author, createdAt: now(), body: text }));
     console.log(`Replied to ${id}`);
     break;
-  case 'resolve':
-    mutate((d) => {
+  }
+  case 'resolve': {
+    const [mdArg, id, text] = rest;
+    if (!mdArg || !id) usage();
+    mutate(mdOf(mdArg), (d) => {
       const c = find(d, id);
       if (text) c.replies.push({ id: newId('r'), author, createdAt: now(), body: text });
       c.status = 'resolved';
@@ -101,13 +326,20 @@ switch (cmd) {
     });
     console.log(`Resolved ${id}`);
     break;
-  case 'reopen':
-    mutate((d) => {
+  }
+  case 'reopen': {
+    const [mdArg, id] = rest;
+    if (!mdArg || !id) usage();
+    mutate(mdOf(mdArg), (d) => {
       const c = find(d, id);
       c.status = 'submitted';
       c.resolvedAt = null;
     });
     console.log(`Reopened ${id}`);
+    break;
+  }
+  case 'init-claude':
+    initClaude(rest[0]);
     break;
   default:
     usage();
