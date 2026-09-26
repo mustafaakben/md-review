@@ -49,7 +49,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       bibWatchers.forEach((d) => d.dispose());
       bibWatchers = files.map((f) => {
         const w = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(f)), path.basename(f)));
-        const again = () => rerender();
+        const again = () => rerender(true); // same text, new references
         w.onDidChange(again);
         w.onDidCreate(again);
         w.onDidDelete(again);
@@ -91,16 +91,22 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     const subs: vscode.Disposable[] = [];
     let timer: NodeJS.Timeout | undefined;
-    const rerender = () => {
+    let forced = false;
+    // `force` when the text may be unchanged but its rendering isn't.
+    const rerender = (force = false) => {
+      forced ||= force;
       clearTimeout(timer);
-      timer = setTimeout(() => session.render(), 150);
+      timer = setTimeout(() => {
+        const f = forced;
+        forced = false;
+        session.render(f);
+      }, 150);
     };
     subs.push(
       webview.onDidReceiveMessage((m: FromWebview) => {
         // Alt+1/2/3 are VS Code's "open editor N"; bind them only while a comment box has focus.
         if (m.type === 'composing') return void vscode.commands.executeCommand('setContext', 'mdReview.composing', m.on);
         session.handle(m);
-        if (m.type === 'saveBlock' || m.type === 'undo' || m.type === 'redo') setTimeout(() => void refreshFromDisk(document, session), 400);
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
@@ -122,7 +128,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const mdWatcher = vscode.workspace.createFileSystemWatcher(
       new vscode.RelativePattern(vscode.Uri.file(dir), path.basename(mdPath)),
     );
-    subs.push(mdWatcher, mdWatcher.onDidChange(() => setTimeout(() => void refreshFromDisk(document, session), 300)));
+    // render() skips text it already showed, so this costs nothing when the
+    // buffer listener above got there first.
+    subs.push(mdWatcher, mdWatcher.onDidChange(() => rerender()), mdWatcher.onDidCreate(() => rerender()));
 
     subs.push(
       panel.onDidChangeViewState((e) => {
@@ -157,11 +165,6 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <title>MD Review</title></head>
 <body><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
-}
-
-/** Re-render; when the buffer is clean the session reads straight from disk. */
-async function refreshFromDisk(_document: vscode.TextDocument, session: ReviewSession) {
-  session.render();
 }
 
 function openLink(href: string, dir: string) {

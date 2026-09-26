@@ -16,7 +16,13 @@ export function suggestionDiff(before: string, after: string): string {
   while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
   const lead = a.slice(0, p).join('');
   const tail = a.slice(a.length - s).join('');
-  const clip = (t: string, end: boolean) => (t.length > 40 ? (end ? t.slice(0, 40) + '…' : '…' + t.slice(-40)) : t);
+  // Long context is cut back to the nearest whole word within 40 characters.
+  const clip = (t: string, end: boolean) => {
+    if (t.length <= 40) return t;
+    // Drop the partial word at the cut, unless the cut falls on a space.
+    const cut = end ? (/\s/.test(t[40]) ? t.slice(0, 40) : t.slice(0, 40).replace(/\S*$/, '')) : /\s/.test(t[t.length - 41]) ? t.slice(-40) : t.slice(-40).replace(/^\S*/, '');
+    return end ? cut + '…' : '…' + cut;
+  };
   const del = a.slice(p, a.length - s).join('');
   const ins = b.slice(p, b.length - s).join('');
   return `${esc(clip(lead, false))}${del ? `<del><span class="mdr-sr">deleted: </span>${esc(del)}</del>` : ''}${ins ? `<ins><span class="mdr-sr">inserted: </span>${esc(ins)}</ins>` : ''}${esc(clip(tail, true))}`;

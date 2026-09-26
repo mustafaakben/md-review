@@ -12,7 +12,9 @@
 import * as fs from 'fs';
 import type MarkdownIt from 'markdown-it';
 import { readBlock, spliceBlock, BlockEditError } from './blockEdit';
-import { createRenderer } from './render';
+import { rendererFor } from './render';
+
+const plain = (src: string) => src;
 
 export type BlockKind = 'paragraph' | 'heading' | 'list_item' | 'tr' | 'blockquote';
 
@@ -115,7 +117,7 @@ export function candidates(src: string, oldText: string, newText: string): strin
  * the edit can't be mapped to Markdown with certainty.
  */
 export function applyInlineEdit(filePath: string, ls: number, le: number, kind: BlockKind, oldText: string, newText: string): string {
-  const md = createRenderer((x) => x);
+  const md = rendererFor(plain);
   const buf = fs.readFileSync(filePath);
   const src = readBlock(buf, ls, le);
   const bom = buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf ? 3 : 0;

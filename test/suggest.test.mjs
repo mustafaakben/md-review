@@ -62,6 +62,25 @@ test('applying rewrites only the quote, resolves the thread, and undo reverts th
   assert.ok(posted.some((m) => m.type === 'inlineFailed'));
 });
 
+test('undo and redo move each applied suggestion with its text, however many were applied', () => {
+  const { md, s, side } = session('apply2.md', '# T\n\nThe cat sat.\n\nThe mat was red.\n');
+  s.handle({ type: 'addComment', anchor: anchor('cat', 3), body: 'a', suggestion: 'dog' });
+  s.handle({ type: 'addComment', anchor: anchor('red', 5), body: 'b', suggestion: 'blue' });
+  s.handle({ type: 'submitReview' });
+  const [a, b] = side().comments.map((c) => c.id);
+  s.handle({ type: 'applySuggestion', id: a, ls: 2, le: 3, kind: 'paragraph', oldText: 'The cat sat.', newText: 'The dog sat.' });
+  s.handle({ type: 'applySuggestion', id: b, ls: 4, le: 5, kind: 'paragraph', oldText: 'The mat was red.', newText: 'The mat was blue.' });
+  const state = () => side().comments.map((c) => [c.status, !!c.suggestion.appliedAt]);
+  assert.deepEqual(state(), [['resolved', true], ['resolved', true]]);
+  s.handle({ type: 'undo' });
+  s.handle({ type: 'undo' });
+  assert.equal(fs.readFileSync(md, 'utf8'), '# T\n\nThe cat sat.\n\nThe mat was red.\n');
+  assert.deepEqual(state(), [['submitted', false], ['submitted', false]]);
+  s.handle({ type: 'redo' });
+  assert.equal(fs.readFileSync(md, 'utf8'), '# T\n\nThe dog sat.\n\nThe mat was red.\n');
+  assert.deepEqual(state(), [['resolved', true], ['submitted', false]]);
+});
+
 test('the CLI suggests on a reply; dismissing marks it; document threads refuse', () => {
   const { md, s, side } = session('cli.md', '# T\n\nThe cat sat.\n');
   s.handle({ type: 'addComment', anchor: anchor('cat', 3), body: 'Better word?' });
