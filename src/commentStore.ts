@@ -59,6 +59,8 @@ export interface Comment {
   workingBy?: string;
   /** "agent": a draft an agent left as first reviewer, waiting for the reviewer to triage it. */
   origin?: 'agent';
+  /** The Review with Claude run that left this draft (the CLI's --run). */
+  reviewRun?: string;
   /** Who first raised a thread the reviewer took over (kept from an agent's draft). */
   suggestedBy?: string;
   replies: Reply[];
@@ -92,6 +94,8 @@ export interface Sidecar {
   comments: Comment[];
   /** Set by the CLI's review-done when an agent finishes reviewing the file first. */
   reviewDoneAt?: string;
+  /** The review run review-done ended (its --run), when Claude was given one. */
+  reviewDoneRun?: string;
 }
 
 export function sidecarPath(mdPath: string): string {

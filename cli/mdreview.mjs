@@ -11,9 +11,9 @@
 //   node mdreview.mjs suggest <file.md> <id> "<replacement for the quote>" ["<note>"]
 //   node mdreview.mjs reopen  <file.md> <id>
 //   node mdreview.mjs comment <file.md> --quote "<text as it reads>" [--line N] [--kind question|praise]
-//                             [--severity major|minor|nit] [--suggest "<replacement>"] "<body>"
+//                             [--severity major|minor|nit] [--suggest "<replacement>"] [--run <id>] "<body>"
 //   node mdreview.mjs comment <file.md> --document "<body>"
-//   node mdreview.mjs review-done <file.md>
+//   node mdreview.mjs review-done <file.md> [--run <id>]
 //   node mdreview.mjs init-claude [folder] [--force]
 //
 // paths can be .md files or folders (searched recursively; default: the current
@@ -58,6 +58,7 @@ const kindArg = flag('kind');
 const severityArg = flag('severity');
 const suggestArg = flag('suggest');
 const wholeDoc = bool('document');
+const runArg = flag('run');
 const [cmd, ...rest] = args;
 
 function usage(code = 1) {
@@ -430,6 +431,34 @@ function plainText(src) {
       lit.fill(1, s, e + 1);
     }
   }
+  // Indented code (four spaces or a tab after a blank line, outside a list) shows as written too.
+  let prevBlank = true;
+  let inCode = false;
+  let inList = false;
+  for (const [s, e] of lines) {
+    const t = lineAt(s, e);
+    if (!t.trim()) {
+      prevBlank = true;
+      continue;
+    }
+    const indent = /^(?: {4}|\t)/.exec(t);
+    if (lit[s] && !inCode) {
+      prevBlank = inCode = false;
+      continue;
+    }
+    if (indent && !inList && (prevBlank || inCode)) {
+      inCode = true;
+      fill(s, s + indent[0].length, DROP, true);
+      lit.fill(1, s, e + 1);
+    } else {
+      inCode = false;
+      if (!indent) {
+        if (/^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]/.test(t)) inList = true;
+        else if (prevBlank) inList = false;
+      }
+    }
+    prevBlank = false;
+  }
   each(/(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g, (m, i) => {
     fill(i, i + m[1].length, DROP);
     fill(i + m[0].length - m[1].length, i + m[0].length, DROP);
@@ -517,11 +546,14 @@ function plainText(src) {
     }
     const ws = /\s/.test(ch);
     if (ws && space) continue;
-    chars.push(ws ? ' ' : ch);
     space = ws;
-    at.push(k);
-    stop.push(pending);
-    pending = false;
+    // An entity can stand for two UTF-16 units (&#x1F600;): one map entry per unit keeps offsets aligned.
+    for (let u = 0; u < (ws ? 1 : ch.length); u++) {
+      chars.push(ws ? ' ' : ch[u]);
+      at.push(k);
+      stop.push(pending);
+      pending = false;
+    }
   }
   return { text: chars.join(''), at, stop };
 }
@@ -853,6 +885,7 @@ switch (cmd) {
       ...(severityArg ? { severity: severityArg } : {}),
       ...(suggestArg !== undefined ? { suggestion: { text: suggestArg } } : {}),
       origin: 'agent',
+      ...(runArg ? { reviewRun: runArg } : {}),
       replies: [],
     };
     mutate(md, (d) => void d.comments.push(c));
@@ -867,7 +900,12 @@ switch (cmd) {
     if (!mdArg) usage();
     const md = mdOf(mdArg);
     if (!fs.existsSync(md)) fail(`Not found: ${mdArg}`);
-    const d = mutate(md, (x) => void (x.reviewDoneAt = now()));
+    const d = mutate(md, (x) => {
+      x.reviewDoneAt = now();
+      // Which review this ends, so a second review started meanwhile keeps going.
+      if (runArg) x.reviewDoneRun = runArg;
+      else delete x.reviewDoneRun;
+    });
     const mine = d.comments.filter((c) => c.origin === 'agent' && c.status === 'draft').length;
     console.log(`Marked the review of ${shown(md)} done (${mine} draft${mine === 1 ? '' : 's'} waiting for the reviewer).`);
     break;

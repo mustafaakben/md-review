@@ -7,6 +7,7 @@ export * from './inlineEdit';
 export * from './editHistory';
 export * from './agentPrompt';
 export * from './reviewPresets';
-export { parseBibTeX, parseCslJson } from './bibliography';
+export { loadBibliography, parseBibTeX, parseCslJson } from './bibliography';
+export * from './agentLaunch';
 export * from './redlines';
 export * from './wordDiff';

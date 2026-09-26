@@ -388,6 +388,13 @@ mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(-
   --rl-del-bg: var(--vscode-diffEditor-removedTextBackground, color-mix(in srgb, #f85149 12%, transparent));
   --rl-mod: var(--vscode-editorGutter-modifiedBackground, var(--accent));
 }
+/* A reading theme sets the page's colours whatever VS Code's theme is, so the redline follows the page. */
+body[data-reading-theme='paper'] .mdr-layout, body[data-reading-theme='sepia'] .mdr-layout {
+  --rl-ins: #1a7f37; --rl-ins-bg: color-mix(in srgb, #2ea043 14%, transparent); --rl-del: #b42318; --rl-del-bg: color-mix(in srgb, #f85149 12%, transparent); --rl-mod: var(--doc-accent);
+}
+body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .mdr-layout {
+  --rl-ins: #6fdd8b; --rl-ins-bg: color-mix(in srgb, #2ea043 24%, transparent); --rl-del: #ff9b92; --rl-del-bg: color-mix(in srgb, #f85149 20%, transparent); --rl-mod: var(--doc-accent);
+}
 .mdr-toolbar button#mdr-changes-btn[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .mdr-changes {
   position: fixed; top: calc(var(--bar-h) + 8px); left: 50%; transform: translateX(-50%); z-index: 34; display: flex; align-items: center; gap: 4px;
@@ -400,7 +407,7 @@ mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(-
 .mdr-rl-close { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0 !important; background: transparent; border-color: transparent; color: var(--muted); }
 .mdr-rl-close::before { content: ''; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--i-close) center / contain no-repeat; mask: var(--i-close) center / contain no-repeat; }
 .mdr-doc ins.mdr-rl-ins { text-decoration: underline; text-decoration-color: var(--rl-ins); text-decoration-thickness: 2px; text-underline-offset: 3px; background: var(--rl-ins-bg); border-radius: 2px; }
-.mdr-doc del.mdr-rl-del { color: var(--rl-del); text-decoration: line-through; text-decoration-thickness: 1.5px; background: var(--rl-del-bg); border-radius: 2px; margin-right: 0.15em; }
+.mdr-doc del.mdr-rl-del { color: color-mix(in srgb, var(--rl-del) 60%, var(--doc-fg)); text-decoration: line-through; text-decoration-thickness: 1.5px; background: var(--rl-del-bg); border-radius: 2px; margin-right: 0.15em; }
 .mdr-doc .mdr-rl { position: relative; }
 .mdr-doc .mdr-rl::after { content: ''; position: absolute; left: -14px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--rl-mod); }
 .mdr-doc .mdr-rl.mdr-rl-add::after { background: var(--rl-ins); }
@@ -413,7 +420,7 @@ mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(-
 @keyframes mdr-rl-flash { 50% { background: color-mix(in srgb, var(--accent) 16%, transparent); } }
 .mdr-rl-gone { position: relative; margin: 0.6em 0; padding: 4px 10px; border-left: 3px solid var(--rl-del); border-radius: 4px; background: var(--rl-del-bg); }
 .mdr-rl-gone.mdr-rl-moved { border-left-color: var(--rl-mod); background: transparent; outline: 1px dotted var(--rl-mod); opacity: 0.8; }
-.mdr-rl-old { display: block; color: var(--rl-del); text-decoration: line-through; }
+.mdr-rl-old { display: block; color: color-mix(in srgb, var(--rl-del) 60%, var(--doc-fg)); text-decoration: line-through; }
 .mdr-rl-moved .mdr-rl-old { color: var(--doc-muted, var(--muted)); text-decoration: none; }
 .mdr-doc .mdr-rl-old > * { margin: 0.3em 0; }
 .mdr-rl-before { margin: 0.6em 0 0.2em; padding: 4px 10px; border-left: 3px solid var(--rl-del); border-radius: 4px; background: var(--rl-del-bg); opacity: 0.9; }

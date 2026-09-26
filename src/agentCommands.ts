@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { awaitsAgent, readSidecar } from './commentStore';
 import { buildFolderPrompt } from './agentPrompt';
-import { runAgent } from './editorProvider';
+import { runAgent } from './agentRun';
 
 const SIDECAR = '.md.comments.json';
 
@@ -60,10 +60,15 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
     cliPath: vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
     suggest: vscode.workspace.getConfiguration('mdReview').get<string>('agent.editMode') === 'suggest',
   });
-  void vscode.window.showInformationMessage(runAgent(prompt, name, cwd));
+  const status = runAgent(prompt, name, cwd);
+  if (status) void vscode.window.showInformationMessage(status);
 }
 
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {
+  if (!vscode.workspace.isTrusted) {
+    void vscode.window.showInformationMessage('Trust this folder first; the skill is for running Claude Code in it.');
+    return;
+  }
   const ws = await pickWorkspaceFolder('Add the MD Review skill to which folder?');
   if (ws === null) return;
   if (!ws) {

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import type { Baselines } from './redlines';
+import { runAgent } from './agentRun';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 /** Changes baselines per file, in workspace storage (never next to the document). */
@@ -61,7 +62,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const session = new ReviewSession({
       mdPath,
-      author: () => cfg().get<string>('author') || os.userInfo().username,
+      author: () => cfg().get<string>('author')?.trim() || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
       resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
@@ -71,6 +72,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       isDirty: () => document.isDirty,
       openLink: (href) => openLink(href, dir),
       watchFiles: watchBibs,
+      // In Restricted Mode a document can't make us read files elsewhere on the
+      // machine. (A document at a drive root or in the home folder allows that folder.)
+      readableRoots: () => (vscode.workspace.isTrusted ? undefined : [dir, ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)]),
       suggestMode: () => cfg().get<string>('agent.editMode') === 'suggest',
       reviewComments: () => cfg().get<number>('agent.reviewComments', 12),
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
@@ -118,6 +122,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
       }),
+      vscode.workspace.onDidGrantWorkspaceTrust(() => rerender(true)),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.workspace.isTrusted || rerender(true)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('mdReview')) session.sendComments();
       }),
@@ -163,49 +169,55 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       // allowing a host would let document HTML load scripts from the workspace.
       `script-src 'nonce-${nonce}'`,
     ].join('; ');
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    // The reading look goes into the page itself, so the first paint has it.
+    const prefs = readingPrefs(this.context.globalState.get(PREFS_KEY));
+    const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    return `<!DOCTYPE html><html lang="en" style="--doc-zoom:${prefs.zoom}"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${media('katex/katex.min.css')}">
 <link rel="stylesheet" href="${media('style.css')}">
 <link rel="stylesheet" href="${media('features.css')}">
 <title>MD Review</title></head>
-<body><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
+<body data-reading-theme="${prefs.theme}" data-reading-font="${prefs.font}" data-prefs="${attr(JSON.stringify(prefs))}"><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
+}
+
+/**
+ * The OS user name. os.userInfo() throws when the user has no passwd entry,
+ * as in many dev containers and CI images that run under an arbitrary uid.
+ */
+function systemUser(): string {
+  try {
+    const name = os.userInfo().username;
+    if (name) return name;
+  } catch {
+    // fall through
+  }
+  return process.env.USER || process.env.USERNAME || 'Reviewer';
+}
+
+/** Stored reading preferences, with anything unexpected replaced by the default. */
+function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string } {
+  const p = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
+  const zoom = typeof p.zoom === 'number' && p.zoom >= 0.5 && p.zoom <= 3 ? p.zoom : 1;
+  const theme = typeof p.theme === 'string' && ['auto', 'paper', 'sepia', 'dusk', 'night'].includes(p.theme) ? p.theme : 'auto';
+  const font = p.font === 'serif' ? 'serif' : 'sans';
+  return { zoom, theme, font };
 }
 
 function openLink(href: string, dir: string) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    void vscode.env.openExternal(vscode.Uri.parse(href));
+    const uri = vscode.Uri.parse(href);
+    // file: links open here. In Restricted Mode only web and mail links leave
+    // VS Code; other schemes (vscode:, other apps' handlers) need trust.
+    const scheme = uri.scheme.toLowerCase();
+    if (scheme === 'file') void vscode.commands.executeCommand('vscode.open', uri);
+    else if (vscode.workspace.isTrusted || ['http', 'https', 'mailto'].includes(scheme)) void vscode.env.openExternal(uri);
+    else void vscode.window.showInformationMessage(`Trust this folder to open ${uri.scheme}: links.`);
     return;
   }
   const [p] = href.split('#');
   if (!p) return;
   void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.resolve(dir, decodeURIComponent(p))));
-}
-
-/**
- * Start the configured agent in a terminal. The review prompt is written to a
- * temp file and the agent gets one short argument that points at it.
- */
-export function runAgent(prompt: string, fileName: string, cwd: string): string {
-  const cfg = vscode.workspace.getConfiguration('mdReview');
-  const mode = cfg.get<string>('agent.mode', 'terminal');
-  const command = (cfg.get<string>('agent.command') || 'claude').trim();
-  void vscode.env.clipboard.writeText(prompt);
-  if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
-  const [shellPath, ...extra] = command.split(/\s+/);
-  // Pass a short fixed argument pointing at a file instead of the prompt itself:
-  // comment text is untrusted, and on Windows a .cmd shim would run it through cmd.exe.
-  const promptFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-')), 'review-prompt.md');
-  fs.writeFileSync(promptFile, prompt, 'utf8');
-  const term = vscode.window.createTerminal({
-    name: `Claude · ${fileName}`,
-    cwd,
-    shellPath,
-    shellArgs: [...extra, `Read and follow the review instructions in ${promptFile}`],
-    iconPath: new vscode.ThemeIcon('sparkle'),
-  });
-  term.show();
-  return `Sent to ${shellPath} in a new terminal. The prompt is on your clipboard too.`;
 }

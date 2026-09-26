@@ -8,7 +8,6 @@ const sup = require('markdown-it-sup');
 const sub = require('markdown-it-sub');
 const attrs = require('markdown-it-attrs');
 const texmath = require('markdown-it-texmath');
-const katex = require('katex');
 import { frontMatterPlugin } from './frontMatter';
 import { criticPlugin } from './critic';
 import { gfmPlugin } from './gfm';
@@ -21,6 +20,8 @@ import { linearFootnoteTail } from './footnoteTail';
  * math-heavy render. KaTeX output depends only on the source and the options,
  * which are fixed here apart from displayMode. markdown-it-texmath keeps the
  * engine from its first use, so every renderer has to share this one.
+ * KaTeX itself loads on the first formula: a quarter of the extension's
+ * start-up, and many documents have no math.
  */
 const MATH_CACHE_LIMIT = 5000;
 // Two generations: a full one is kept as the older one while a new one fills,
@@ -29,11 +30,15 @@ const MATH_CACHE_LIMIT = 5000;
 // before it is needed again once a file has more formulas than the limit.
 let mathCache = new Map<string, string>();
 let olderMath = new Map<string, string>();
+let katex: { renderToString(tex: string, options: object): string } | undefined;
 const mathEngine = {
   renderToString(tex: string, options: { displayMode?: boolean }): string {
     const key = (options.displayMode ? 'D' : 'I') + tex;
     let html = mathCache.get(key) ?? olderMath.get(key);
-    if (html === undefined) html = katex.renderToString(tex, options) as string; // throws are handled by texmath; nothing is cached
+    if (html === undefined) {
+      katex ??= require('katex') as NonNullable<typeof katex>;
+      html = katex.renderToString(tex, options); // throws are handled by texmath; nothing is cached
+    }
     if (!mathCache.has(key)) {
       if (mathCache.size >= MATH_CACHE_LIMIT) {
         olderMath = mathCache;
@@ -112,6 +117,8 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
 /** `docDir`: the file's folder, for reading its `bibliography:`. */
 export interface RenderEnv {
   docDir?: string;
+  /** When set (an untrusted folder), only bibliographies inside these folders are read. */
+  bibRoots?: string[];
   /** Filled in by the render: the bibliography files it read, to watch. */
   bibFiles?: string[];
 }

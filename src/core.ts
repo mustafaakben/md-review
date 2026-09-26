@@ -1,5 +1,6 @@
 // Host-side message handling, independent of the VS Code API so the same code
 // drives both the extension and the browser test harness.
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
@@ -138,14 +139,17 @@ export interface HostContext {
   openLink(href: string): void;
   /** True when Send to Claude should ask for suggestions instead of edits. */
   suggestMode?(): boolean;
+  /** Folders the bibliography may be read from; undefined means anywhere. */
+  readableRoots?(): string[] | undefined;
   /** Re-render when any of these files (the bibliography) changes. */
   watchFiles?(files: string[]): void;
   /**
    * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
-   * a status line for the user. When absent, the prompt goes back to the
-   * webview, which copies it to the clipboard.
+   * a status line for the user ('' when it already told them), or null when no
+   * agent was started. When absent, the prompt goes back to the webview, which
+   * copies it to the clipboard.
    */
-  runAgent?(prompt: string): string;
+  runAgent?(prompt: string): string | null;
   /** Working directory for the agent; defaults to the Markdown file's folder. */
   agentCwd?(): string;
   /** Per-user view preferences (reading theme, zoom), shared by every file. */
@@ -208,7 +212,7 @@ export class ReviewSession {
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
   /** A Review with Claude run: when it started, its cap, and the drafts seen so far. Independent of the round. */
-  private review: { since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
+  private review: { run: string; since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
   private bases: redlines.Baselines | undefined;
   /** The Changes view is on, so every render carries the hunks. */
   private changesOn = false;
@@ -233,7 +237,7 @@ export class ReviewSession {
     if (!force && text === this.lastRendered) return this.syncHistory();
     this.lastRendered = text;
     let html: string;
-    const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
+    const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath), bibRoots: this.ctx.readableRoots?.() };
     this.lastParse = undefined;
     try {
       const r = renderParsed(text, this.ctx.resolveImage, env);
@@ -480,15 +484,18 @@ export class ReviewSession {
     const r = this.review;
     if (!r) return;
     const by = new Map(data.comments.map((c) => [c.id, c]));
-    // Drafts past the cap, or after the run finished, aren't this run's.
+    // An earlier review still running can finish after this one started; only this run's review-done counts.
+    const done = typeof data.reviewDoneAt === 'string' && (data.reviewDoneRun ? data.reviewDoneRun === r.run : data.reviewDoneAt >= r.since);
+    // Drafts past the cap, or after the run finished (even in the same write), aren't this run's.
     for (const c of data.comments) {
       if (r.finished || r.ids.size >= r.max) break;
-      if (c.origin === 'agent' && c.createdAt >= r.since) r.ids.add(c.id);
+      if (done && c.createdAt > data.reviewDoneAt!) continue;
+      if (c.origin === 'agent' && (c.reviewRun ? c.reviewRun === r.run : c.createdAt >= r.since)) r.ids.add(c.id);
     }
     const n = r.ids.size;
     let untriaged = 0;
     for (const id of r.ids) if (by.get(id) && store.isAgentDraft(by.get(id)!)) untriaged++;
-    const finished = r.finished || n >= r.max || (typeof data.reviewDoneAt === 'string' && data.reviewDoneAt >= r.since);
+    const finished = r.finished || n >= r.max || done;
     if (finished && !r.finished) {
       const file = path.basename(this.ctx.mdPath);
       this.ctx.notify?.(n ? `Claude left ${count(n, 'comment', 'comments')} on ${file}.` : `Claude finished reviewing ${file} with no comments.`);
@@ -530,10 +537,11 @@ export class ReviewSession {
       case 'ready':
         this.sent = { id: '', missing: [] }; // a new view has no baseline yet
         this.lastInfo = 'null'; // and knows of none
-        this.render(true);
+        // Document last, so the view paints once with its look and comments.
+        if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
         this.sendComments();
         this.postHistory();
-        if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
+        this.render(true);
         return;
       case 'addComment':
         return this.mutate((d) => {
@@ -747,14 +755,11 @@ export class ReviewSession {
       this.ctx.post({ type: 'toast', message: 'No open comments to send. Add a comment first.' });
       return;
     }
-    // Only threads that are actually waiting on the agent count toward the round.
-    const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
-    this.snapshot(ids);
-    // Ask Claude on one thread while a round is still running adds to that round.
-    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
-    else this.round = ids.length ? { ids } : null;
-    if (this.round) this.updateRound(data);
-    else this.ctx.post({ type: 'round', round: null });
+    // The copy the Changes view compares against, read before Claude can start.
+    let before: Buffer | undefined;
+    try {
+      before = fs.readFileSync(this.ctx.mdPath);
+    } catch {}
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
@@ -762,8 +767,20 @@ export class ReviewSession {
       cliPath: this.ctx.cliPath,
       suggest: this.ctx.suggestMode?.(),
     });
-    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
-    else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+    if (this.ctx.runAgent) {
+      const status = this.ctx.runAgent(prompt);
+      // Nothing started (the host said why): no round to follow.
+      if (status === null) return;
+      if (status) this.ctx.post({ type: 'toast', message: status });
+    } else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+    // Only threads that are actually waiting on the agent count toward the round.
+    const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
+    if (before) this.snapshot(ids, before);
+    // Ask Claude on one thread while a round is still running adds to that round.
+    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
+    else this.round = ids.length ? { ids } : null;
+    if (this.round) this.updateRound(data);
+    else this.ctx.post({ type: 'round', round: null });
   }
 
   private agentCwd(): string {
@@ -784,24 +801,23 @@ export class ReviewSession {
       existing = store.readSidecar(this.ctx.mdPath).comments.filter((c) => c.status !== 'resolved').length;
     } catch {} // a broken sidecar is reported by sendComments
     const max = Math.max(1, Math.min(50, Math.round(this.ctx.reviewComments?.() ?? 12)));
-    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing });
+    const run = crypto.randomBytes(4).toString('hex');
+    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing, run });
+    const since = store.now();
+    if (this.ctx.runAgent) {
+      const status = this.ctx.runAgent(prompt);
+      // Nothing started (the host said why): no review to follow.
+      if (status === null) return;
+      if (status) this.ctx.post({ type: 'toast', message: status });
+    } else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
     // A Send to Claude round still running keeps its own banner.
-    this.review = { since: store.now(), max, ids: new Set(), finished: false };
+    this.review = { run, since, max, ids: new Set(), finished: false };
     this.sendComments();
-    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
-    else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
   }
 
   /** Save the baseline the Changes view compares against (see redlines.onSend). */
-  private snapshot(ids: string[]): void {
-    if (!ids.length) return;
-    let disk: Buffer;
-    try {
-      disk = fs.readFileSync(this.ctx.mdPath);
-    } catch {
-      return;
-    }
-    if (disk.length > redlines.MAX_BASELINE_BYTES) return;
+  private snapshot(ids: string[], disk: Buffer): void {
+    if (!ids.length || disk.length > redlines.MAX_BASELINE_BYTES) return;
     this.setBaselines(redlines.onSend(this.baselines(), disk, ids));
   }
 

@@ -154,6 +154,15 @@ test('Ask Claude on one thread sends only that thread', () => {
   assert.equal(last('toast').message, 'started');
 });
 
+test('no round banner when the agent could not be started', () => {
+  const md = fresh('nostart.md', 'Alpha beta gamma.\n');
+  const { s, posted } = session(md, { runAgent: () => null });
+  s.handle({ type: 'addComment', anchor: { quote: 'beta', prefix: 'Alpha ', suffix: ' gamma.', lineStart: 1, lineEnd: 1 }, body: 'Why?' });
+  s.handle({ type: 'sendToAgent' });
+  assert.ok(!posted.some((m) => m.type === 'round' && m.round), 'no round started');
+  assert.ok(!posted.some((m) => m.type === 'toast'));
+});
+
 test('Send to Claude with nothing open says so', () => {
   const md = fresh('empty.md', 'Nothing here.\n');
   const { s, last } = session(md, { runAgent: () => assert.fail('should not run') });
@@ -192,4 +201,10 @@ test('a file change reaching the host several ways renders once', () => {
   // A reloaded view asks again and gets a fresh copy.
   s.handle({ type: 'ready' });
   assert.equal(renders(), 4);
+});
+
+test('on open the document comes last, after the reading look, comments and history', () => {
+  const md = fresh('open-order.md', '# Title\n\nText.\n');
+  const { posted } = session(md, { getPrefs: () => ({ zoom: 1.2 }) });
+  assert.deepEqual(posted.map((m) => m.type), ['prefs', 'comments', 'history', 'render']);
 });

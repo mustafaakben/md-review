@@ -144,6 +144,12 @@ const reading = createReading(
   (msg) => toast(msg),
 );
 const reviewMenu = createReviewMenu(document.getElementById('mdr-review-btn')!, document.getElementById('mdr-review')!, (m) => post(m), () => setSidebarOpen(true));
+// The host puts the stored reading look into the page (see shell()).
+try {
+  reading.apply(JSON.parse(document.body.dataset.prefs || '{}'));
+} catch {
+  /* keep the defaults */
+}
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;
 const outline = createOutline(
   doc,
