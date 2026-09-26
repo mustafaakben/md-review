@@ -178,8 +178,8 @@ export interface WrapSpec {
  * wrapRange() for each spec in turn: the text map is patched in place as nodes
  * split, instead of being rebuilt per range.
  */
-export function wrapRanges(root: Element, specs: WrapSpec[]): HTMLElement[][] {
-  const map = buildTextMap(root);
+/** `map`: the root's text map, when the caller just built it (it is updated as marks go in). */
+export function wrapRanges(root: Element, specs: WrapSpec[], map = buildTextMap(root)): HTMLElement[][] {
   return specs.map((sp) => wrapInMap(map, sp.start, sp.end, sp.make));
 }
 

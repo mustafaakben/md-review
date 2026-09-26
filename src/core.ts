@@ -13,6 +13,7 @@ import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 import * as redlines from './redlines';
 import { BaselineHook, memoryBaselines } from './baselineStore';
 import { diffSeq } from './wordDiff';
+import { SIDECAR_RETRY_MS } from './fileWatch';
 
 /** What the Changes view paints: the hunks against the current baseline. `v` names this comparison. */
 export interface Changes {
@@ -46,7 +47,7 @@ export interface BaselineInfo {
 }
 
 export type ToWebview =
-  | { type: 'render'; html: string; fileName: string; changes?: Changes | null; changesFailed?: boolean }
+  | { type: 'render'; blocks: string[]; fileName: string; changes?: Changes | null; changesFailed?: boolean }
   | { type: 'changes'; changes: Changes | null; failed?: boolean }
   | { type: 'baseline'; info: BaselineInfo | null }
   | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
@@ -60,6 +61,8 @@ export type ToWebview =
   | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'round'; round: Round | null }
   | { type: 'review'; review: ReviewRun | null }
+  /** Jump to a thread picked in the review inbox. */
+  | { type: 'focusThread'; id: string }
   | { type: 'error'; message: string };
 
 /**
@@ -167,6 +170,10 @@ export interface HostContext {
   notify?(message: string): void;
   /** The most comments Review with Claude asks for (default 12). */
   reviewComments?(): number;
+  /** Delays before re-reading a sidecar that didn't parse (tests shorten them). */
+  sidecarRetryMs?: number[];
+  /** Run fn after ms; defaults to setTimeout. */
+  schedule?(fn: () => void, ms: number): void;
   /** Where this file's Changes baseline is kept (a file in the extension's storage in VS Code). In memory when absent. */
   baselines?: BaselineHook;
 }
@@ -221,6 +228,11 @@ const YOURS: EditTag = { yours: true };
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
+  /** Counts sidecar events, so a pending re-read gives way to a newer one. */
+  private sidecarEvents = 0;
+  /** The sidecar text last shown after a watcher event, so a second report of the same change is skipped. */
+  private lastSidecarSeen: string | undefined;
+  private disposed = false;
   private lastRendered: string | undefined;
   private watched = '';
   private lastParse: RenderedParse | undefined;
@@ -258,15 +270,15 @@ export class ReviewSession {
     const text = this.ctx.getText();
     if (!force && text === this.lastRendered) return this.syncHistory();
     this.lastRendered = text;
-    let html: string;
+    let blocks: string[];
     const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath), bibRoots: this.ctx.readableRoots?.() };
     this.lastParse = undefined;
     try {
       const r = renderParsed(text, this.ctx.resolveImage, env);
-      html = r.html;
+      blocks = r.blocks;
       this.lastParse = { text, ...r.parse };
     } catch (e: any) {
-      html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
+      blocks = [`<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`];
     }
     const bibs = (env.bibFiles || []).join('\n');
     if (bibs !== this.watched) {
@@ -281,7 +293,7 @@ export class ReviewSession {
       changes = null; // a text the parser rejects: show no redlines rather than fail the render
       changesFailed = true;
     }
-    this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath), changes, changesFailed });
+    this.ctx.post({ type: 'render', blocks, fileName: path.basename(this.ctx.mdPath), changes, changesFailed });
     this.syncHistory();
     this.postBaseline();
   }
@@ -364,7 +376,7 @@ export class ReviewSession {
       try {
         // The same reading rules as the document (bibliographies only where render() may read them).
         const r = renderParsed(v.text, this.ctx.resolveImage, { docDir: path.dirname(this.ctx.mdPath), bibRoots: this.ctx.readableRoots?.() });
-        v.html = r.html;
+        v.html = r.blocks.join('');
         if (!v.blocks || v.pending) {
           v.blocks = redlines.blocksOfTokens(r.parse.tokens);
           v.pending = undefined;
@@ -575,12 +587,20 @@ export class ReviewSession {
     try {
       data = store.readSidecar(this.ctx.mdPath);
     } catch (e: any) {
-      this.ctx.post({ type: 'error', message: `Could not parse ${path.basename(store.sidecarPath(this.ctx.mdPath))}: ${e.message}` });
+      this.postParseError(e);
       return;
     }
+    this.postComments(data);
+  }
+
+  private postComments(data: store.Sidecar): void {
     this.ctx.post({ type: 'comments', data, author: this.ctx.author(), showResolved: this.ctx.showResolved() });
     this.updateRound(data);
     this.updateReview(data);
+  }
+
+  private postParseError(e: any): void {
+    this.ctx.post({ type: 'error', message: `Could not parse ${path.basename(store.sidecarPath(this.ctx.mdPath))}: ${e.message}` });
   }
 
   private updateRound(data: store.Sidecar): void {
@@ -623,6 +643,11 @@ export class ReviewSession {
     this.ctx.post({ type: 'round', round: round.total ? round : null });
   }
 
+  /** The panel closed: pending re-reads do nothing. */
+  dispose(): void {
+    this.disposed = true;
+  }
+
   /**
    * Count the drafts Claude has left since the review started. It's finished
    * once Claude stamps reviewDoneAt (review-done) or reaches the cap.
@@ -651,16 +676,40 @@ export class ReviewSession {
     this.ctx.post({ type: 'review', review: { startedAt: r.since, total: n, ids: [...r.ids], untriaged, finished } });
   }
 
-  /** Called by a file watcher when the sidecar changes on disk. */
+  /**
+   * Called by a file watcher when the sidecar changes on disk. The writer may
+   * not be done yet (sync tools and Windows fall back to writing in place), so
+   * a file that doesn't parse is read again a few times before it's an error.
+   */
   onSidecarChanged(): void {
-    let current: string | undefined;
-    try {
-      current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
-    } catch {
-      current = undefined;
-    }
-    if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
-    this.sendComments();
+    const gen = ++this.sidecarEvents;
+    const delays = this.ctx.sidecarRetryMs ?? SIDECAR_RETRY_MS;
+    const schedule = this.ctx.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
+    const attempt = (i: number) => {
+      if (this.disposed || gen !== this.sidecarEvents) return; // closed, or a newer event reads it instead
+      let current: string | undefined;
+      try {
+        current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
+      } catch {
+        current = undefined;
+      }
+      if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
+      if (current !== undefined && current === this.lastSidecarSeen) return; // already shown (event and poll both saw it)
+      const retry = i < delays.length;
+      // An empty file is usually a writer that has truncated but not written yet.
+      if (current === '' && retry) return schedule(() => attempt(i + 1), delays[i]);
+      let data: store.Sidecar;
+      try {
+        data = store.readSidecar(this.ctx.mdPath);
+      } catch (e: any) {
+        if (retry) schedule(() => attempt(i + 1), delays[i]);
+        else this.postParseError(e);
+        return;
+      }
+      this.lastSidecarSeen = current;
+      this.postComments(data);
+    };
+    attempt(0);
   }
 
   private mutate(fn: (d: store.Sidecar) => void): void {

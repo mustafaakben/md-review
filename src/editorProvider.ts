@@ -6,6 +6,9 @@ import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import { BaselineStore } from './baselineStore';
 import { runAgent } from './agentRun';
+import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
+import { hasUrlScheme } from './render';
+import { inlineImage, isInside } from './localImage';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 
@@ -20,11 +23,13 @@ function readDisk(p: string): string | undefined {
 export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdReview.editor';
   /** Every open MD Review panel, so commands can reach the focused one. */
-  private static panels = new Set<vscode.WebviewPanel>();
+  private static panels = new Map<vscode.WebviewPanel, PanelState>();
+  /** Threads to jump to once a panel that is still opening says it's ready. */
+  private static pendingFocus = new Map<string, string>();
 
   /** Forward a command (undo, find, …) to the focused MD Review webview. */
   static postToActive(msg: unknown): boolean {
-    for (const p of this.panels) {
+    for (const p of this.panels.keys()) {
       if (p.active) {
         void p.webview.postMessage(msg);
         return true;
@@ -35,6 +40,43 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
   /** Changes baselines: files in the extension's storage (never next to the document), details in workspace state. */
   private baselines: BaselineStore;
+
+  /** Hand a message to the focused panel's session as if its webview sent it (the smoke test's way in). */
+  static handleInActive(msg: FromWebview): boolean {
+    for (const [p, s] of this.panels) {
+      if (p.active) {
+        s.session.handle(msg);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Open `uri` in MD Review (or reveal the panel already showing it) and jump to a thread. */
+  static async focusThread(uri: vscode.Uri, id: string): Promise<void> {
+    const key = fileKey(uri);
+    for (const [p, s] of this.panels) {
+      if (s.key !== key) continue;
+      p.reveal();
+      if (s.ready) void p.webview.postMessage({ type: 'focusThread', id });
+      else s.focus = id;
+      return;
+    }
+    try {
+      await vscode.workspace.fs.stat(uri);
+    } catch {
+      // The inbox lists threads from the sidecar, which can outlive its Markdown file.
+      void vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} no longer exists; its review threads are still in ${path.basename(uri.fsPath)}.comments.json.`);
+      return;
+    }
+    this.pendingFocus.set(key, id);
+    try {
+      await vscode.commands.executeCommand('vscode.openWith', uri, this.viewType);
+    } finally {
+      // The panel took it when it opened; if it never did, don't jump in a later one.
+      if (this.pendingFocus.get(key) === id) this.pendingFocus.delete(key);
+    }
+  }
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.baselines = new BaselineStore(vscode.Uri.joinPath(context.storageUri ?? context.globalStorageUri, 'baselines').fsPath, context.workspaceState);
@@ -68,7 +110,16 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       author: () => cfg().get<string>('author')?.trim() || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
-      resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
+      resolveImage: (src) => {
+        const file = path.resolve(dir, src);
+        // In a trusted folder, an image outside the folders above (`../figures/a.png`
+        // beside a file opened on its own) is sent inline instead.
+        if (vscode.workspace.isTrusted && !roots.some((r) => isInside(r.fsPath, file))) {
+          const inline = inlineImage(file);
+          if (inline) return inline;
+        }
+        return webview.asWebviewUri(vscode.Uri.file(file)).toString();
+      },
       // Clean buffer -> render the disk bytes (the source of truth for block
       // edits); dirty buffer -> render what the user is typing.
       getText: () => (document.isDirty ? document.getText() : readDisk(mdPath) ?? document.getText()),
@@ -86,7 +137,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       setPrefs: (prefs) => {
         void this.context.globalState.update(PREFS_KEY, prefs);
         // Keep other open MD Review panels in step.
-        for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+        for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       baselines: this.baselines.forFile(mdPath),
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
@@ -98,7 +149,10 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         });
       },
     });
-    MdReviewEditorProvider.panels.add(panel);
+    const key = fileKey(document.uri);
+    const state: PanelState = { session, key, ready: false, focus: MdReviewEditorProvider.pendingFocus.get(key) };
+    MdReviewEditorProvider.pendingFocus.delete(key);
+    MdReviewEditorProvider.panels.set(panel, state);
 
     const subs: vscode.Disposable[] = [];
     let timer: NodeJS.Timeout | undefined;
@@ -118,6 +172,11 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         // Alt+1/2/3 are VS Code's "open editor N"; bind them only while a comment box has focus.
         if (m.type === 'composing') return void vscode.commands.executeCommand('setContext', 'mdReview.composing', m.on);
         session.handle(m);
+        if (m.type === 'ready') {
+          state.ready = true;
+          if (state.focus) void webview.postMessage({ type: 'focusThread', id: state.focus });
+          state.focus = undefined;
+        }
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
@@ -125,33 +184,52 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidGrantWorkspaceTrust(() => rerender(true)),
       vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.workspace.isTrusted || rerender(true)),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('mdReview')) session.sendComments();
+        if (!e.affectsConfiguration('mdReview')) return;
+        session.sendComments();
+        updatePolling();
       }),
     );
 
-    // Sidecar watcher (works for files outside the workspace too).
-    const sideWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(dir), path.basename(mdPath) + '.comments.json'),
-    );
-    const onSide = () => session.onSidecarChanged();
-    subs.push(sideWatcher, sideWatcher.onDidChange(onSide), sideWatcher.onDidCreate(onSide), sideWatcher.onDidDelete(onSide));
+    // Watch the folder rather than the two files: editors, sync tools and agents
+    // often save by replacing the file (delete + create), and a glob would miss a
+    // sidecar whose name differs only in case. This works outside the workspace too.
+    const mdName = path.basename(mdPath);
+    const sideName = mdName + '.comments.json';
+    const onFile = (name: string) => {
+      // render() skips text it already showed, so this costs nothing when the
+      // buffer listener above got there first.
+      if (sameName(name, mdName, process.platform)) rerender();
+      else if (sameName(name, sideName, process.platform)) session.onSidecarChanged();
+    };
+    subs.push(watchFolder(dir, (uri) => onFile(path.basename(uri.fsPath))));
 
-    // Markdown watcher: if VS Code hasn't reloaded the buffer (e.g. the file
-    // lives outside the workspace), make sure we still show the disk content.
-    const mdWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(dir), path.basename(mdPath)),
-    );
-    // render() skips text it already showed, so this costs nothing when the
-    // buffer listener above got there first.
-    subs.push(mdWatcher, mdWatcher.onDidChange(() => rerender()), mdWatcher.onDidCreate(() => rerender()));
+    // Network shares and \\wsl$ send no file events: look every 2 s while the panel shows.
+    let tracker: StampTracker | undefined;
+    let poll: NodeJS.Timeout | undefined;
+    const check = () => void tracker?.check().then((changed) => changed.forEach((f) => onFile(path.basename(f))));
+    const updatePolling = () => {
+      if (!(panel.visible && shouldPoll(mdPath, process.platform, cfg().get<boolean>('pollFiles', false)))) {
+        clearInterval(poll);
+        poll = undefined;
+      } else if (!poll) {
+        tracker ??= new StampTracker([mdPath, path.join(dir, sideName)]);
+        check(); // catch up on changes made while hidden
+        poll = setInterval(check, POLL_MS);
+      }
+    };
+    updatePolling();
+    subs.push({ dispose: () => clearInterval(poll) });
 
     subs.push(
       panel.onDidChangeViewState((e) => {
+        updatePolling();
         if (!e.webviewPanel.active) void vscode.commands.executeCommand('setContext', 'mdReview.composing', false);
       }),
     );
     panel.onDidDispose(() => {
       MdReviewEditorProvider.panels.delete(panel);
+      clearTimeout(timer);
+      session.dispose();
       subs.forEach((d) => d.dispose());
       bibWatchers.forEach((d) => d.dispose());
     });
@@ -183,6 +261,50 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   }
 }
 
+type FileEvent = (uri: vscode.Uri) => void;
+
+/** One watcher per folder, shared by every panel showing a file in it. */
+const folderWatchers = new Map<string, { watcher: vscode.FileSystemWatcher; listeners: Set<FileEvent> }>();
+
+/** Call `listener` on every change, creation or deletion of a file directly in `dir`. */
+function watchFolder(dir: string, listener: FileEvent): vscode.Disposable {
+  const key = folderKey(dir, process.platform);
+  let entry = folderWatchers.get(key);
+  if (!entry) {
+    // '*' without '**' watches only the folder's own files, not its subfolders.
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*'));
+    const listeners = new Set<FileEvent>();
+    const fire = (uri: vscode.Uri) => listeners.forEach((l) => l(uri));
+    watcher.onDidChange(fire);
+    watcher.onDidCreate(fire);
+    watcher.onDidDelete(fire);
+    entry = { watcher, listeners };
+    folderWatchers.set(key, entry);
+  }
+  const e = entry;
+  e.listeners.add(listener);
+  return new vscode.Disposable(() => {
+    e.listeners.delete(listener);
+    if (e.listeners.size) return;
+    e.watcher.dispose();
+    folderWatchers.delete(key);
+  });
+}
+
+interface PanelState {
+  session: ReviewSession;
+  key: string;
+  /** The webview has sent `ready`, so messages reach a live view. */
+  ready: boolean;
+  /** A thread to jump to once it is ready. */
+  focus?: string;
+}
+
+/** Compare files by path; Windows and macOS paths are case-insensitive. */
+function fileKey(uri: vscode.Uri): string {
+  return nameKey(uri.fsPath, process.platform);
+}
+
 /**
  * The OS user name. os.userInfo() throws when the user has no passwd entry,
  * as in many dev containers and CI images that run under an arbitrary uid.
@@ -207,7 +329,8 @@ function readingPrefs(stored: unknown): { zoom: number; theme: string; font: str
 }
 
 function openLink(href: string, dir: string) {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
+  // `C:/notes/x.md` is a path on a drive, not a URL with scheme `c`.
+  if (hasUrlScheme(href)) {
     const uri = vscode.Uri.parse(href);
     // file: links open here. In Restricted Mode only web and mail links leave
     // VS Code; other schemes (vscode:, other apps' handlers) need trust.

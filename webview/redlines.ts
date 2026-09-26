@@ -141,6 +141,8 @@ export interface Redlines {
   set(ch: Changes | null, paint?: boolean, failed?: boolean): void;
   /** Paint the current hunks over the document (after every full paint). */
   apply(): void;
+  /** Take every redline off the document (before a repaint; apply() puts them back). */
+  clear(): void;
   /** Remove the redline from one block, before it's edited. */
   clearIn(el: HTMLElement): void;
   step(d: 1 | -1): void;
@@ -355,6 +357,7 @@ export function createRedlines(
       pending = null;
       run?.();
     },
+    clear,
     clearIn(el) {
       shown.filter((p) => p.el && (p.el === el || el.contains(p.el))).forEach(unpaint);
     },

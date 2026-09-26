@@ -52,7 +52,35 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
     void vscode.window.showInformationMessage(`No open review comments in ${name}. Submit a review first.`);
     return;
   }
-  const cwd = ws?.uri.fsPath ?? folder.fsPath;
+  const status = startAgent(context, folder, ws?.uri.fsPath ?? folder.fsPath, files);
+  if (status) void vscode.window.showInformationMessage(status);
+}
+
+/**
+ * The review inbox's Send All: every workspace folder with open reviews gets
+ * its own Claude, started in that folder. When prompts only go to the
+ * clipboard there is room for one, so it asks for a folder as above.
+ */
+export async function sendWorkspaceToClaude(context: vscode.ExtensionContext): Promise<void> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const clipboard = vscode.workspace.getConfiguration('mdReview').get<string>('agent.mode') === 'clipboard' || !vscode.workspace.isTrusted;
+  if (folders.length < 2 || clipboard) return sendFolderToClaude(context);
+  const sent: string[] = [];
+  let status: string | null = '';
+  for (const ws of folders) {
+    const files = await openReviews(ws.uri);
+    if (!files.length) continue;
+    status = startAgent(context, ws.uri, ws.uri.fsPath, files);
+    // null: nothing started (no claude found), and the user was already told.
+    if (status === null) return;
+    sent.push(ws.name);
+  }
+  if (!sent.length) void vscode.window.showInformationMessage('No open review comments in this workspace. Submit a review first.');
+  else if (sent.length > 1) void vscode.window.showInformationMessage(`Sent the open reviews in ${sent.join(', ')} to Claude, each in its own terminal.`);
+  else if (status) void vscode.window.showInformationMessage(status);
+}
+
+function startAgent(context: vscode.ExtensionContext, folder: vscode.Uri, cwd: string, files: { mdPath: string; open: number }[]): string | null {
   const prompt = buildFolderPrompt({
     folder: folder.fsPath,
     cwd,
@@ -60,8 +88,7 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
     cliPath: vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
     suggest: vscode.workspace.getConfiguration('mdReview').get<string>('agent.editMode') === 'suggest',
   });
-  const status = runAgent(prompt, name, cwd);
-  if (status) void vscode.window.showInformationMessage(status);
+  return runAgent(prompt, path.basename(folder.fsPath), cwd);
 }
 
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {

@@ -12,3 +12,6 @@ export * from './agentLaunch';
 export * from './redlines';
 export * from './wordDiff';
 export * from './baselineStore';
+export * from './fileWatch';
+export { inlineImage } from './localImage';
+export * as inbox from './inbox';

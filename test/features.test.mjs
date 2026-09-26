@@ -193,7 +193,7 @@ test('a file change reaching the host several ways renders once', () => {
   s.render();
   s.render();
   assert.equal(renders(), 2);
-  assert.match(posted.filter((m) => m.type === 'render').at(-1).html, /First, edited\./);
+  assert.match(posted.filter((m) => m.type === 'render').at(-1).blocks.join(''), /First, edited\./);
   // An outside change is still picked up.
   fs.writeFileSync(md, 'Replaced.\n');
   s.render();

@@ -54,8 +54,18 @@ export type ResolveImage = (src: string) => string;
 
 const WRAPPED = ['html_block', 'math_block', 'math_block_eqno', 'code_block'];
 
+/**
+ * Whether `s` starts with a URL scheme (`https:`, `file:`, `vscode:`). A scheme
+ * is two or more characters, so a Windows drive (`C:\x.png`, `C:/x.md`) is a
+ * path, not a URL.
+ */
+export function hasUrlScheme(s: string): boolean {
+  return /^[a-z][a-z0-9+.-]+:/i.test(s);
+}
+
+/** A local path: relative, absolute or on a drive (not a URL, `//host`, `\\\\host` or `#id`). */
 function isRelative(src: string): boolean {
-  return !!src && !/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src);
+  return !!src && !hasUrlScheme(src) && !/^([\\/]{2}|#)/.test(src);
 }
 
 function cssLength(v: string): string {
@@ -97,7 +107,12 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   md.renderer.rules.image = (tokens, idx, opts, env, self) => {
     const t = tokens[idx];
     const src = t.attrGet('src') || '';
-    if (isRelative(src)) t.attrSet('src', resolveImage(decodeURIComponent(src)));
+    // Decode first: markdown-it stores a backslash as %5C, and `\\host` is a network path.
+    let local = src;
+    try {
+      local = decodeURIComponent(src);
+    } catch {} // a bare % stays as written
+    if (isRelative(local)) t.attrSet('src', resolveImage(local));
     const style: string[] = [];
     for (const k of ['width', 'height']) {
       const v = t.attrGet(k);
@@ -139,13 +154,29 @@ export interface Parse {
   env: Record<string, any>;
 }
 
-/** Render, keeping the parse so an in-view edit can find its block in it. */
-export function renderParsed(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): { html: string; parse: Parse } {
+/**
+ * Render, keeping the parse so an in-view edit can find its block in it. The
+ * HTML comes one string per top-level block (the footnotes are one block), so
+ * the view can replace only the blocks that changed; joined, they are exactly
+ * the whole document's HTML.
+ */
+export function renderParsed(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): { blocks: string[]; parse: Parse } {
   const md = rendererFor(resolveImage);
   const tokens = md.parse(text, env);
-  return { html: md.renderer.render(tokens, md.options, env), parse: { tokens, env } };
+  const blocks: string[] = [];
+  let start = 0;
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    depth += tokens[i].nesting;
+    if (depth === 0) {
+      blocks.push(md.renderer.render(tokens.slice(start, i + 1), md.options, env));
+      start = i + 1;
+    }
+  }
+  if (start < tokens.length) blocks.push(md.renderer.render(tokens.slice(start), md.options, env));
+  return { blocks, parse: { tokens, env } };
 }
 
 export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
-  return renderParsed(text, resolveImage, env).html;
+  return renderParsed(text, resolveImage, env).blocks.join('');
 }
