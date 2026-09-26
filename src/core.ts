@@ -400,7 +400,7 @@ export class ReviewSession {
     const text = this.lastRendered ?? '';
     const list = redlines.diffBlocks(v.text, text, this.blocks(v), this.blocksFor(text));
     if (!list.length && (this.differs(cur) || (this.settling && !cur.settled))) {
-      // Nothing left to show (what's left, if anything, is blank lines or link definitions): the review is done.
+      // Nothing left to show (what's left, if anything, is blank lines): the review is done.
       this.rebase(cur, text);
       return this.changes();
     }
@@ -1021,38 +1021,37 @@ export class ReviewSession {
 
   /**
    * On Send: save the copy the Changes view compares against, the text as
-   * you see it. While the current copy still has changes to review, or Claude
-   * hasn't changed anything yet, it stays (nothing an earlier round changed
-   * drops out of view) and the new threads join it.
+   * you see it (see redlines.sendBaseline).
    */
   private snapshot(comments: store.Comment[], text: string): void {
     if (!comments.length) return;
-    const bytes = Buffer.from(text, 'utf8');
-    if (bytes.length > redlines.MAX_BASELINE_BYTES) {
+    const cur = this.baselines().get();
+    const next = redlines.sendBaseline(cur, () => {
+      const v = this.view(cur!);
+      if (!v) return undefined;
+      return this.differs(cur!, text) ? redlines.diffBlocks(v.text, text, this.blocks(v), this.blocksFor(text)) : null;
+    }, comments, text);
+    if (!next) {
       this.ctx.post({ type: 'toast', message: 'This file is over 4 MB, so no copy was saved for the Changes view.' });
       return;
     }
-    const ids = comments.map((c) => c.id);
-    const span = (c: store.Comment): [number, number] => [Math.max(0, c.anchor.lineStart - 1), Math.max(c.anchor.lineStart, c.anchor.lineEnd)];
-    const cur = this.baselines().get();
-    const v = cur && !cur.settled ? this.view(cur) : null;
-    if (cur && v) {
-      const hunks = this.differs(cur, text) ? redlines.diffBlocks(v.text, text, this.blocks(v), this.blocksFor(text)) : [];
-      if (hunks.length || !this.differs(cur, text)) {
-        // The new threads' lines are the file's: find them in the baseline.
-        const spans = { ...cur.spans };
-        for (const c of comments) if (!spans[c.id]) spans[c.id] = redlines.baseSpan(hunks, span(c));
-        this.setBaseline({ ...cur, threads: [...new Set([...cur.threads, ...ids])], spans });
-        return this.postChanges();
-      }
+    if (next.bytes) {
+      const t = redlines.normText(text);
+      // The text was just rendered: its blocks are known.
+      const blocks = this.lastParse && redlines.normText(this.lastParse.text) === t ? this.blocksFor(text) : undefined;
+      this.baseView = { id: next.baseline.id, bytes: next.bytes, text: t, blocks };
     }
-    const id = redlines.textId(text);
-    const t = redlines.normText(text);
-    // The text was just rendered: its blocks are known.
-    const blocks = this.lastParse && redlines.normText(this.lastParse.text) === t ? this.blocksFor(text) : undefined;
-    this.baseView = { id, bytes, text: t, blocks };
-    this.setBaseline({ id, at: new Date().toISOString(), threads: ids, spans: Object.fromEntries(comments.map((c) => [c.id, span(c)])) }, bytes);
+    this.setBaseline(next.baseline, next.bytes);
     this.postChanges();
+  }
+
+  /**
+   * Claude was sent this file's threads from outside the panel (a folder's
+   * reviews, the inbox's Send All): save the copy a Send here would, `text`
+   * being the file as it was before Claude started.
+   */
+  snapshotSent(comments: store.Comment[], text: string): void {
+    this.snapshot(comments.filter((c) => store.awaitsAgent(c)), text);
   }
 
   /** Let go of what the Changes view needed: its rendered baseline (and on Accept all, the baseline itself). */

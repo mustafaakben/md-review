@@ -427,6 +427,9 @@ body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .m
 .mdr-rl-old { display: block; color: color-mix(in srgb, var(--rl-del) 60%, var(--doc-fg)); text-decoration: line-through; }
 .mdr-rl-moved .mdr-rl-old { color: var(--doc-muted, var(--muted)); text-decoration: none; }
 .mdr-doc .mdr-rl-old > * { margin: 0.3em 0; }
+.mdr-rl-gone.mdr-rl-src { border-left-color: var(--rl-mod); background: transparent; }
+.mdr-rl-src .mdr-rl-raw + .mdr-rl-cap { margin-top: 0.4em; }
+.mdr-doc pre.mdr-rl-raw { margin: 0.2em 0; padding: 2px 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
 .mdr-rl-before { margin: 0.6em 0 0.2em; padding: 4px 10px; border-left: 3px solid var(--rl-del); border-radius: 4px; background: var(--rl-del-bg); opacity: 0.9; }
 .mdr-rl-cap { font: 600 11px var(--vscode-font-family, system-ui); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
 .mdr-rl-acts { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; vertical-align: middle; font: 12px var(--vscode-font-family, system-ui); text-indent: 0; opacity: 0; transition: opacity 0.12s; }

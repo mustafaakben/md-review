@@ -8,7 +8,8 @@
 import { diffWords, Edit } from '../src/wordDiff';
 
 export interface Block { ls: number; le: number; type: string }
-export interface Hunk { kind: 'changed' | 'inserted' | 'deleted'; moved?: boolean; pair?: number; cur?: Block; base?: Block; c: [number, number]; b: [number, number] }
+/** A 'source' hunk is lines that render as nothing (a link definition): shown as their raw lines, was and now. */
+export interface Hunk { kind: 'changed' | 'inserted' | 'deleted' | 'source'; moved?: boolean; pair?: number; cur?: Block; base?: Block; c: [number, number]; b: [number, number]; was?: string; now?: string }
 /** Lines [lo, at) of the baseline were replaced and the lines from `at` on moved by `delta` (a Keep, or your own edit). */
 export interface BaseStep { lo: number; at: number; delta: number }
 export interface Changes { v: string; at: string; baseHtml?: string; baseShift?: { from: string; steps: BaseStep[] }; baseId: string; hunks: Hunk[]; spans?: Record<string, [number, number]> }
@@ -241,8 +242,35 @@ export function createRedlines(
     }
   }
 
+  /** Put a box for lines the document doesn't show before the first block at or after `line`, or at the end. */
+  function placeAt(box: HTMLElement, line: number, cur: Map<number, HTMLElement[]>) {
+    let next: HTMLElement | null = null;
+    for (const [ls, list] of cur) if (ls >= line && (!next || ls < Number(next.dataset.ls))) next = list[0];
+    const ref = next?.tagName === 'CODE' ? next.closest('pre') || next : next;
+    if (ref) ref.before(box);
+    else doc.appendChild(box);
+  }
+
+  /** Raw lines, as a captioned block. */
+  const rawLines = (cap: string, text: string) => `<div class="mdr-rl-cap">${cap}</div><pre class="mdr-rl-raw">${esc(text) || '<em>(none)</em>'}</pre>`;
+
   function paintHunk(i: number, h: Hunk, cur: Map<number, HTMLElement[]>): Painted {
     const p: Painted = { i, el: null, extras: [] };
+    if (h.kind === 'source') {
+      // Lines that render as nothing (a link definition): a mark where they are, their text on Show before.
+      const box = document.createElement('div');
+      box.className = 'mdr-ui mdr-rl-ui mdr-rl-gone mdr-rl-src';
+      box.dataset.rlI = String(i);
+      const note = document.createElement('div');
+      note.className = 'mdr-rl-cap';
+      note.textContent = !h.was ? 'Source lines added' : !h.now ? 'Source lines removed' : 'Source lines changed';
+      box.appendChild(note);
+      if (before.has(i)) box.insertAdjacentHTML('beforeend', rawLines('Before', h.was ?? '') + rawLines('Now', h.now ?? ''));
+      box.appendChild(chip(i, 'Source', true));
+      placeAt(box, h.c[0], cur);
+      p.extras.push(box);
+      return p;
+    }
     const old = h.base && base ? find(base.idx, h.base) : null;
     if (h.kind === 'deleted') {
       if (!old) return p;
@@ -257,11 +285,7 @@ export function createRedlines(
       box.appendChild(body);
       box.appendChild(chip(i, what, false));
       // Before the first block at or after where it was.
-      let next: HTMLElement | null = null;
-      for (const [ls, list] of cur) if (ls >= h.c[0] && (!next || ls < Number(next.dataset.ls))) next = list[0];
-      const ref = next?.tagName === 'CODE' ? next.closest('pre') || next : next;
-      if (ref) ref.before(box);
-      else doc.appendChild(box);
+      placeAt(box, h.c[0], cur);
       p.extras.push(box);
       return p;
     }

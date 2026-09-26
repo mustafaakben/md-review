@@ -140,6 +140,29 @@ for (const [name, base, last] of [
   assert.equal(t.last('render').changes.baseHtml, undefined, 'the baseline HTML is not sent again');
 });
 
+test('a changed link definition is a change of its own: Revert puts it back, Keep settles it', () => {
+  const base = 'See [docs].\n\n[docs]: https://old.example\n\nEnd.\n';
+  const agent = base.replace('old.example', 'new.example');
+  assert.deepEqual(lib.diffBlocks(base, agent), [{ kind: 'source', c: [2, 3], b: [2, 3], was: '[docs]: https://old.example', now: '[docs]: https://new.example' }]);
+  assert.deepEqual(lib.diffBlocks(base, base.replace('End.\n', 'End.\n\n\n')), [], 'blank lines alone are no change');
+  const r = session('refdef-r.md', base);
+  sendThenEdit(r, 'See', 1, () => Buffer.from(agent));
+  let ch = r.changes();
+  assert.equal(ch.hunks.length, 1, 'shown, not settled as reviewed');
+  assert.equal(r.saved.text, base);
+  assert.notEqual(r.saved.meta.settled, true);
+  r.s.handle({ type: 'revertChange', v: ch.v, i: 0 });
+  assert.equal(fs.readFileSync(r.md, 'utf8'), base, 'every byte is back');
+  const k = session('refdef-k.md', base);
+  sendThenEdit(k, 'See', 1, () => Buffer.from(agent));
+  ch = k.changes();
+  k.s.handle({ type: 'keepChange', v: ch.v, i: 0 });
+  assert.deepEqual(k.last('changes').changes.hunks, []);
+  assert.equal(k.saved.text, agent);
+  assert.equal(k.saved.meta.settled, true);
+  assert.equal(fs.readFileSync(k.md, 'utf8'), agent);
+});
+
 test('Revert refuses when the file changed underneath, or the hunks are stale', () => {
   const t = session('stale.md', '# T\n\nalpha beta.\n\ngamma.\n');
   sendThenEdit(t, 'alpha', 3, (b) => Buffer.from(b.toString().replace('alpha', 'ALPHA')));
@@ -308,6 +331,8 @@ for (const [name, base, agent] of [
   ['table row changed, table deleted', '| a | b |\n|---|---|\n| 1 | 2 |\n\nText.\n\n| c |\n|---|\n| 3 |\n', '| a | b |\n|---|---|\n| 1 | 9 |\n\nText.\n'],
   ['quote split', '> one\n>\n> two\n\nEnd.\n', '> one changed\n\nEnd.\n'],
   ['moved block', 'A block.\n\nB block.\n\nC block.\n', 'B block.\n\nC block.\n\nA block.\n'],
+  ['link definition changed', 'See [docs].\n\n[docs]: https://old.example\n', 'See [docs].\n\n[docs]: https://new.example\n'],
+  ['link definitions removed, added, moved', 'A [x] [y].\n\n[x]: http://a\n[y]: http://b\n\nB.\n', '[y]: http://b\n\nA [x] [y] [z].\n\nB.\n\n[z]: http://c\n'],
 ]) {
   test(`Revert all in any order is the baseline, Keep all is the file: ${name}`, () => roundTrips(name.replace(/\W+/g, '-'), base, agent));
   test(`... with CRLF and a BOM: ${name}`, () => roundTrips('crlf-' + name.replace(/\W+/g, '-'), crlf(base), crlf(agent)));

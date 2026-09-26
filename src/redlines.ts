@@ -6,6 +6,7 @@ import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 import { createRenderer } from './render';
 import { diffSeq, Edit } from './wordDiff';
+import type { BaselineHook } from './baselineStore';
 
 /** A block of source lines [ls, le) and its token type ('paragraph', 'li', 'table', 'fence', …). */
 export interface Block {
@@ -15,7 +16,8 @@ export interface Block {
 }
 
 export interface Hunk {
-  kind: 'changed' | 'inserted' | 'deleted';
+  /** 'source': lines outside any block changed (a link definition), which render as nothing. */
+  kind: 'changed' | 'inserted' | 'deleted' | 'source';
   /** The same block was deleted in one place and inserted in another. */
   moved?: boolean;
   /** For a move, the index of its other half: Keep and Revert settle both. */
@@ -26,6 +28,9 @@ export interface Hunk {
   /** Lines [start, end) that Revert copies from the baseline (b) over the file (c), and Keep the other way. One may be empty. */
   c: [number, number];
   b: [number, number];
+  /** For a source change, its lines in the baseline and in the file, for the view to show as they are. */
+  was?: string;
+  now?: string;
 }
 
 /**
@@ -61,6 +66,51 @@ export function shiftSpans(spans: Record<string, [number, number]> | undefined, 
     out[id] = s >= at ? [s + delta, e + delta] : e <= lo ? [s, e] : [Math.min(s, lo), Math.max(e > at ? e + delta : at + delta, lo)];
   }
   return out;
+}
+
+/** A thread's lines [start, end) in the file, from its anchor. */
+export const threadSpan = (a: { lineStart: number; lineEnd: number }): [number, number] => [Math.max(0, a.lineStart - 1), Math.max(a.lineStart, a.lineEnd)];
+
+/**
+ * The baseline a Send saves, for `text` and the threads sent. While the
+ * current one (`cur`) still has changes to review, or Claude hasn't changed
+ * anything yet, it stays (nothing an earlier round changed drops out of view)
+ * and the new threads join it; otherwise the copy is `text`, with bytes to
+ * write. `changes` is asked only for an unreviewed `cur`: the hunks of `text`
+ * against it, null for the same text, undefined when its copy is gone. Null
+ * when the file is too large to keep a copy of.
+ */
+export function sendBaseline(
+  cur: Baseline | undefined,
+  changes: () => Hunk[] | null | undefined,
+  threads: { id: string; anchor: { lineStart: number; lineEnd: number } }[],
+  text: string,
+): { baseline: Baseline; bytes?: Buffer } | null {
+  const bytes = Buffer.from(text, 'utf8');
+  if (bytes.length > MAX_BASELINE_BYTES) return null;
+  const ids = threads.map((c) => c.id);
+  const hunks = cur && !cur.settled ? changes() : undefined;
+  if (cur && hunks !== undefined && (!hunks || hunks.length)) {
+    // The new threads' lines are the file's: find them in the baseline.
+    const spans = { ...cur.spans };
+    for (const c of threads) if (!spans[c.id]) spans[c.id] = baseSpan(hunks ?? [], threadSpan(c.anchor));
+    return { baseline: { ...cur, threads: [...new Set([...cur.threads, ...ids])], spans } };
+  }
+  const spans = Object.fromEntries(threads.map((c) => [c.id, threadSpan(c.anchor)]));
+  return { baseline: { id: textId(text), at: new Date().toISOString(), threads: ids, spans }, bytes };
+}
+
+/** Save what a Send saves (see sendBaseline) into a file's baseline, with no session open on it. False when the file is too large. */
+export function saveSendBaseline(hook: BaselineHook, threads: { id: string; anchor: { lineStart: number; lineEnd: number } }[], text: string): boolean {
+  if (!threads.length) return true;
+  const next = sendBaseline(hook.get(), () => {
+    const bytes = hook.read();
+    if (!bytes) return undefined;
+    const base = normText(bytes.toString('utf8'));
+    return base === normText(text) ? null : diffBlocks(base, text);
+  }, threads, text);
+  if (next) hook.set(next.baseline, next.bytes);
+  return !!next;
 }
 
 let parser: MarkdownIt | undefined;
@@ -110,6 +160,9 @@ const blank = (line: string | undefined) => line !== undefined && /^[\s>]*$/.tes
  * (blank lines, link definitions, a quote's bare `>`) that both sides share
  * are fixed points no hunk's lines cross; the rest go with the nearest block,
  * so that settling hunks one at a time, in any order, ends at the other side.
+ * Lines of text outside blocks that only one side has (a link definition
+ * whose URL changed) are a source hunk of their own: no hunks means no
+ * difference but blank lines.
  */
 export function diffBlocks(baseText: string, curText: string, baseBlocks = blocksOf(baseText), curBlocks = blocksOf(curText)): Hunk[] {
   const B = baseBlocks;
@@ -133,10 +186,18 @@ export function diffBlocks(baseText: string, curText: string, baseBlocks = block
   let gap: Gap = { del: [], ins: [], b: [0, 0], c: [0, 0] };
   let i = 0;
   let j = 0;
+  /** The lines of text in [lo, hi): not blank lines, which alone are no change. */
+  const texts = (lines: string[], lo: number, hi: number) => lines.slice(lo, hi).filter((l) => !blank(l));
   const close = (b: number, c: number) => {
     gap.b[1] = b;
     gap.c[1] = c;
     if (gap.del.length || gap.ins.length) gaps.push(gap);
+    else if (b - gap.b[0] || c - gap.c[0]) {
+      // No block here, but the lines between blocks (link definitions) may differ.
+      const tb = texts(bl, gap.b[0], b);
+      const tc = texts(cl, gap.c[0], c);
+      if (tb.length !== tc.length || tb.some((l, k) => l !== tc[k])) gaps.push(gap);
+    }
   };
   for (const e of script) {
     if (e === 0) {
@@ -181,6 +242,12 @@ export function diffBlocks(baseText: string, curText: string, baseBlocks = block
     hunks.push({ kind: 'deleted', moved: moved.has('b' + d) || undefined, base: B[d], c, b });
   const ins = (n: number, c: [number, number], b: [number, number]) =>
     hunks.push({ kind: 'inserted', moved: moved.has('c' + n) || undefined, cur: C[n], c, b });
+  /** Lines of text outside blocks one side lacks, as one hunk with those next to them. */
+  const source = (b: [number, number], c: [number, number]) => {
+    const h = hunks[hunks.length - 1];
+    if (h?.kind === 'source' && h.b[1] === b[0] && h.c[1] === c[0]) [h.b[1], h.c[1]] = [b[1], c[1]];
+    else hunks.push({ kind: 'source', c, b });
+  };
   /** Separator lines that differ with no block among them (a blank line became a bare `>`): they go with a hunk beside them. */
   const loose: { b: [number, number]; c: [number, number] }[] = [];
   // Both files end in a line break: their empty last lines stay put.
@@ -237,7 +304,7 @@ export function diffBlocks(baseText: string, curText: string, baseBlocks = block
       }
     }
     fine(tb.length, tc.length);
-    // Runs between fixed lines. A line of text outside blocks (a link definition) that only one side has is fixed too: it stays where it is.
+    // Runs between fixed lines. A line of text outside blocks (a link definition) that only one side has ends a run too, and is a source hunk.
     x = 0;
     y = 0;
     let at = [b[0], c[0]];
@@ -255,15 +322,19 @@ export function diffBlocks(baseText: string, curText: string, baseBlocks = block
         const t = tb[x++];
         if (!text(t, bl)) run.b.push(t);
         else {
-          flush(t.ls, next(tc, y, c[1]));
-          at = [t.le, next(tc, y, c[1])];
+          const p = next(tc, y, c[1]);
+          flush(t.ls, p);
+          source([t.ls, t.le], [p, p]);
+          at = [t.le, p];
         }
       } else {
         const t = tc[y++];
         if (!text(t, cl)) run.c.push(t);
         else {
-          flush(next(tb, x, b[1]), t.ls);
-          at = [next(tb, x, b[1]), t.le];
+          const p = next(tb, x, b[1]);
+          flush(p, t.ls);
+          source([p, p], [t.ls, t.le]);
+          at = [p, t.le];
         }
       }
     }
@@ -337,6 +408,9 @@ export function diffBlocks(baseText: string, curText: string, baseBlocks = block
     if (h && h.c[1] === r.c[0] && h.b[1] === r.b[0]) [h.c[1], h.b[1]] = [r.c[1], r.b[1]];
     else if (h) [h.c[0], h.b[0]] = [r.c[0], r.b[0]];
   }
+  // The raw lines of each source change, without the blank lines it took along.
+  const raw = (lines: string[], [lo, hi]: [number, number]) => texts(lines, lo, hi).join('\n');
+  for (const h of hunks) if (h.kind === 'source') [h.was, h.now] = [raw(bl, h.b), raw(cl, h.c)];
   // In reading order; a deletion sits before the block that now follows it.
   hunks.sort((x, y) => x.c[0] - y.c[0] || (x.kind === 'deleted' ? -1 : 0) - (y.kind === 'deleted' ? -1 : 0) || (x.b[0] - y.b[0]));
   // Link the two halves of each move.

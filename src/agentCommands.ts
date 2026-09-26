@@ -6,6 +6,7 @@ import * as path from 'path';
 import { awaitsAgent, readSidecar } from './commentStore';
 import { buildFolderPrompt } from './agentPrompt';
 import { runAgent } from './agentRun';
+import { MdReviewEditorProvider } from './editorProvider';
 
 const SIDECAR = '.md.comments.json';
 
@@ -88,7 +89,12 @@ function startAgent(context: vscode.ExtensionContext, folder: vscode.Uri, cwd: s
     cliPath: vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
     suggest: vscode.workspace.getConfiguration('mdReview').get<string>('agent.editMode') === 'suggest',
   });
-  return runAgent(prompt, path.basename(folder.fsPath), cwd);
+  // The copies the Changes view compares against, taken before Claude can start (as Send in a panel does).
+  const before = files.map((f) => [f.mdPath, MdReviewEditorProvider.textOf(f.mdPath)] as const);
+  const status = runAgent(prompt, path.basename(folder.fsPath), cwd);
+  // null: nothing started, so nothing to compare against.
+  if (status !== null) for (const [mdPath, text] of before) if (text !== undefined) MdReviewEditorProvider.snapshotSent(context, mdPath, text);
+  return status;
 }
 
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {
