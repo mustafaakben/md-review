@@ -1,6 +1,8 @@
 // Find in document. Matches are painted with the CSS Custom Highlight API, so
 // searching never touches the document DOM (no conflict with comment marks or
-// editing) and a repaint only has to recompute ranges.
+// editing) and a repaint only has to recompute ranges. Matches are
+// StaticRanges: thousands of live Ranges would each be updated by the browser
+// on every later DOM change, which made one repaint after a find take seconds.
 import { buildTextMap, TextMap } from './anchor';
 import { tip } from './keys';
 import { reveal as revealTarget } from './reveal';
@@ -10,7 +12,7 @@ const MAX_MATCHES = 5000;
 declare const Highlight: any;
 const highlights: Map<string, unknown> | undefined = (globalThis as any).CSS?.highlights;
 
-function rangeAt(map: TextMap, start: number, end: number): Range | null {
+function rangeAt(map: TextMap, start: number, end: number): StaticRange | null {
   const at = (off: number, isEnd: boolean): [Text, number] | null => {
     let lo = 0;
     let hi = map.starts.length - 1;
@@ -25,10 +27,24 @@ function rangeAt(map: TextMap, start: number, end: number): Range | null {
   const a = at(start, false);
   const b = at(end, true);
   if (!a || !b) return null;
-  const r = document.createRange();
-  r.setStart(a[0], a[1]);
-  r.setEnd(b[0], b[1]);
-  return r;
+  return new StaticRange({ startContainer: a[0], startOffset: a[1], endContainer: b[0], endOffset: b[1] });
+}
+
+/** A live Range for measuring one match; dropped right after use. */
+function live(r: StaticRange): Range | null {
+  if (!r.startContainer.isConnected || !r.endContainer.isConnected) return null;
+  const l = document.createRange();
+  try {
+    l.setStart(r.startContainer, r.startOffset);
+    l.setEnd(r.endContainer, r.endOffset);
+  } catch {
+    return null;
+  }
+  return l;
+}
+
+function top(r: StaticRange): number {
+  return live(r)?.getBoundingClientRect().top ?? -Infinity;
 }
 
 export interface Search {
@@ -47,7 +63,7 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
     <button data-find="close" title="Close (Esc)" aria-label="Close">✕</button>`;
   const input = bar.querySelector('input') as HTMLInputElement;
   const countEl = bar.querySelector('.mdr-find-count') as HTMLElement;
-  let ranges: Range[] = [];
+  let ranges: StaticRange[] = [];
   let index = -1;
   let timer: any;
 
@@ -67,7 +83,7 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
   }
 
   function reveal() {
-    const r = ranges[index];
+    const r = ranges[index] && live(ranges[index]);
     if (!r) return;
     const rect = r.getBoundingClientRect();
     if (rect.top < 70 || rect.bottom > window.innerHeight - 40) revealTarget(r, 'third');
@@ -92,9 +108,16 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
       if (ranges.length) {
         if (keepIndex && prev >= 0) index = Math.min(prev, ranges.length - 1);
         else {
-          // Start from the first match below the top of the viewport.
-          index = ranges.findIndex((r) => r.getBoundingClientRect().top >= 60);
-          if (index < 0) index = 0;
+          // Start from the first match below the top of the viewport (matches
+          // are in document order, so binary search).
+          let lo = 0;
+          let hi = ranges.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (top(ranges[mid]) >= 60) hi = mid;
+            else lo = mid + 1;
+          }
+          index = lo < ranges.length ? lo : 0;
         }
       }
     }

@@ -171,3 +171,11 @@ test('images outside the allowed folders go inline: image files only, never netw
   assert.equal(inlineImage('\\\\srv\\share\\a.png', 'win32'), null);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('attributes still apply, and are skipped only when no text has a brace', () => {
+  const md = require('../dist/lib.cjs').createRenderer((x) => x);
+  assert.match(md.render('# Head {#top .big}\n\nA para {.note}\n'), /<h1 id="top" class="big"[^>]*>Head<\/h1>\n<p class="note"/);
+  assert.match(md.render('`a{b}` and $x^{2}$ then text {.late}\n'), /<p class="late"/);
+  assert.match(md.render('```js {.lang}\nx\n```\n'), /class="lang/);
+  assert.equal(md.render('Plain $x^{2}$ and `a{b}`.\n').includes('{b}'), true);
+});

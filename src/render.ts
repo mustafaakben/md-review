@@ -72,12 +72,37 @@ function cssLength(v: string): string {
   return /^\d+(\.\d+)?$/.test(v) ? `${v}px` : v;
 }
 
+/**
+ * markdown-it-attrs tests every token against a dozen patterns: about half of
+ * each parse. Only `{…}` in text or a fence's info string can carry
+ * attributes, so run it only when some token has one (math and code braces
+ * don't count).
+ */
+function gateAttrs(md: MarkdownIt): void {
+  const rules = (md.core.ruler as any).__rules__ as { name: string; fn: (state: any) => unknown }[];
+  const rule = rules.find((r) => r.name === 'curly_attributes');
+  if (!rule) return;
+  const inner = rule.fn;
+  const plain = (t: { type: string }) => !t.type.startsWith('math') && t.type !== 'code_inline' && t.type !== 'code_block';
+  md.core.ruler.at('curly_attributes', (state: any) => {
+    const hasBrace = state.tokens.some((t: any) =>
+      t.type === 'fence'
+        ? t.info.includes('{')
+        : t.children
+          ? t.children.some((c: any) => plain(c) && c.content.includes('{'))
+          : plain(t) && t.content.includes('{'),
+    );
+    return hasBrace ? inner(state) : false;
+  });
+}
+
 export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   const md = new MarkdownIt({ html: true, linkify: true, typographer: false });
   md.use(frontMatterPlugin).use(criticPlugin);
   md.use(footnote).use(linearFootnoteTail).use(sup).use(sub).use(gfmPlugin);
   md.use(texmath, { engine: mathEngine, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } });
   md.use(attrs, { allowedAttributes: ['id', 'class', 'width', 'height', 'style'] });
+  gateAttrs(md);
   md.use(citationsPlugin);
 
   // Tag block tokens with their source line range.
