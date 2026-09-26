@@ -53,7 +53,7 @@ jobs:
   # runs on main, weekly and on demand rather than on every pull request.
   smoke:
     name: VS Code smoke · ${{ matrix.os }}
-    if: true # TEMP: run the smoke test once on this PR
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
