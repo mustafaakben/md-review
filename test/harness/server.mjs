@@ -48,9 +48,10 @@ fs.watch(dir, (_ev, name) => {
 });
 
 const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MD Review harness</title>
-<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"></head>
+<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"><link rel="stylesheet" href="/media/features.css"></head>
 <body><div id="app"></div>
 <script>
+  window.__mdrStandalone = true;
   let state = {};
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => fetch('/msg', { method: 'POST', body: JSON.stringify(m) }),

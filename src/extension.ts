@@ -18,6 +18,17 @@ export function activate(context: vscode.ExtensionContext) {
       if (!target) return;
       await vscode.commands.executeCommand('vscode.openWith', target, 'default', vscode.ViewColumn.Beside);
     }),
+    ...(
+      [
+        ['mdReview.undo', { type: 'command', command: 'undo' }],
+        ['mdReview.redo', { type: 'command', command: 'redo' }],
+        ['mdReview.find', { type: 'command', command: 'find' }],
+        ['mdReview.nextComment', { type: 'command', command: 'next' }],
+        ['mdReview.previousComment', { type: 'command', command: 'prev' }],
+        ['mdReview.toggleOutline', { type: 'command', command: 'outline' }],
+        ['mdReview.sendToClaude', { type: 'command', command: 'send' }],
+      ] as const
+    ).map(([id, msg]) => vscode.commands.registerCommand(id, () => MdReviewEditorProvider.postToActive(msg))),
   );
 }
 

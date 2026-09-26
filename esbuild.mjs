@@ -8,6 +8,7 @@ mkdirSync('media/katex', { recursive: true });
 cpSync('node_modules/katex/dist/katex.min.css', 'media/katex/katex.min.css');
 cpSync('node_modules/katex/dist/fonts', 'media/katex/fonts', { recursive: true });
 cpSync('webview/style.css', 'media/style.css');
+cpSync('webview/features.css', 'media/features.css');
 
 const builds = [
   // Extension host.

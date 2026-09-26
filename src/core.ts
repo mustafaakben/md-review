@@ -6,6 +6,8 @@ import * as store from './commentStore';
 import { applyBlockEdit, readBlock, BlockEditError } from './blockEdit';
 import { renderMarkdown, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
+import { EditHistory, HistoryError } from './editHistory';
+import { buildAgentPrompt } from './agentPrompt';
 
 export type ToWebview =
   | { type: 'render'; html: string; fileName: string }
@@ -13,6 +15,9 @@ export type ToWebview =
   | { type: 'block'; ls: number; le: number; text: string }
   | { type: 'blockSaved'; ls: number }
   | { type: 'inlineFailed'; ls: number; le: number; text: string; message: string }
+  | { type: 'history'; canUndo: boolean; canRedo: boolean }
+  | { type: 'toast'; message: string }
+  | { type: 'agentPrompt'; prompt: string; count: number }
   | { type: 'error'; message: string };
 
 export type FromWebview =
@@ -26,7 +31,10 @@ export type FromWebview =
   | { type: 'getBlock'; ls: number; le: number }
   | { type: 'saveBlock'; ls: number; le: number; original: string; newText: string }
   | { type: 'saveInline'; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
-  | { type: 'openLink'; href: string };
+  | { type: 'openLink'; href: string }
+  | { type: 'undo' }
+  | { type: 'redo' }
+  | { type: 'sendToAgent'; id?: string };
 
 export interface HostContext {
   mdPath: string;
@@ -39,11 +47,22 @@ export interface HostContext {
   /** True if the document has unsaved changes in an editor. */
   isDirty(): boolean;
   openLink(href: string): void;
+  /**
+   * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
+   * a status line for the user. When absent, the prompt goes back to the
+   * webview, which copies it to the clipboard.
+   */
+  runAgent?(prompt: string): string;
+  /** Working directory for the agent; defaults to the Markdown file's folder. */
+  agentCwd?(): string;
+  /** Absolute path to cli/mdreview.mjs, if available. */
+  cliPath?: string;
 }
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
   private lastRendered = '';
+  private history = new EditHistory();
 
   constructor(private ctx: HostContext) {}
 
@@ -103,6 +122,7 @@ export class ReviewSession {
       case 'ready':
         this.render();
         this.sendComments();
+        this.postHistory();
         return;
       case 'addComment':
         return this.mutate((d) => void store.addComment(d, author, msg.anchor, msg.body));
@@ -124,14 +144,14 @@ export class ReviewSession {
       }
       case 'saveBlock':
         this.assertEditable();
-        applyBlockEdit(this.ctx.mdPath, msg.ls, msg.le, msg.original, msg.newText);
+        this.recorded(() => applyBlockEdit(this.ctx.mdPath, msg.ls, msg.le, msg.original, msg.newText));
         this.ctx.post({ type: 'blockSaved', ls: msg.ls });
         this.render();
         return;
       case 'saveInline':
         this.assertEditable();
         try {
-          applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText);
+          this.recorded(() => applyInlineEdit(this.ctx.mdPath, msg.ls, msg.le, msg.kind, msg.oldText, msg.newText));
         } catch (e) {
           if (e instanceof InlineMapError) {
             this.ctx.post({ type: 'inlineFailed', ls: msg.ls, le: msg.le, text: e.source, message: e.message });
@@ -145,7 +165,74 @@ export class ReviewSession {
       case 'openLink':
         this.ctx.openLink(msg.href);
         return;
+      case 'undo':
+      case 'redo':
+        return this.undoRedo(msg.type);
+      case 'sendToAgent':
+        return this.sendToAgent(msg.id);
     }
+  }
+
+  /** Run a file edit and remember it for undo. */
+  private recorded(write: () => unknown): void {
+    const before = fs.readFileSync(this.ctx.mdPath);
+    write();
+    this.history.record(before, fs.readFileSync(this.ctx.mdPath));
+    this.postHistory();
+  }
+
+  postHistory(): void {
+    this.ctx.post({ type: 'history', canUndo: this.history.canUndo, canRedo: this.history.canRedo });
+  }
+
+  private undoRedo(which: 'undo' | 'redo'): void {
+    if (which === 'undo' ? !this.history.canUndo : !this.history.canRedo) {
+      this.ctx.post({ type: 'toast', message: which === 'undo' ? 'Nothing to undo.' : 'Nothing to redo.' });
+      return;
+    }
+    if (this.ctx.isDirty()) {
+      throw new Error('This file has unsaved changes in another editor. Save or revert them before undoing here.');
+    }
+    const cur = fs.readFileSync(this.ctx.mdPath);
+    let next: Buffer;
+    try {
+      next = which === 'undo' ? this.history.undo(cur) : this.history.redo(cur);
+    } catch (e) {
+      if (e instanceof HistoryError) this.postHistory();
+      throw e;
+    }
+    fs.writeFileSync(this.ctx.mdPath, next);
+    this.postHistory();
+    this.ctx.post({ type: 'toast', message: which === 'undo' ? 'Undid the last edit.' : 'Redid the edit.' });
+    this.render();
+  }
+
+  /**
+   * Submit what's pending and hand the open threads to an agent. With an id,
+   * only that thread is sent (and submitted if it was a draft).
+   */
+  private sendToAgent(id?: string): void {
+    const { data, written } = store.mutate(this.ctx.mdPath, (d) => {
+      if (id) {
+        const c = store.find(d, id);
+        if (c.status === 'draft') store.setStatus(d, id, 'submitted');
+      } else store.submitDrafts(d);
+    });
+    this.lastSidecarWrite = written;
+    this.sendComments();
+    const comments = data.comments.filter((c) => (id ? c.id === id : c.status === 'submitted'));
+    if (!comments.length) {
+      this.ctx.post({ type: 'toast', message: 'No open comments to send. Add a comment first.' });
+      return;
+    }
+    const prompt = buildAgentPrompt({
+      mdPath: this.ctx.mdPath,
+      cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
+      comments,
+      cliPath: this.ctx.cliPath,
+    });
+    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
+    else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
   }
 
   /** Block editing works on disk bytes, so the view must reflect the disk. */
