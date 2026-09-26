@@ -88,6 +88,10 @@ test('CLI: a section ends at the next heading, not at fences, rules or deeper he
   assert.equal(end(['## S', '', '  ### Ind', '', 'x', '', '## T'], 'S'), 6);
   // A setext heading ends the section at the line before its text.
   assert.equal(end(['## S', '', 'x', '', 'Next', '----', '', 'y'], 'S'), 4);
+  // Heading-like lines inside raw HTML blocks and comments are not headings.
+  assert.equal(end(['## S', '', '<div>', '## example', '</div>', '', 'x', '', '## T'], 'S'), 8);
+  assert.equal(end(['## S', '', '<!--', '## hidden', '-->', '', '## T'], 'S'), 6);
+  assert.equal(end(['## S', '', '<pre>', '', '## code', '</pre>', '', '## T'], 'S'), 7);
   // The last section ends at the last non-blank line.
   assert.equal(end(['## S', '', 'x', '', ''], 'S'), 3);
 });
