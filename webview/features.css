@@ -316,3 +316,6 @@ mark.mdr-hl.mdr-working { animation: mdr-glow 1.4s ease-in-out infinite; }
   .mdr-sugg-head::before, .mdr-sugg-toggle::before { forced-color-adjust: none; background: CanvasText; }
   .mdr-sugg-diff del, .mdr-sugg-diff ins { forced-color-adjust: none; background: Canvas; color: CanvasText; }
 }
+
+/* Read by screen readers only. */
+.mdr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

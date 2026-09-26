@@ -40,7 +40,7 @@ function steps(where: string, suggest = false, cli = 'node mdreview.mjs'): strin
   const act = suggest
     ? [
         'For each comment:',
-        `1. Don't edit ${where}. Work out the replacement for the quoted text itself (the whole quote, rewritten; empty to delete it).`,
+        `1. Don't edit ${where}. Work out the replacement for the quoted text itself (the whole quote, rewritten; empty to delete it). Write it as the text reads on screen, on one line: no Markdown and no line breaks.`,
         `2. Propose it with \`${cli} suggest <file.md> <id> "<replacement>" "<one line on why>"\`. It adds your reply with the suggestion; the reviewer applies it with one click. Leave the thread "submitted".`,
         '3. If the comment needs no text change, or can\'t be done by replacing the quote, reply instead (and resolve it if nothing is left to do).',
       ]
@@ -93,7 +93,7 @@ export function buildAgentPrompt(o: PromptOptions): string {
   // Major first; otherwise the order they came in (document order).
   for (const c of [...o.comments].sort((a, b) => rank(a) - rank(b))) {
     const where = c.anchor.lineStart ? ` (lines ${c.anchor.lineStart}-${c.anchor.lineEnd || c.anchor.lineStart})` : '';
-    const what = c.scope === 'document' ? 'the whole document' : `"${c.anchor.quote.replace(/\s+/g, ' ').slice(0, 200)}"`;
+    const what = c.scope === 'document' ? 'the whole document' : `"${c.anchor.quote.replace(/\s+/g, ' ').slice(0, o.suggest ? undefined : 200)}"`;
     lines.push(`- ${c.id}${tags(c)}${c.scope === 'document' ? '' : where}: ${what} -> ${c.body.replace(/\s+/g, ' ')}`);
     if (c.suggestion && !c.suggestion.appliedAt) lines.push(`    suggestion: replace the quote with "${c.suggestion.text.replace(/\s+/g, ' ')}"`);
     for (const r of c.replies) lines.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}${r.suggestion ? ` [suggested: "${r.suggestion.text.replace(/\s+/g, ' ')}"${r.suggestion.appliedAt ? ', applied' : r.suggestion.dismissedAt ? ', dismissed' : ''}]` : ''}`);

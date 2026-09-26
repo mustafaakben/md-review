@@ -1,7 +1,7 @@
 // Live agent status: the "Claude is working · 2 of 5" banner over the threads,
 // the summary when the round ends, and which threads Claude is on right now.
 
-export interface Round { total: number; done: number; resolved: number; questions: number; questionIds: string[]; finished: boolean }
+export interface Round { total: number; done: number; resolved: number; questions: number; suggestions: number; questionIds: string[]; finished: boolean }
 
 /** A claim older than this is treated as abandoned (the agent crashed or was stopped). */
 const FRESH_MS = 5 * 60 * 1000;
@@ -29,10 +29,11 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 export function roundBanner(r: Round | null, working: boolean): string {
   if (!r) return '';
   if (r.finished) {
-    const q = r.questions ? `, ${plural(r.questions, 'question')} for you` : '';
+    const yours = [r.suggestions && plural(r.suggestions, 'suggested edit'), r.questions && plural(r.questions, 'question')].filter(Boolean);
+    const q = yours.length ? `, ${yours.join(' and ')} for you` : '';
     return `<div class="mdr-round-row"><span class="mdr-round-icon done" aria-hidden="true"></span>
       <span class="mdr-round-text">Claude finished: ${r.resolved} resolved${q}</span></div>
-      <div class="mdr-round-row mdr-round-actions">${r.questions ? `<button data-round="questions">Show questions</button>` : ''}<button data-round="dismiss">Dismiss</button></div>`;
+      <div class="mdr-round-row mdr-round-actions">${r.questionIds.length ? `<button data-round="questions">${r.suggestions ? 'Show them' : 'Show questions'}</button>` : ''}<button data-round="dismiss">Dismiss</button></div>`;
   }
   const pct = r.total ? Math.round((100 * r.done) / r.total) : 0;
   const what = working ? 'Claude is working' : 'Waiting for Claude';

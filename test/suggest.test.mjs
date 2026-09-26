@@ -51,6 +51,10 @@ test('applying rewrites only the quote, resolves the thread, and undo reverts th
   assert.ok(c.suggestion.appliedAt);
   s.handle({ type: 'undo' });
   assert.equal(fs.readFileSync(md, 'utf8'), '# T\n\nThe **cat** sat on the mat.\n');
+  // Undo also reopens the thread and the suggestion, so Apply is offered again.
+  const back = side().comments[0];
+  assert.equal(back.status, 'draft'); // as it was before Apply
+  assert.equal(back.suggestion.appliedAt, undefined);
   // A change that can't be mapped safely writes nothing and opens the source instead.
   posted.length = 0;
   s.handle({ type: 'applySuggestion', id, ls: 2, le: 3, kind: 'paragraph', oldText: 'The cat sat on the mat.', newText: '' });
@@ -81,4 +85,27 @@ test('suggest mode asks the agent for suggestions, and a reviewer suggestion is 
   const sug = lib.buildAgentPrompt({ mdPath: '/w/a.md', cwd: '/w', comments: [c], cliPath: '/x/mdreview.mjs', suggest: true });
   assert.match(sug, /Don't edit a\.md/);
   assert.match(sug, /mdreview\.mjs" suggest "a\.md" <id>/);
+});
+
+test('an agent suggestion is one line of text, and the round counts it apart from questions', () => {
+  const { md, s, side, posted } = session('round.md', '# T\n\nThe cat sat.\n\nA dog ran.\n');
+  s.handle({ type: 'addComment', anchor: anchor('cat', 3), body: 'Better word?' });
+  s.handle({ type: 'addComment', anchor: anchor('dog', 5), body: 'Which dog?' });
+  s.handle({ type: 'sendToAgent' });
+  const [a, b] = side().comments;
+  run('suggest', md, a.id, 'fe\n\n  line');
+  assert.equal(side().comments[0].replies[0].suggestion.text, 'fe line');
+  run('reply', md, b.id, 'A terrier?');
+  s.onSidecarChanged();
+  const r = posted.filter((m) => m.type === 'round').at(-1).round;
+  assert.deepEqual([r.finished, r.suggestions, r.questions, r.questionIds.length], [true, 1, 1, 2]);
+  assert.equal(lib.roundSummary(r), '0 resolved, 1 suggested edit and 1 question for you');
+});
+
+test('suggest mode gives the agent the whole quote and asks for plain text', () => {
+  const long = 'word '.repeat(80).trim();
+  const c = { id: 'c1', author: 'R', createdAt: '', anchor: anchor(long, 3), body: 'Shorter', status: 'submitted', submittedAt: null, resolvedAt: null, replies: [] };
+  const sug = lib.buildAgentPrompt({ mdPath: '/w/a.md', cwd: '/w', comments: [c], suggest: true });
+  assert.ok(sug.includes(long));
+  assert.match(sug, /no Markdown and no line breaks/);
 });

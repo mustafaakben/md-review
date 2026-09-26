@@ -359,7 +359,7 @@ function openSuggestion(c: Comment): string | null {
 }
 
 function card(c: Comment, now = Date.now()): string {
-  const open = openSuggestion(c);
+  const open = orphans.has(c.id) ? null : openSuggestion(c); // no text to apply it to
   const replies = c.replies
     .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div>${r.suggestion ? suggestionBlock(c.anchor.quote, r.suggestion, r.id, r.author, open === r.id) : ''}</div>`)
     .join('');

@@ -516,7 +516,8 @@ switch (cmd) {
         console.error(`${id} has no quote to replace (it's about a whole ${c.scope || 'document'}). Reply instead.`);
         process.exit(2);
       }
-      c.replies.push({ id: newId('r'), author, createdAt: now(), body: note || 'Suggested edit.', suggestion: { text } });
+      // One line of plain text: a line break could change the block's structure.
+      c.replies.push({ id: newId('r'), author, createdAt: now(), body: note || 'Suggested edit.', suggestion: { text: text.replace(/\s*\n\s*/g, ' ') } });
       unclaim(c);
     });
     console.log(`Suggested an edit on ${id}`);
