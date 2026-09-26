@@ -4,6 +4,7 @@ import { createOutline } from './outline';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
+import { reveal, settle, viewTop } from './reveal';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -132,7 +133,7 @@ function paint() {
   docStale = false;
   editBtn.hidden = true;
   hoverEl = null;
-  const y = window.scrollY;
+  const at = readingPosition();
   doc.innerHTML = html;
   const text = buildTextMap(doc).text;
   if (text !== paintedText) anchorCache.clear();
@@ -147,7 +148,33 @@ function paint() {
   wrapRanges(doc, specs);
   renderSidebar();
   afterPaint();
-  window.scrollTo(0, y);
+  restorePosition(at);
+}
+
+// Off-screen blocks use an estimated height until they are first shown (see
+// content-visibility in style.css), so a pixel offset does not survive a repaint
+// or a reopen. Remember the block at the top of the view and where it sat instead.
+type Position = { i: number; dy: number } | null;
+
+function readingPosition(): Position {
+  const blocks = doc.children;
+  if (!blocks.length || window.scrollY <= 0) return null;
+  const top = viewTop();
+  // First block whose bottom is below the top of the view (blocks are in order).
+  let lo = 0;
+  let hi = blocks.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (blocks[mid].getBoundingClientRect().bottom > top) hi = mid;
+    else lo = mid + 1;
+  }
+  return { i: lo, dy: blocks[lo].getBoundingClientRect().top - top };
+}
+
+function restorePosition(at: Position) {
+  const el = at && doc.children[Math.min(at.i, doc.children.length - 1)];
+  if (!el) return window.scrollTo(0, 0);
+  settle(() => el.getBoundingClientRect().top - viewTop() - at!.dy);
 }
 
 /**
@@ -312,7 +339,7 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   marks.forEach((m) => m.classList.add('active'));
   const cardEl = sidebar.querySelector(`.mdr-card[data-id="${id}"]`);
   cardEl?.classList.add('active');
-  if (scrollDoc && marks[0]) marks[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (scrollDoc) reveal(marks[0], 'center');
   if (scrollCard && cardEl) cardEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
@@ -497,7 +524,7 @@ doc.addEventListener('click', (e) => {
     if (editMode || inline) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#')) {
-      document.getElementById(decodeURIComponent(href.slice(1)))?.scrollIntoView({ block: 'center' });
+      reveal(document.getElementById(decodeURIComponent(href.slice(1))), 'center', false);
     } else if (href) post({ type: 'openLink', href });
     return;
   }
@@ -897,9 +924,10 @@ window.addEventListener('message', (ev) => {
         fileName = m.fileName;
         paint();
       }
-      if (saved.scrollY && !(saved as any)._restored) {
+      if (!(saved as any)._restored) {
         (saved as any)._restored = true;
-        window.scrollTo(0, saved.scrollY);
+        if (saved.position) restorePosition(saved.position);
+        else if (saved.scrollY) window.scrollTo(0, saved.scrollY);
       }
       break;
     case 'comments':
@@ -970,7 +998,7 @@ async function copyText(text: string): Promise<boolean> {
 let scrollT: any;
 window.addEventListener('scroll', () => {
   clearTimeout(scrollT);
-  scrollT = setTimeout(() => vscode.setState({ ...(vscode.getState() || {}), scrollY: window.scrollY }), 200);
+  scrollT = setTimeout(() => vscode.setState({ ...(vscode.getState() || {}), scrollY: window.scrollY, position: readingPosition() }), 200);
 });
 
 void author;

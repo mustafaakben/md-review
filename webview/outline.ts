@@ -2,6 +2,7 @@
 // while scrolling and a count of open threads in each section.
 
 import { tip } from './keys';
+import { reveal } from './reveal';
 
 export interface Outline {
   /** Rebuild from the freshly painted document. */
@@ -62,7 +63,7 @@ export function createOutline(
   function jump(item: HTMLElement, viaKeyboard: boolean) {
     const h = heads[Number(item.dataset.i)];
     if (!h) return;
-    h.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    reveal(h, 'start');
     if (viaKeyboard) {
       // Move focus to the heading so reading (and Tab) continues from there.
       if (!h.hasAttribute('tabindex')) h.tabIndex = -1;
