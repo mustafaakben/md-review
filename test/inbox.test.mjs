@@ -27,7 +27,7 @@ function thread(status, { line = 1, replies = [], reopenedAt, scope, body = 'Fix
     replies: replies.map(([author, createdAt], i) => ({ id: `r${n}_${i}`, author, createdAt, body: 'ok' })),
   };
 }
-const file = (mdPath, comments) => ({ mdPath, data: { schemaVersion: 1, file: mdPath, comments } });
+const file = (mdPath, threads) => ({ mdPath, threads });
 const ids = (f) => f.threads.map((c) => c.id);
 
 test('needs you vs waiting on Claude, including a reopened thread', () => {
@@ -66,12 +66,88 @@ test('files sort by path and threads by line, whole-document threads first', () 
 });
 
 test('a malformed sidecar is skipped, not thrown', () => {
-  assert.equal(inbox.parseInboxSidecar('{ "comments": [ oops', '/w/bad.md'), null);
-  const good = inbox.parseInboxSidecar(JSON.stringify({ schemaVersion: 1, file: 'ok.md', comments: [thread('draft')] }), '/w/ok.md');
-  assert.equal(good.comments.length, 1);
-  assert.deepEqual(inbox.parseInboxSidecar('', '/w/empty.md').comments, []);
-  const r = inbox.buildInbox([{ mdPath: '/w/bad.md', data: null }, { mdPath: '/w/ok.md', data: good }]);
+  assert.equal(inbox.parseInboxSidecar('{ "comments": [ oops'), null);
+  assert.equal(inbox.parseInboxSidecar(JSON.stringify({ comments: { a: 1 } })), null);
+  assert.equal(inbox.parseInboxSidecar(JSON.stringify({ comments: 'abc' })), null);
+  const good = inbox.parseInboxSidecar(JSON.stringify({ schemaVersion: 1, file: 'ok.md', comments: [thread('draft')] }));
+  assert.equal(good.length, 1);
+  for (const raw of ['', '  \n', 'null', '[1, 2]', '{ "comments": null }', '\uFEFF{}']) assert.deepEqual(inbox.parseInboxSidecar(raw), [], raw);
+  const r = inbox.buildInbox([file('/w/bad.md', null), file('/w/ok.md', good)]);
   assert.deepEqual(r.groups.drafts.map((f) => f.mdPath), ['/w/ok.md']);
+});
+
+test('a hand-edited sidecar with the wrong types still groups and labels', () => {
+  const raw = JSON.stringify({
+    comments: [
+      // Epoch times on two threads on one line: the sort compared them as text and threw.
+      { ...thread('submitted', { line: 3 }), createdAt: 2 },
+      { ...thread('submitted', { line: 3 }), createdAt: 1 },
+      { ...thread('submitted'), body: 42, anchor: { quote: 5, lineStart: '7' } },
+      { ...thread('submitted'), body: null, anchor: null, replies: { a: 1 } },
+      { ...thread('submitted'), author: 7, replies: [null, { author: 'Claude', createdAt: '2026-01-02T00:00:00Z', body: ['x'] }] },
+      { ...thread('draft'), status: 'weird', scope: 'everything', origin: 'robot', workingAt: 12 },
+      // Keys every object has: looked up in a plain table, they gave functions, not labels.
+      { ...thread('submitted', { line: 9 }), severity: 'constructor', kind: 'toString' },
+      { ...thread('submitted'), severity: '__proto__', kind: 'hasOwnProperty' },
+    ],
+  });
+  const threads = inbox.parseInboxSidecar(raw);
+  assert.equal(threads.length, 8);
+  for (const c of threads) {
+    for (const k of ['id', 'author', 'createdAt', 'status', 'body']) assert.equal(typeof c[k], 'string', k);
+    assert.equal(typeof c.anchor.quote, 'string');
+    assert.equal(typeof c.anchor.lineStart, 'number');
+    assert.ok(Array.isArray(c.replies));
+    assert.equal(c.severity, undefined);
+    assert.equal(c.kind, undefined);
+    assert.equal(typeof inbox.threadLabel(c), 'string');
+    assert.equal(typeof inbox.threadDescription(c), 'string');
+  }
+  assert.equal(threads[5].status, 'submitted');
+  assert.equal(threads[5].scope, undefined);
+  assert.equal(threads[4].replies[0].author, 'Claude');
+  assert.equal(inbox.groupOf(threads[4]), 'needsYou');
+  const r = inbox.buildInbox([file('/w/a.md', threads)]);
+  assert.equal(r.counts.waiting + r.counts.needsYou, 8);
+  assert.equal(inbox.threadDescription(threads[6]), 'L9 · some text');
+  // Even unparsed objects with epoch times sort without throwing.
+  const raw2 = [{ ...thread('draft', { line: 2 }), createdAt: 5 }, { ...thread('draft', { line: 2 }), createdAt: 4 }];
+  assert.deepEqual(ids(inbox.buildInbox([file('/w/b.md', raw2)]).groups.drafts[0]), [raw2[1].id, raw2[0].id]);
+});
+
+test('the inbox keeps only what it shows of each thread', () => {
+  const long = 'word '.repeat(1000);
+  const replies = Array.from({ length: 50 }, (_, i) => ({ id: `r${i}`, author: i % 2 ? 'Claude' : 'Reviewer', createdAt: `2026-01-02T00:00:${String(i).padStart(2, '0')}Z`, body: long }));
+  replies[3].suggestion = { text: 'new words' };
+  const [c] = inbox.parseInboxSidecar(JSON.stringify({ comments: [{ ...thread('submitted'), body: long, replies, prefix: long, extra: long }] }));
+  assert.equal(c.replies.length, 1);
+  assert.equal(c.replies[0].author, 'Claude');
+  assert.ok(c.body.length <= 300 && c.replies[0].body.length <= 200);
+  assert.equal(c.extra, undefined);
+  assert.equal(c.suggested, true);
+  assert.equal(inbox.groupOf(c), 'needsYou');
+  const applied = { ...thread('submitted'), suggestion: { text: 'x', appliedAt: '2026-01-03T00:00:00Z' } };
+  assert.equal(inbox.parseInboxSidecar(JSON.stringify({ comments: [applied] }))[0].suggested, undefined);
+});
+
+test('a thread without an id is left out: there is nothing stable to jump to', () => {
+  const noId = { ...thread('submitted') };
+  delete noId.id;
+  const threads = inbox.parseInboxSidecar(JSON.stringify({ comments: [noId, { ...thread('submitted'), id: 7 }, thread('submitted', { body: 'kept' })] }));
+  assert.deepEqual(threads.map((c) => c.body), ['kept']);
+});
+
+test('files.exclude globs, as the workspace search reads them', () => {
+  const ex = (rel, ...globs) => inbox.excludedBy(rel, globs);
+  assert.ok(ex('dist/a.md.comments.json', '**/dist'));
+  assert.ok(ex('x/y/dist/a.md.comments.json', '**/dist'));
+  assert.ok(ex('out/a.md.comments.json', 'out/'));
+  assert.ok(ex('drafts/a.md.comments.json', '{drafts,tmp}'));
+  assert.ok(ex('tmp2/a.md.comments.json', 'tmp[0-9]'));
+  assert.ok(ex('a.md.comments.json', '**/*.comments.json'));
+  assert.ok(!ex('distx/a.md.comments.json', '**/dist'));
+  assert.ok(!ex('src/a.md.comments.json', '**/dist', '{unbalanced'));
+  assert.ok(!ex('a.md.comments.json'));
 });
 
 test('labels: first line of the body, line and quote excerpt', () => {

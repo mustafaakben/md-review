@@ -253,7 +253,7 @@ export function setStatus(data: Sidecar, id: string, status: Status): void {
 }
 
 /** An agent's draft the reviewer hasn't kept, acted on, or dismissed yet. */
-export const isAgentDraft = (c: Comment): boolean => c.status === 'draft' && c.origin === 'agent';
+export const isAgentDraft = (c: Pick<Comment, 'status' | 'origin'>): boolean => c.status === 'draft' && c.origin === 'agent';
 
 /** Take over an agent's draft: it becomes the reviewer's own, noting who raised it. */
 export function keepAgentDraft(data: Sidecar, id: string, author: string): void {
@@ -286,7 +286,7 @@ export function deleteComment(data: Sidecar, id: string): void {
  * Whether a submitted thread is waiting on the agent: its last reply isn't the
  * agent's, or the reviewer reopened it after that reply.
  */
-export function awaitsAgent(c: Comment, agent = 'Claude'): boolean {
+export function awaitsAgent(c: Pick<Comment, 'status' | 'reopenedAt'> & { replies: Pick<Reply, 'author' | 'createdAt'>[] }, agent = 'Claude'): boolean {
   if (c.status !== 'submitted') return false;
   const last = c.replies[c.replies.length - 1];
   return !last || last.author !== agent || (!!c.reopenedAt && c.reopenedAt > last.createdAt);

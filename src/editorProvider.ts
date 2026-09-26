@@ -44,8 +44,20 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       else s.focus = id;
       return;
     }
+    try {
+      await vscode.workspace.fs.stat(uri);
+    } catch {
+      // The inbox lists threads from the sidecar, which can outlive its Markdown file.
+      void vscode.window.showWarningMessage(`${path.basename(uri.fsPath)} no longer exists; its review threads are still in ${path.basename(uri.fsPath)}.comments.json.`);
+      return;
+    }
     this.pendingFocus.set(key, id);
-    await vscode.commands.executeCommand('vscode.openWith', uri, this.viewType);
+    try {
+      await vscode.commands.executeCommand('vscode.openWith', uri, this.viewType);
+    } finally {
+      // The panel took it when it opened; if it never did, don't jump in a later one.
+      if (this.pendingFocus.get(key) === id) this.pendingFocus.delete(key);
+    }
   }
 
   constructor(private readonly context: vscode.ExtensionContext) {}

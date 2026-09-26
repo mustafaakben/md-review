@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { MdReviewEditorProvider } from './editorProvider';
-import { addClaudeSkill, sendFolderToClaude } from './agentCommands';
+import { addClaudeSkill, sendFolderToClaude, sendWorkspaceToClaude } from './agentCommands';
 import { initAgentPrompts } from './agentRun';
 import { InboxView } from './inboxView';
 
@@ -31,7 +31,7 @@ export function activate(context: vscode.ExtensionContext) {
       MdReviewEditorProvider.focusThread(vscode.Uri.file(mdPath), id),
     ),
     vscode.commands.registerCommand('mdReview.inbox.refresh', () => inbox.refresh()),
-    vscode.commands.registerCommand('mdReview.inbox.sendAll', () => sendFolderToClaude(context)),
+    vscode.commands.registerCommand('mdReview.inbox.sendAll', () => sendWorkspaceToClaude(context)),
     ...(
       [
         ['mdReview.undo', { type: 'command', command: 'undo' }],

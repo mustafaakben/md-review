@@ -33,6 +33,8 @@ let fileName = '';
 let comments: Comment[] = [];
 let author = '';
 let showResolved = true;
+/** A thread the review inbox jumped to: shown whatever the filters say, until they change. Never saved. */
+let revealed: string | null = null;
 let activeId: string | null = null;
 let pendingAnchor: (Omit<Captured, 'start' | 'end'> & { lineStart: number; lineEnd: number; scope?: 'section' | 'document' }) | null = null;
 let editing: { ls: number; le: number; original: string; el: HTMLElement; box: HTMLElement } | null = null;
@@ -320,7 +322,7 @@ function layout(): [Comment, number, number][] {
       continue;
     }
     positions.set(c.id, r[0]);
-    if (c.status === 'resolved' && !showResolved) continue;
+    if (c.status === 'resolved' && !showResolved && c.id !== revealed) continue;
     out.push([c, r[0], r[1]]);
   }
   return out;
@@ -362,7 +364,7 @@ function renderSidebar() {
   sendBtn.disabled = sendable === 0;
   sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
 
-  const visible = comments.filter((c) => passes(c, filter, showResolved));
+  const visible = comments.filter((c) => c.id === revealed || passes(c, filter, showResolved));
   const byPos = (a: Comment, b: Comment) => positions.get(a.id)! - positions.get(b.id)!;
   navOrder = visible.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort(byPos).map((c) => c.id);
   // Claude's drafts wait at the top until they're triaged: document notes, then in text order.
@@ -497,16 +499,13 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   }
 }
 
-/** Jump to a thread picked in the review inbox, first letting it past the filters. */
+/** Jump to a thread picked in the review inbox, showing it even if the filters hide it (without changing them). */
 function focusThread(id: string) {
   const c = comments.find((x) => x.id === id);
   if (!c) return toast('That thread is no longer in this file.', true);
-  if (c.status === 'resolved' && !showResolved) {
-    showResolved = true;
-    vscode.setState({ ...(vscode.getState() || {}), showResolved });
-    paintComments();
-  }
-  if (!passes(c, filter, showResolved)) setFilter({ status: 'all', author: '', severity: '', ids: undefined });
+  const was = revealed;
+  revealed = passes(c, filter, showResolved) ? null : id;
+  if (revealed !== was) paintComments();
   activate(id, true, true);
 }
 
@@ -882,8 +881,11 @@ outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
 // ---------------------------------------------------------------- filters & navigation
 function setFilter(f: Partial<FilterState>, repaint = true) {
   Object.assign(filter, f);
+  const was = revealed;
+  revealed = null;
   vscode.setState({ ...(vscode.getState() || {}), filterStatus: filter.status, filterAuthor: filter.author, filterSeverity: filter.severity });
-  if (repaint) renderSidebar();
+  // A revealed resolved thread has a highlight to take down too.
+  if (repaint) was ? paintComments() : renderSidebar();
 }
 filtersEl.addEventListener('click', (e) => {
   const st = (e.target as Element).closest('[data-filter-status]')?.getAttribute('data-filter-status') as StatusFilter | undefined;
@@ -1053,6 +1055,7 @@ document.addEventListener('keydown', (e) => {
 });
 showResolvedBox.addEventListener('change', () => {
   showResolved = showResolvedBox.checked;
+  revealed = null;
   vscode.setState({ ...(vscode.getState() || {}), showResolved });
   paintComments();
 });
