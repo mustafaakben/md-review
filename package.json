@@ -43,6 +43,17 @@
         "priority": "option"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "mdReview.inbox",
+          "name": "MD Review",
+          "icon": "$(comment-discussion)",
+          "contextualTitle": "MD Review",
+          "visibility": "collapsed"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "mdReview.open",
@@ -164,6 +175,23 @@
         "command": "mdReview.readingView",
         "title": "Reading Theme, Font, and Zoom…",
         "category": "MD Review"
+      },
+      {
+        "command": "mdReview.inbox.refresh",
+        "title": "Refresh",
+        "category": "MD Review",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "mdReview.inbox.sendAll",
+        "title": "Send All to Claude",
+        "category": "MD Review",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdReview.openThread",
+        "title": "Open Thread",
+        "category": "MD Review"
       }
     ],
     "menus": {
@@ -280,6 +308,30 @@
         {
           "command": "mdReview.severity3",
           "when": "false"
+        },
+        {
+          "command": "mdReview.inbox.refresh",
+          "when": "false"
+        },
+        {
+          "command": "mdReview.inbox.sendAll",
+          "when": "false"
+        },
+        {
+          "command": "mdReview.openThread",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "mdReview.inbox.sendAll",
+          "when": "view == mdReview.inbox",
+          "group": "navigation@1"
+        },
+        {
+          "command": "mdReview.inbox.refresh",
+          "when": "view == mdReview.inbox",
+          "group": "navigation@2"
         }
       ]
     },

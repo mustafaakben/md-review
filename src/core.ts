@@ -24,6 +24,8 @@ export type ToWebview =
   | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'round'; round: Round | null }
   | { type: 'review'; review: ReviewRun | null }
+  /** Jump to a thread picked in the review inbox. */
+  | { type: 'focusThread'; id: string }
   | { type: 'error'; message: string };
 
 /**

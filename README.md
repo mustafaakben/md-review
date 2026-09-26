@@ -18,6 +18,7 @@ paper.md.comments.json     ← the comment threads (schema below)
 - An agent protocol and a zero-dependency CLI, so any agent can find submitted comments and answer them.
 - Light editing directly in the rendered view that **never re-serializes the file**. Only the bytes you changed are written, and line endings, spacing, and markup elsewhere stay exactly as they were.
 - **Send to Claude**: one click hands the open threads to Claude Code in a terminal (or copies the prompt for any other agent).
+- A **review inbox** in the Explorer: every thread in the workspace, grouped by whose turn it is.
 - An outline pane, find in document, `j`/`k` jumps between comments, and status and author filters.
 - Reading themes (Paper, Sepia, Dusk, Night), a serif option, and zoom for the document column.
 - Byte-exact undo and redo of edits made in the view.
@@ -99,6 +100,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
 - **Send a whole folder.** Right-click a folder in the Explorer → **Send Open Reviews in Folder to Claude** (or run it from the Command Palette for the workspace). Claude gets the list of files with open threads and works through them one at a time with the CLI's `next` command, which shows each comment with the source lines its quote is on.
+- **Review inbox.** The **MD Review** view in the Explorer lists the threads of every reviewed file in the workspace under **Needs you** (Claude replied, your turn), **Waiting on Claude**, **Drafts**, and **Resolved**, each with a count. Click a thread to open its file in MD Review at that thread. **Send All to Claude** in the view's title bar sends the whole workspace, and once the view has been opened the status bar shows how many threads need you. The view scans only when you first expand it (it skips `node_modules`, dot-folders, and `files.exclude`, and lists up to 2000 reviewed files).
 - **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
 **Review with Claude.**
@@ -264,6 +266,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/commentStore.ts` | sidecar read-merge-write |
 | `src/editHistory.ts` | byte-exact undo/redo of in-view edits |
 | `src/agentPrompt.ts`, `src/agentCommands.ts` | the prompts Send to Claude hands to the agent; the folder and skill commands |
+| `src/inbox.ts`, `src/inboxView.ts` | review inbox: grouping (VS Code-independent) and the Explorer tree |
 | `src/render.ts` | Markdown → HTML with source-line tags |
 | `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |

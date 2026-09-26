@@ -497,6 +497,19 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   }
 }
 
+/** Jump to a thread picked in the review inbox, first letting it past the filters. */
+function focusThread(id: string) {
+  const c = comments.find((x) => x.id === id);
+  if (!c) return toast('That thread is no longer in this file.', true);
+  if (c.status === 'resolved' && !showResolved) {
+    showResolved = true;
+    vscode.setState({ ...(vscode.getState() || {}), showResolved });
+    paintComments();
+  }
+  if (!passes(c, filter, showResolved)) setFilter({ status: 'all', author: '', severity: '', ids: undefined });
+  activate(id, true, true);
+}
+
 // ---------------------------------------------------------------- selection -> comment
 function blockRange(node: Node): [number, number] | null {
   const el = (node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement)?.closest('[data-ls]');
@@ -1388,6 +1401,9 @@ window.addEventListener('message', (ev) => {
       break;
     case 'command':
       runCommand(m.command);
+      break;
+    case 'focusThread':
+      focusThread(m.id);
       break;
     case 'inlineFailed': {
       endInline(true);

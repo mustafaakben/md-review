@@ -19,17 +19,33 @@ function readDisk(p: string): string | undefined {
 export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdReview.editor';
   /** Every open MD Review panel, so commands can reach the focused one. */
-  private static panels = new Set<vscode.WebviewPanel>();
+  private static panels = new Map<vscode.WebviewPanel, PanelState>();
+  /** Threads to jump to once a panel that is still opening says it's ready. */
+  private static pendingFocus = new Map<string, string>();
 
   /** Forward a command (undo, find, …) to the focused MD Review webview. */
   static postToActive(msg: unknown): boolean {
-    for (const p of this.panels) {
+    for (const p of this.panels.keys()) {
       if (p.active) {
         void p.webview.postMessage(msg);
         return true;
       }
     }
     return false;
+  }
+
+  /** Open `uri` in MD Review (or reveal the panel already showing it) and jump to a thread. */
+  static async focusThread(uri: vscode.Uri, id: string): Promise<void> {
+    const key = fileKey(uri);
+    for (const [p, s] of this.panels) {
+      if (s.key !== key) continue;
+      p.reveal();
+      if (s.ready) void p.webview.postMessage({ type: 'focusThread', id });
+      else s.focus = id;
+      return;
+    }
+    this.pendingFocus.set(key, id);
+    await vscode.commands.executeCommand('vscode.openWith', uri, this.viewType);
   }
 
   constructor(private readonly context: vscode.ExtensionContext) {}
@@ -80,7 +96,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       setPrefs: (prefs) => {
         void this.context.globalState.update(PREFS_KEY, prefs);
         // Keep other open MD Review panels in step.
-        for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+        for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
@@ -91,7 +107,10 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         });
       },
     });
-    MdReviewEditorProvider.panels.add(panel);
+    const key = fileKey(document.uri);
+    const state: PanelState = { key, ready: false, focus: MdReviewEditorProvider.pendingFocus.get(key) };
+    MdReviewEditorProvider.pendingFocus.delete(key);
+    MdReviewEditorProvider.panels.set(panel, state);
 
     const subs: vscode.Disposable[] = [];
     let timer: NodeJS.Timeout | undefined;
@@ -111,6 +130,11 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         // Alt+1/2/3 are VS Code's "open editor N"; bind them only while a comment box has focus.
         if (m.type === 'composing') return void vscode.commands.executeCommand('setContext', 'mdReview.composing', m.on);
         session.handle(m);
+        if (m.type === 'ready') {
+          state.ready = true;
+          if (state.focus) void webview.postMessage({ type: 'focusThread', id: state.focus });
+          state.focus = undefined;
+        }
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
@@ -174,6 +198,19 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <title>MD Review</title></head>
 <body data-reading-theme="${prefs.theme}" data-reading-font="${prefs.font}" data-prefs="${attr(JSON.stringify(prefs))}"><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
+}
+
+interface PanelState {
+  key: string;
+  /** The webview has sent `ready`, so messages reach a live view. */
+  ready: boolean;
+  /** A thread to jump to once it is ready. */
+  focus?: string;
+}
+
+/** Compare files by path; Windows paths are case-insensitive. */
+function fileKey(uri: vscode.Uri): string {
+  return process.platform === 'win32' ? uri.fsPath.toLowerCase() : uri.fsPath;
 }
 
 /**
