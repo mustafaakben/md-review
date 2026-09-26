@@ -6,7 +6,8 @@ import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import { runAgent } from './agentRun';
 import { sameName, shouldPoll, folderKey, StampTracker, POLL_MS } from './fileWatch';
-import { hasUrlScheme, imageSources } from './render';
+import { hasUrlScheme } from './render';
+import { inlineImage, isInside } from './localImage';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 
@@ -53,28 +54,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const webview = panel.webview;
     const roots = [vscode.Uri.file(dir), vscode.Uri.joinPath(this.context.extensionUri, 'media')];
     for (const f of vscode.workspace.workspaceFolders ?? []) roots.push(f.uri);
-    // In a trusted folder, images elsewhere on disk (`../figures/a.png` beside a
-    // file opened on its own) are allowed too: their folders join the roots.
-    // Reassigning webview.options reloads the page, so the folders the text
-    // links to are collected before the first load; one a render finds later
-    // (a new image, or trust granted) costs one reload, and the reloaded page
-    // asks for the document again. Restricted Mode keeps the roots above.
-    const imageDirs = new Set<string>();
-    const allowImage = (file: string): boolean => {
-      if (!vscode.workspace.isTrusted) return false;
-      const d = path.dirname(file);
-      if (imageDirs.has(d) || roots.some((r) => isInside(r.fsPath, d))) return false;
-      if (!fs.existsSync(file)) return false; // e.g. a path still being typed
-      imageDirs.add(d);
-      return true;
-    };
-    const setOptions = () => {
-      webview.options = { enableScripts: true, localResourceRoots: [...roots, ...[...imageDirs].map((d) => vscode.Uri.file(d))] };
-    };
-    for (const src of imageSources(document.getText())) allowImage(path.resolve(dir, src));
-    setOptions();
+    webview.options = { enableScripts: true, localResourceRoots: roots };
     webview.html = this.shell(webview);
-    let reloadQueued = false;
 
     const cfg = () => vscode.workspace.getConfiguration('mdReview');
     // The bibliography can live anywhere; watch exactly the files the last render read.
@@ -97,13 +78,11 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       post: (m) => void webview.postMessage(m),
       resolveImage: (src) => {
         const file = path.resolve(dir, src);
-        if (allowImage(file) && !reloadQueued) {
-          reloadQueued = true;
-          // After this render has been sent.
-          queueMicrotask(() => {
-            reloadQueued = false;
-            setOptions();
-          });
+        // In a trusted folder, an image outside the folders above (`../figures/a.png`
+        // beside a file opened on its own) is sent inline instead.
+        if (vscode.workspace.isTrusted && !roots.some((r) => isInside(r.fsPath, file))) {
+          const inline = inlineImage(file);
+          if (inline) return inline;
         }
         return webview.asWebviewUri(vscode.Uri.file(file)).toString();
       },
@@ -290,12 +269,6 @@ function readingPrefs(stored: unknown): { zoom: number; theme: string; font: str
   const theme = typeof p.theme === 'string' && ['auto', 'paper', 'sepia', 'dusk', 'night'].includes(p.theme) ? p.theme : 'auto';
   const font = p.font === 'serif' ? 'serif' : 'sans';
   return { zoom, theme, font };
-}
-
-/** Whether `p` is `root` or inside it (case-insensitively on Windows, as path.relative is). */
-function isInside(root: string, p: string): boolean {
-  const rel = path.relative(root, p);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 function openLink(href: string, dir: string) {

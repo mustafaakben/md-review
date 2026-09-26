@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const { renderMarkdown, hasUrlScheme, imageSources } = require('../dist/lib.cjs');
+const { renderMarkdown, hasUrlScheme } = require('../dist/lib.cjs');
 const render = (s) => renderMarkdown(s, (x) => x);
 
 test('front matter becomes a title card with its source range', () => {
@@ -150,7 +150,24 @@ test('URL schemes need two or more characters', () => {
   assert.equal(hasUrlScheme('notes/other.md'), false);
 });
 
-test('imageSources lists the local images a text links to, before rendering', () => {
-  const text = '![a](../figures/a.png)\n![b](<my figs/b%20c.png> "t")\n![c](https://e.org/c.png) ![d](C:\\figs\\d.png)\n[not](x.png) ![e](#frag)\n';
-  assert.deepEqual(imageSources(text), ['../figures/a.png', 'my figs/b c.png', 'C:\\figs\\d.png']);
+test('network paths are never resolved as local images', () => {
+  // After Markdown's escapes these are \\srv\share\a.png and /\srv\share\b.png: network paths on Windows.
+  const html = renderMarkdown(String.raw`![a](<\\\\srv\\share\\a.png>) ![b](/\\srv\\share\\b.png)` + '\n', () => 'RESOLVED');
+  assert.doesNotMatch(html, /RESOLVED/);
+  assert.match(renderMarkdown(String.raw`![c](\\figs\\c.png)` + '\n', () => 'RESOLVED'), /RESOLVED/, 'one backslash: a path on the current drive');
+});
+
+test('images outside the allowed folders go inline: image files only, never network paths', () => {
+  const { inlineImage } = require('../dist/lib.cjs');
+  const dir = fs.mkdtempSync(path.join(here, 'tmp', 'img-'));
+  const png = path.join(dir, 'a.png');
+  fs.writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  assert.equal(inlineImage(png), 'data:image/png;base64,iVBORw==');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'secret');
+  assert.equal(inlineImage(path.join(dir, 'notes.txt')), null, 'not an image type');
+  fs.mkdirSync(path.join(dir, 'd.png'));
+  assert.equal(inlineImage(path.join(dir, 'd.png')), null, 'a folder');
+  assert.equal(inlineImage(path.join(dir, 'missing.png')), null);
+  assert.equal(inlineImage('\\\\srv\\share\\a.png', 'win32'), null);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

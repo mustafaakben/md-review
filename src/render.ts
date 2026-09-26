@@ -63,26 +63,9 @@ export function hasUrlScheme(s: string): boolean {
   return /^[a-z][a-z0-9+.-]+:/i.test(s);
 }
 
-/** A local path: relative, absolute or on a drive (not a URL, `//host` or `#id`). */
+/** A local path: relative, absolute or on a drive (not a URL, `//host`, `\\\\host` or `#id`). */
 function isRelative(src: string): boolean {
-  return !!src && !hasUrlScheme(src) && !/^(\/\/|#)/.test(src);
-}
-
-/**
- * The local image paths a Markdown text links to with `![alt](path)`, found
- * without parsing it, so the host can allow their folders before the first
- * render. Approximate: reference-style images and HTML `<img>` are left out.
- */
-export function imageSources(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(/!\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+))/g)) {
-    let src = m[1] ?? m[2];
-    try {
-      src = decodeURIComponent(src);
-    } catch {} // a bare % stays as written
-    if (isRelative(src)) out.push(src);
-  }
-  return out;
+  return !!src && !hasUrlScheme(src) && !/^([\\/]{2}|#)/.test(src);
 }
 
 function cssLength(v: string): string {
@@ -124,7 +107,12 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   md.renderer.rules.image = (tokens, idx, opts, env, self) => {
     const t = tokens[idx];
     const src = t.attrGet('src') || '';
-    if (isRelative(src)) t.attrSet('src', resolveImage(decodeURIComponent(src)));
+    // Decode first: markdown-it stores a backslash as %5C, and `\\host` is a network path.
+    let local = src;
+    try {
+      local = decodeURIComponent(src);
+    } catch {} // a bare % stays as written
+    if (isRelative(local)) t.attrSet('src', resolveImage(local));
     const style: string[] = [];
     for (const k of ['width', 'height']) {
       const v = t.attrGet(k);
