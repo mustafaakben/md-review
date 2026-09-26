@@ -283,7 +283,20 @@
           "type": "string",
           "scope": "machine",
           "default": "claude",
-          "markdownDescription": "Program started by **Send to Claude**, followed by the review prompt as its last argument. Extra arguments are allowed, e.g. `claude --permission-mode acceptEdits`."
+          "markdownDescription": "Program started by **Send to Claude**, followed by the review prompt as its last argument. Extra arguments are allowed, e.g. `claude --permission-mode acceptEdits`. Quote a path with spaces: `\"C:\\Program Files\\Claude\\claude.exe\"`. When the program isn't on PATH, the usual install folders are checked too."
+        },
+        "mdReview.agent.launch": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "shell"
+          ],
+          "default": "direct",
+          "enumDescriptions": [
+            "Start the agent as the terminal's own process; the terminal closes when it exits.",
+            "Open your default shell and run the agent in it; the shell stays open afterwards (e.g. for `claude --continue`)."
+          ],
+          "description": "How Send to Claude starts the agent in its terminal."
         },
         "mdReview.agent.editMode": {
           "type": "string",
