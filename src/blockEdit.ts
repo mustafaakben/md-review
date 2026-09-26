@@ -76,3 +76,35 @@ export function applyBlockEdit(filePath: string, lineStart: number, lineEnd: num
   if (!out.equals(buf)) fs.writeFileSync(filePath, out);
   return out;
 }
+
+export const TASK_LINE = /^([ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)( |x|X)\]/;
+
+/**
+ * A short fingerprint of a task line, ignoring its tick and line ending, so a
+ * click can prove it still points at the task the user saw.
+ */
+export function taskKey(line: string): string {
+  const text = line.replace(/^\uFEFF/, '').replace(/\r$/, '').replace(TASK_LINE, '$1 ]');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Tick or untick the task list item that starts on `line` (0-based) by
+ * rewriting the single byte between its brackets. Nothing else changes.
+ * With `key`, the line must still be the task that was rendered.
+ */
+export function toggleTask(filePath: string, line: number, checked: boolean, key?: string): void {
+  const buf = fs.readFileSync(filePath);
+  const idx = indexLines(buf);
+  if (!(line >= 0 && line < idx.starts.length)) throw new BlockEditError(`Line ${line + 1} is outside the file.`);
+  const start = idx.starts[line];
+  const end = line + 1 < idx.starts.length ? idx.starts[line + 1] : buf.length;
+  const text = buf.subarray(start, end).toString('utf8');
+  const m = TASK_LINE.exec(text);
+  if (!m || (key !== undefined && taskKey(text.replace(/\n$/, '')) !== key)) throw new BlockEditError('That task changed on disk; the view was refreshed.');
+  if ((m[2] !== ' ') === checked) return;
+  buf[start + Buffer.byteLength(m[1])] = checked ? 0x78 /* x */ : 0x20;
+  fs.writeFileSync(filePath, buf);
+}

@@ -212,6 +212,9 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - relative images resolved from the file's folder
 - YAML front matter at the top of the file, shown as a title card (title, subtitle, authors, date, keywords; the raw YAML is under a disclosure)
 - CriticMarkup: `{++added++}`, `{--deleted--}`, `{~~old~>new~~}`, `{==highlight==}`, `{>>note<<}`
+- task lists (`- [ ]` / `- [x]`; clicking a box writes that one character), GitHub alerts (`> [!NOTE]` and friends), `==highlight==`
+- syntax highlighting for fenced code with a common language tag (bash, C/C++, CSS, diff, Go, Java, JS/TS, JSON, Julia, LaTeX, Markdown, Python, R, Rust, SQL, XML/HTML, YAML)
+- ```` ```mermaid ```` diagrams, drawn in the view; the Mermaid library loads on first use
 
 Every block carries `data-ls`/`data-le` attributes: its 0-based source line range, end exclusive. Block editing uses these.
 

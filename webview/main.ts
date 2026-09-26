@@ -1,6 +1,7 @@
 import { buildTextMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
+import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
@@ -33,6 +34,8 @@ let deferredPaint = false;
 let painted: Map<string, { status: Status; start: number; end: number }> | null = null;
 let paintedText = '';
 let docStale = false;
+/** The task checkbox to refocus after the repaint its click causes. */
+let focusTask: string | null = null;
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
@@ -91,11 +94,17 @@ const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
 const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
 const keySheet = createShortcutSheet(document.getElementById('mdr-keys')!);
 const search = createSearch(doc, document.getElementById('mdr-find')!);
+const diagrams = createDiagrams(doc);
+// VS Code's own theme switch changes the body class; diagrams follow it.
+new MutationObserver(() => void diagrams.refresh()).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 const reading = createReading(
   doc,
   document.getElementById('mdr-reading-btn')!,
   document.getElementById('mdr-reading')!,
-  (prefs: ReadingPrefs) => post({ type: 'setPrefs', prefs }),
+  (prefs: ReadingPrefs) => {
+    post({ type: 'setPrefs', prefs });
+    void diagrams.refresh(); // a reading theme can switch light/dark
+  },
   (msg) => toast(msg),
 );
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;
@@ -148,6 +157,10 @@ function paint() {
   renderSidebar();
   afterPaint();
   window.scrollTo(0, y);
+  if (focusTask !== null) {
+    (doc.querySelector(`input.mdr-task[data-task-line="${focusTask}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
+    focusTask = null;
+  }
 }
 
 /**
@@ -204,6 +217,7 @@ function paintComments() {
 function afterPaint() {
   outline.rebuild();
   search.refresh();
+  void diagrams.refresh();
 }
 
 /** Locate every comment in the painted text; returns the visible highlights in wrap order. */
@@ -491,6 +505,15 @@ function sendReply(id: string, cardEl: HTMLElement) {
 
 doc.addEventListener('click', (e) => {
   const t = e.target as Element;
+  // Task list checkbox: the host flips `[ ]`/`[x]` on that source line and re-renders.
+  if (t instanceof HTMLInputElement && t.classList.contains('mdr-task')) {
+    if (editing || inline) return e.preventDefault();
+    // Repaint whatever comes back, so a refused write unticks the box again.
+    docStale = true;
+    focusTask = t.dataset.taskLine ?? null;
+    post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked, key: t.dataset.taskKey });
+    return;
+  }
   const a = t.closest('a');
   if (a) {
     e.preventDefault();
@@ -783,6 +806,7 @@ doc.addEventListener('focusout', (e) => {
 // Edit mode: clicking a block places the caret in it directly.
 doc.addEventListener('mousedown', (e) => {
   if (!editMode || editing || e.button !== 0) return;
+  if ((e.target as Element).closest('.mdr-task')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || (inline && inline.el === el)) return;
   if ((e.target as Element).closest('a')) e.preventDefault();
@@ -793,6 +817,7 @@ doc.addEventListener('mousedown', (e) => {
 });
 
 doc.addEventListener('dblclick', (e) => {
+  if ((e.target as Element).closest('.mdr-task')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || inline) return;
   startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
@@ -936,6 +961,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'prefs':
       reading.apply(m.prefs || {});
+      void diagrams.refresh(); // a reading theme can switch light/dark
       break;
     case 'command':
       runCommand(m.command);
