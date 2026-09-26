@@ -27,6 +27,16 @@
   --measure: 76ch;
   --radius: 6px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Document area. A reading theme or zoom overrides these on body or .mdr-layout; the review chrome keeps the VS Code theme. */
+  --doc-bg: var(--bg);
+  --doc-fg: var(--fg);
+  --doc-muted: var(--muted);
+  --doc-accent: var(--accent);
+  --doc-font: var(--font);
+  --doc-mono: var(--mono);
+  --doc-size: 15px;
+  --doc-zoom: 1;
+  --doc-leading: 1.7;
   --font: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif);
   --mono: var(--vscode-editor-font-family, 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace);
 
@@ -49,7 +59,7 @@
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 body { font-family: var(--font); font-size: 15px; line-height: 1.7; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 :focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
-.mdr-doc ::selection { background: var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--accent) 28%, transparent)); }
+.mdr-doc ::selection { background: var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--doc-accent) 28%, transparent)); }
 
 /* ---------- icons ---------- */
 .mdr-file::before, .mdr-empty::before, #mdr-edit-btn::before, .mdr-toggle::before,
@@ -97,12 +107,12 @@ button.danger { color: var(--danger); }
 .mdr-toolbar {
   position: sticky; top: 0; z-index: 20; height: var(--bar-h); display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 0 12px 0 20px; font-size: 13px;
-  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px);
+  background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: saturate(1.4) blur(12px);
   border-bottom: 1px solid var(--hairline);
 }
 .mdr-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .mdr-file { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mdr-counts { display: flex; gap: 12px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.mdr-counts { display: flex; gap: 10px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .mdr-pill { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .mdr-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .mdr-pill.draft::before { background: var(--draft); }
@@ -120,15 +130,24 @@ button.danger { color: var(--danger); }
 .mdr-toggle:has(input:focus-visible) { outline: 1px solid var(--focus); outline-offset: 1px; }
 .mdr-toggle:has(input:not(:checked)) { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
 button.mdr-side-toggle { padding: 5px; }
-.mdr-hint { color: var(--muted); font-size: 12px; margin-right: 8px; opacity: 0.8; white-space: nowrap; }
-@media (max-width: 1100px) { .mdr-hint { display: none; } }
+.mdr-hint { display: none; } /* the empty comments pane explains how to comment and edit */
+#mdr-submit:disabled { display: none; } /* only offered when there are drafts to submit */
 @media (max-width: 760px) { .mdr-counts { display: none; } }
 
 /* ---------- layout ---------- */
-.mdr-layout { display: grid; grid-template-columns: minmax(0, 1fr) clamp(240px, 30vw, var(--sidebar-w)); }
-.mdr-doc { padding: 48px 56px 160px; max-width: calc(var(--measure) + 112px); width: 100%; margin: 0 auto; }
+.mdr-layout {
+  --doc-rule: color-mix(in srgb, var(--doc-fg) 10%, transparent);
+  --doc-soft: color-mix(in srgb, var(--doc-fg) 5%, var(--doc-bg));
+  --doc-softer: color-mix(in srgb, var(--doc-fg) 2.5%, var(--doc-bg));
+  --doc-code-bg: var(--vscode-textCodeBlock-background, var(--doc-softer));
+  background: var(--doc-bg); color: var(--doc-fg);
+  display: grid; grid-template-columns: minmax(0, 1fr) clamp(240px, 30vw, var(--sidebar-w)); }
+.mdr-doc {
+  font-family: var(--doc-font); font-size: calc(var(--doc-size) * var(--doc-zoom)); line-height: var(--doc-leading);
+  padding: 48px 56px 160px; max-width: calc(var(--measure) + 112px); width: 100%; margin: 0 auto; }
 .mdr-sidebar {
-  position: sticky; top: var(--bar-h); height: calc(100vh - var(--bar-h)); overflow-y: auto; padding: 14px 12px 60px;
+  color: var(--fg);
+  position: sticky; top: var(--bar-h); height: calc(100vh - var(--bar-h)); overflow-y: auto; padding: 10px 8px 60px;
   border-left: 1px solid var(--hairline); background: var(--softer); font-size: 13px; line-height: 1.5;
   scrollbar-width: thin; scrollbar-color: var(--vscode-scrollbarSlider-background, var(--border)) transparent;
   animation: mdr-fade-in 0.18s var(--ease);
@@ -148,38 +167,38 @@ button.mdr-side-toggle { padding: 5px; }
 .mdr-doc h1, .mdr-doc h2, .mdr-doc h3, .mdr-doc h4, .mdr-doc h5, .mdr-doc h6 {
   line-height: 1.25; font-weight: 650; margin: 2em 0 0.65em; letter-spacing: -0.012em; text-wrap: balance;
 }
-.mdr-doc h1 { font-size: 1.85em; letter-spacing: -0.02em; padding-bottom: 0.35em; border-bottom: 1px solid var(--hairline); }
+.mdr-doc h1 { font-size: 1.85em; letter-spacing: -0.02em; padding-bottom: 0.35em; border-bottom: 1px solid var(--doc-rule); }
 .mdr-doc h2 { font-size: 1.4em; }
 .mdr-doc h3 { font-size: 1.15em; }
 .mdr-doc h4 { font-size: 1em; }
-.mdr-doc h5, .mdr-doc h6 { font-size: 0.9em; color: var(--muted); }
+.mdr-doc h5, .mdr-doc h6 { font-size: 0.9em; color: var(--doc-muted); }
 .mdr-doc > :first-child { margin-top: 0; }
 .mdr-doc p { margin: 0 0 1.05em; text-wrap: pretty; }
-.mdr-doc a { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent); text-underline-offset: 2px; transition: text-decoration-color 0.12s; }
+.mdr-doc a { color: var(--doc-accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--doc-accent) 35%, transparent); text-underline-offset: 2px; transition: text-decoration-color 0.12s; }
 .mdr-doc a:hover { text-decoration-color: currentColor; }
 .mdr-doc strong { font-weight: 650; }
 .mdr-doc img { max-width: 100%; height: auto; display: block; margin: 0.75em auto; border-radius: var(--radius); }
-.mdr-doc blockquote { margin: 0 0 1.05em; padding: 0.1em 0 0.1em 1.1em; border-left: 3px solid var(--hairline); color: var(--muted); }
-.mdr-doc code { font-family: var(--mono); font-size: 0.86em; background: var(--soft); padding: 0.12em 0.38em; border-radius: 4px; }
+.mdr-doc blockquote { margin: 0 0 1.05em; padding: 0.1em 0 0.1em 1.1em; border-left: 3px solid var(--doc-rule); color: var(--doc-muted); }
+.mdr-doc code { font-family: var(--doc-mono); font-size: 0.86em; background: var(--doc-soft); padding: 0.12em 0.38em; border-radius: 4px; }
 .mdr-doc pre {
-  background: var(--vscode-textCodeBlock-background, var(--softer)); border: 1px solid var(--hairline);
+  background: var(--doc-code-bg); border: 1px solid var(--doc-rule);
   padding: 14px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.55; font-size: 0.95em;
 }
 .mdr-doc pre code { background: none; padding: 0; font-size: 0.86em; }
 .mdr-doc ul, .mdr-doc ol { padding-left: 1.5em; margin: 0 0 1.05em; }
 .mdr-doc li { margin: 0.25em 0; }
-.mdr-doc li::marker { color: var(--muted); }
-.mdr-doc hr { border: 0; border-top: 1px solid var(--hairline); margin: 2.5em 0; }
+.mdr-doc li::marker { color: var(--doc-muted); }
+.mdr-doc hr { border: 0; border-top: 1px solid var(--doc-rule); margin: 2.5em 0; }
 .mdr-doc table {
-  border-collapse: separate; border-spacing: 0; margin: 0.75em 0 1.5em; font-size: 13px; line-height: 1.5; display: block;
-  overflow-x: auto; max-width: 100%; width: max-content; border: 1px solid var(--hairline); border-radius: 8px;
+  border-collapse: separate; border-spacing: 0; margin: 0.75em 0 1.5em; font-size: 0.87em; line-height: 1.5; display: block;
+  overflow-x: auto; max-width: 100%; width: max-content; border: 1px solid var(--doc-rule); border-radius: 8px;
 }
-.mdr-doc th, .mdr-doc td { padding: 7px 12px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--hairline); }
-.mdr-doc th + th, .mdr-doc td + td { border-left: 1px solid var(--hairline); }
+.mdr-doc th, .mdr-doc td { padding: 7px 12px; vertical-align: top; text-align: left; border-bottom: 1px solid var(--doc-rule); }
+.mdr-doc th + th, .mdr-doc td + td { border-left: 1px solid var(--doc-rule); }
 .mdr-doc tr:last-child > td { border-bottom: 0; }
-.mdr-doc thead th { background: var(--soft); font-weight: 600; }
-.mdr-doc tbody tr:nth-child(even) { background: var(--softer); }
-.mdr-doc .footnotes { font-size: 0.9em; color: var(--muted); }
+.mdr-doc thead th { background: var(--doc-soft); font-weight: 600; }
+.mdr-doc tbody tr:nth-child(even) { background: var(--doc-softer); }
+.mdr-doc .footnotes { font-size: 0.9em; color: var(--doc-muted); }
 .mdr-doc .katex-display { overflow-x: auto; overflow-y: hidden; }
 .mdr-doc eq { display: inline; }
 .mdr-doc section.eqno, .mdr-doc eqn { display: block; }
@@ -236,27 +255,28 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
 .mdr-section { margin: 22px 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .mdr-card {
   --c: var(--submitted);
-  position: relative; background: var(--bg); border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 12px 8px 14px;
-  margin-bottom: 8px; cursor: pointer; overflow: hidden;
-  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s var(--ease);
+  position: relative; border: 1px solid transparent; border-radius: 8px; padding: 10px 12px 8px 16px;
+  margin-bottom: 4px; cursor: pointer;
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), opacity 0.15s var(--ease);
 }
-.mdr-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); opacity: 0.85; }
-.mdr-card:hover { border-color: var(--border); box-shadow: 0 2px 8px color-mix(in srgb, var(--shadow) 50%, transparent); }
+.mdr-card::before { content: ''; position: absolute; left: 6px; top: 12px; bottom: 12px; width: 2px; border-radius: 2px; background: var(--c); opacity: 0.8; }
+.mdr-card:hover { background: color-mix(in srgb, var(--fg) 4%, transparent); }
 .mdr-card.draft { --c: var(--draft); }
-.mdr-card.resolved { --c: var(--resolved); opacity: 0.7; }
+.mdr-card.resolved { --c: var(--resolved); opacity: 0.62; }
 .mdr-card.resolved:hover, .mdr-card.resolved.active { opacity: 1; }
 .mdr-card.orphan::before { background: repeating-linear-gradient(var(--c) 0 4px, transparent 4px 7px); }
-.mdr-card.active { border-color: color-mix(in srgb, var(--focus) 70%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--focus) 70%, transparent), 0 4px 14px color-mix(in srgb, var(--shadow) 60%, transparent); }
+.mdr-card.active { background: var(--bg); border-color: var(--hairline); box-shadow: 0 2px 10px color-mix(in srgb, var(--shadow) 55%, transparent); }
 .mdr-meta { color: var(--muted); font-size: 11.5px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .mdr-meta b { color: var(--fg); font-weight: 600; }
 .mdr-lines { margin-left: auto; font-family: var(--mono); font-size: 10.5px; opacity: 0.8; }
-.mdr-badge { text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.06em; font-weight: 700; padding: 0 6px; line-height: 16px; border-radius: 4px; margin-right: 4px; }
-.mdr-badge.draft { color: var(--draft); background: var(--hl-draft); }
-.mdr-badge.submitted { color: var(--submitted); background: var(--hl-submitted); }
-.mdr-badge.resolved { color: var(--resolved); background: var(--hl-resolved); }
+.mdr-badge { text-transform: capitalize; font-size: 11px; font-weight: 600; margin-right: 2px; }
+.mdr-badge::after { content: ' ·'; color: var(--muted); font-weight: 400; }
+.mdr-badge.draft { color: var(--draft); }
+.mdr-badge.submitted { color: var(--submitted); }
+.mdr-badge.resolved { color: var(--resolved); }
 .mdr-quote {
-  margin: 7px 0; padding: 1px 0 1px 9px; border-left: 2px solid color-mix(in srgb, var(--c, var(--muted)) 45%, transparent); color: var(--muted); font-size: 12px;
-  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  margin: 5px 0 6px; padding: 0; border: 0; color: var(--muted); font-size: 12px; font-style: italic;
+  overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   transition: color 0.12s;
 }
 .mdr-quote[data-act="goto"]:hover { color: var(--fg); }
@@ -266,6 +286,7 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
 .mdr-reply { padding: 6px 0 0 10px; border-left: 2px solid var(--soft); margin-top: 6px; }
 .mdr-actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0 0 -8px; opacity: 0.75; transition: opacity 0.15s var(--ease); }
 .mdr-card:hover .mdr-actions, .mdr-card.active .mdr-actions, .mdr-actions:focus-within { opacity: 1; }
+.mdr-actions { opacity: 0.5; }
 .mdr-actions button { font-size: 11.5px; padding: 2px 8px; gap: 5px; }
 .mdr-actions button::before { width: 14px; height: 14px; -webkit-mask-size: 14px; mask-size: 14px; }
 .mdr-replybox { margin-top: 8px; animation: mdr-fade-in 0.14s var(--ease); }
