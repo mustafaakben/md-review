@@ -50,3 +50,24 @@ test('attribute lists still work next to CriticMarkup', () => {
   assert.match(render('![x](a.png){width=50%}\n'), /style="width:50%"/);
   assert.match(render('{--x'), /\{--x/); // unclosed: left as text
 });
+
+test('CriticMarkup inside link labels, brackets and inline footnotes', () => {
+  assert.match(render('See [the {++new++} paper](http://x).\n'), /<a href="http:\/\/x">the <ins class="mdr-critic-add">new<\/ins> paper<\/a>/);
+  assert.match(render('[a {==b==} c]\n'), /\[a <mark class="mdr-critic-mark">b<\/mark> c\]/);
+  assert.doesNotMatch(render('Text^[inline {++fn++}] x\n'), /Render failed/);
+});
+
+test('front matter follows pandoc: no blank line after the opening ---', () => {
+  const html = render('---\n\nNote: read this first.\n\n---\n\nBody\n');
+  assert.doesNotMatch(html, /mdr-front/);
+  assert.match(html, /^<hr/);
+});
+
+test('Quarto author affiliations are not listed as authors; flow lists respect quotes', () => {
+  const html = render(
+    '---\ntitle: T\nauthor:\n  - name: Ada\n    affiliations:\n      - name: MIT\n      - name: Elon University\n  - name: Ben\nkeywords: [a, "b, c"]\n---\n',
+  );
+  assert.match(html, /mdr-front-meta">Ada, Ben</);
+  assert.match(html, /<span>a<\/span><span>b, c<\/span><\/div>/);
+  assert.match(render('---\nauthor: [{name: A}, B]\n---\n'), /mdr-front-meta">A, B</);
+});

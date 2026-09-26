@@ -369,6 +369,7 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
   .mdr-file::before, .mdr-empty::before { forced-color-adjust: none; background: CanvasText !important; }
   button:disabled::before { background: GrayText !important; }
   .mdr-pill::before { forced-color-adjust: none; }
+  .mdr-doc mark.mdr-critic-mark { outline: 1px solid Mark; text-decoration: underline dotted; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

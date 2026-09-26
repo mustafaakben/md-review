@@ -19,10 +19,40 @@ const unquote = (s: string) => {
   return s.trim();
 };
 
-const flowList = (s: string) =>
-  s.trim().startsWith('[') && s.trim().endsWith(']')
-    ? s.trim().slice(1, -1).split(',').map(unquote).filter(Boolean)
-    : null;
+/** `[a, "b, c", {name: D}]` -> ['a', 'b, c', 'D']. Commas inside quotes or braces don't split. */
+function flowList(s: string): string[] | null {
+  s = s.trim();
+  if (!s.startsWith('[') || !s.endsWith(']')) return null;
+  const out: string[] = [];
+  let cur = '';
+  let quote = '';
+  let depth = 0;
+  for (const ch of s.slice(1, -1)) {
+    if (quote) {
+      if (ch === quote) quote = '';
+      cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+    } else if (ch === '{' || ch === '[') {
+      depth++;
+      cur += ch;
+    } else if (ch === '}' || ch === ']') {
+      depth--;
+      cur += ch;
+    } else if (ch === ',' && depth === 0) {
+      out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out
+    .map((x) => {
+      const named = /^\{\s*name:\s*(.*?)\s*(,.*)?\}$/.exec(x.trim());
+      return unquote(named ? named[1] : x);
+    })
+    .filter(Boolean);
+}
 
 /**
  * Reads the handful of keys the title card shows. Not a general YAML parser:
@@ -37,13 +67,17 @@ export function parseFrontMatter(raw: string): FrontMatter {
     const key = m[1].toLowerCase();
     let value = m[2];
     // Block scalar (`abstract: |`) or nested list/map below the key.
+    // Only items at the first list indent under the key count, so nested
+    // lists (Quarto's author affiliations) aren't read as more authors.
     const items: string[] = [];
+    let indent = -1;
     let j = i + 1;
     while (j < lines.length && (/^\s+\S/.test(lines[j]) || /^-\s/.test(lines[j]))) {
-      const item = /^\s*-\s+(.*)$/.exec(lines[j]);
-      if (item) {
-        const named = /^name:\s*(.*)$/.exec(item[1].trim());
-        items.push(unquote(named ? named[1] : item[1]));
+      const item = /^(\s*)-\s+(.*)$/.exec(lines[j]);
+      if (item && indent < 0) indent = item[1].length;
+      if (item && item[1].length === indent) {
+        const named = /^name:\s*(.*)$/.exec(item[2].trim());
+        items.push(unquote(named ? named[1] : item[2]));
       }
       j++;
     }
@@ -93,14 +127,9 @@ export function frontMatterPlugin(md: MarkdownIt): void {
       // A lone `---` followed by prose is a thematic break, not front matter:
       // the block must close, and its first non-blank line must be `key:`.
       if (end < 1) return false;
-      let firstKey = false;
-      for (let l = 1; l < end; l++) {
-        const s = state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l]);
-        if (!s.trim()) continue;
-        firstKey = /^[A-Za-z_][\w-]*:(\s|$)/.test(s);
-        break;
-      }
-      if (!firstKey) return false;
+      // Like pandoc, the line right after the opening `---` must not be blank.
+      const line1 = state.src.slice(state.bMarks[1] + state.tShift[1], state.eMarks[1]);
+      if (end === 1 || !/^[A-Za-z_][\w-]*:(\s|$)/.test(line1)) return false;
       if (silent) return true;
       const raw = state.src.slice(state.bMarks[1], state.bMarks[end]).replace(/\r?\n$/, '');
       const token = state.push('mdr_front_matter', 'div', 0);

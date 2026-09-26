@@ -24,7 +24,11 @@ export function criticPlugin(md: MarkdownIt): void {
     if (end < 0 || end === start) return false;
     const body = src.slice(start, end);
     if (kind === '~~' && !body.includes('~>')) return false;
-    if (silent) return true;
+    // Silent mode (link labels, footnotes) still has to move past the markup.
+    if (silent) {
+      state.pos = end + spec.close.length;
+      return true;
+    }
     const push = (tag: string, cls: string, text: string) => {
       const open = state.push('mdr_critic_open', tag, 1);
       open.attrSet('class', cls);
