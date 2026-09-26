@@ -3,6 +3,7 @@
 // and sessions (VS Code globalState); the view just applies and reports them.
 
 import { isMac, keyLabel } from './keys';
+import { blockAtY, settle } from './reveal';
 
 export type ReadingTheme = 'auto' | 'paper' | 'sepia' | 'dusk' | 'night';
 export type ReadingFont = 'sans' | 'serif';
@@ -106,11 +107,19 @@ export function createReading(
     const before = prefs.zoom;
     z = Math.min(MAX, Math.max(MIN, z));
     if (Math.abs(z - before) < 0.001) return;
-    const docTop = doc.getBoundingClientRect().top;
-    const offset = anchorY - docTop; // distance into the document
+    // Keep the same point of the block under anchorY there. Blocks off screen
+    // have estimated or remembered heights that don't scale with the zoom, so
+    // the document's height is no guide.
+    const el = blockAtY(doc.children, anchorY);
+    const r = el?.getBoundingClientRect();
+    const frac = r && r.height ? (anchorY - r.top) / r.height : 0;
     set({ zoom: z }, true);
-    const after = doc.getBoundingClientRect().top;
-    window.scrollBy(0, after + offset * (z / before) - anchorY);
+    if (el) {
+      settle(() => {
+        const n = el.getBoundingClientRect();
+        return n.top + frac * n.height - anchorY;
+      });
+    }
     note(`Zoom ${Math.round(z * 100)}%`);
   }
 
