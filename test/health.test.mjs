@@ -408,6 +408,11 @@ test('insideRealRoots follows links, but not a link to a network path', { skip: 
   assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'link.md'), roots), false);
   assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'new.md'), roots), true);
   assert.equal(lib.insideRealRoots(path.join(dir, 'out', 'x.md'), lib.realRoots([path.join(dir, 'out')])), true);
+  // A missing file under a linked folder is judged by where the link leads.
+  fs.rmSync(path.join(dir, 'in', 'outdir'), { force: true });
+  fs.symlinkSync(path.join(dir, 'out'), path.join(dir, 'in', 'outdir'));
+  assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'outdir', 'missing.md'), roots), false);
+  assert.equal(lib.insideRealRoots(path.join(dir, 'in', 'sub', 'missing.md'), roots), true);
 });
 
 test('checkLinks in Restricted Mode looks only inside the readable folders', async () => {
