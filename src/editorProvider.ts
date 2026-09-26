@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview, linkPath } from './core';
+import { BaselineStore } from './baselineStore';
 import { runAgent } from './agentRun';
 import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
 import { hasUrlScheme } from './render';
@@ -36,6 +37,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
     return false;
   }
+
+  /** Changes baselines: files in the extension's storage (never next to the document), details in workspace state. */
+  private baselines: BaselineStore;
 
   /** Hand a message to the focused panel's session as if its webview sent it (the smoke test's way in). */
   static handleInActive(msg: FromWebview): boolean {
@@ -74,7 +78,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
   }
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.baselines = new BaselineStore(vscode.Uri.joinPath(context.storageUri ?? context.globalStorageUri, 'baselines').fsPath, context.workspaceState);
+  }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const mdPath = document.uri.fsPath;
@@ -133,6 +139,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         // Keep other open MD Review panels in step.
         for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
+      baselines: this.baselines.forFile(mdPath),
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
       notify: (message) => {

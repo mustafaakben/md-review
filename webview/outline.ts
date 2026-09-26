@@ -117,12 +117,14 @@ export function createOutline(
 
   const api: Outline = {
     rebuild() {
-      heads = Array.from(doc.querySelectorAll('h1, h2, h3, h4')) as HTMLElement[];
+      // Headings in UI (a Changes before view) aren't the document's.
+      const own = (e: Element) => !e.closest('.mdr-ui');
+      heads = (Array.from(doc.querySelectorAll('h1, h2, h3, h4')) as HTMLElement[]).filter(own);
       // Open (non-resolved) threads per section, in one document-order pass.
       const counts = new Array(heads.length).fill(0);
       const seen = new Set<string>();
       let sec = -1;
-      for (const el of Array.from(doc.querySelectorAll('h1, h2, h3, h4, mark.mdr-hl')) as HTMLElement[]) {
+      for (const el of (Array.from(doc.querySelectorAll('h1, h2, h3, h4, mark.mdr-hl')) as HTMLElement[]).filter(own)) {
         if (el.tagName !== 'MARK') {
           sec++;
           continue;
@@ -136,7 +138,7 @@ export function createOutline(
       const items = heads
         .map((h, i) => {
           const lvl = Number(h.tagName[1]) - min;
-          const text = (h.textContent || '').trim() || '(untitled)';
+          const text = textOf(h).trim() || '(untitled)';
           const n = counts[i] ? `<span class="mdr-toc-count" title="${counts[i]} open thread${counts[i] > 1 ? 's' : ''}">${counts[i]}</span>` : '';
           return `<div class="mdr-toc-item lvl${lvl}" data-i="${i}" role="link" tabindex="${i === 0 ? 0 : -1}" title="${esc(text)}"><span class="mdr-toc-text">${esc(text)}</span>${words(h)}${n}</div>`;
         })
@@ -176,4 +178,12 @@ export function createOutline(
 
 function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+/** A heading's text without UI inside it (a Changes chip, struck-out words). */
+function textOf(h: HTMLElement): string {
+  if (!h.querySelector('.mdr-ui')) return h.textContent || '';
+  const c = h.cloneNode(true) as HTMLElement;
+  c.querySelectorAll('.mdr-ui').forEach((x) => x.remove());
+  return c.textContent || '';
 }

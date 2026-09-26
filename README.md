@@ -108,6 +108,9 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
 - While Claude works, the comments pane shows **Claude is working · 2 of 5** with a progress bar, and the thread Claude is on right now pulses in the document and the list. When every sent thread has an answer you get a summary, "Claude finished: 4 resolved, 1 question for you", with **Show questions** to jump to the threads that need you. If the panel is in the background, VS Code shows the summary as a notification.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
+- **See what Claude changed.** Send to Claude saves a copy of the file first. The **Changes** icon in the toolbar (or `]`) paints a redline over the view: inserted words are underlined and deleted words are struck through, in your theme's diff colours. Math, code, diagrams and tables are marked as changed as a whole, with **Show before** beside them. Each change has **Keep** and **Revert**. Revert puts the old lines back through the same checked, byte-exact path as your own edits, so Undo brings the change back, and it's refused if the file changed since the view was drawn. **Accept all** drops the copy. Edits you make in the view after sending are yours, so they don't show, unless they're inside a change Claude made. `]` and `[` step through the changes.
+- Threads Claude resolved or answered get **Show change**, which jumps to the changes inside that thread's text. When Claude finishes, the summary says how many blocks changed, with **Review changes**.
+- The copy is a file in the extension's workspace storage (in memory in browser mode), never next to your file; only its time and threads go in workspace state. If you send again before reviewing the last round's changes, the older copy stays, so nothing drops out of view. Each file has one copy, a workspace keeps at most 50 of them and 64 MB in all (the oldest go first), **Accept all** deletes it, and files over 4 MB get none (Send says so).
 - Set `mdReview.agent.editMode` to `suggest` and Claude proposes a replacement on each thread instead of editing the file. Its suggestions show on the card with **Apply** and **Dismiss**, so nothing changes until you say so.
 - `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
 - In browser mode the button copies the prompt.
@@ -132,6 +135,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 | Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
 | Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
 | Next / previous comment | Alt+↓ / Alt+↑, or `j` / `k` | ⌥↓ / ⌥↑, or `j` / `k` |
+| Next / previous change | `]` / `[` | `]` / `[` |
 | Find in document | Ctrl+F or `/` | ⌘F or `/` |
 | Outline | Ctrl+Shift+O | ⇧⌘O |
 | Comments pane | Ctrl+Alt+P | ⌥⌘P |
@@ -143,6 +147,12 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 Single-letter keys work when you're not typing in a box. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
+
+**Word round-trip.** For reviewers who work in Word (an advisor, a co-author):
+- **MD Review: Export to Word (with comments)** (Command Palette, or `…` in the MD Review title bar) writes `<file>.docx` next to the Markdown. Headings, lists, quotes, code, tables, links and local PNG/JPEG images come across; math appears as its TeX source and footnotes as `[n]`. Each open thread becomes a real Word comment on its quoted text, with the author and date; its kind and severity and any open suggested edit follow as a line in italics. Choose whether to add replies (as Word replies in the same thread) and resolved threads (marked resolved in Word). A document comment sits on the first paragraph; threads whose quote is gone are listed under **Unanchored comments** at the end. No pandoc or Word needed.
+- **MD Review: Import Comments from Word…** reads a reviewed `.docx` and adds each Word comment as a draft thread by its author (`"origin": "word"`), placed on the same text in the Markdown. Word replies join their thread, comments resolved in Word stay resolved, and tracked changes (insertions and deletions) become threads with a suggested edit you can apply. A file exported by MD Review comes back with its kinds, severities and suggested edits. A comment whose text can't be found is added as a document comment that quotes it, so nothing is lost. Importing the same file twice adds nothing new.
+- Import only reads the comment, reply and document parts of the `.docx`, and refuses files that are not plain Word documents: over 100 MB, parts that would inflate past 64 MB or that pack suspiciously well (ZIP bombs), ZIP64 or encrypted archives, and XML that declares a DTD (entity bombs and external entities). Entry names that point outside the archive are ignored.
+- In Restricted Mode both work: export reads images and the bibliography only from the document's folder and the workspace and doesn't offer to open the `.docx` in another program; import reads the `.docx` you pick and writes only the comments file. The Word code loads when you first run one of these commands, not when MD Review starts.
 
 **Settings.**
 - `mdReview.author`: the name on your comments. If empty (the default), your system user name is used.
@@ -191,7 +201,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "scope": "section",                    // optional: "section" (quote is a heading; about the whole section) | "document" (empty quote)
       "workingAt": "…", "workingBy": "Claude", // optional: set by the CLI while an agent works on this thread
       "suggestion": { "text": "a dock is free" }, // optional: replacement for the quote ("" deletes it); gains appliedAt / dismissedAt
-      "origin": "agent",                     // optional: a draft an agent left as first reviewer, not yet kept or dismissed
+      "origin": "agent",                     // optional: "agent", a draft an agent left as first reviewer, not yet kept or dismissed;
+                                             //   "word", imported from a Word document
       "reviewRun": "3f9a1c07",               // optional: the review run that left it (comment --run)
       "suggestedBy": "Claude",               // optional: who raised a thread the reviewer kept
       "replies": [
@@ -281,7 +292,10 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/agentPrompt.ts`, `src/agentCommands.ts` | the prompts Send to Claude hands to the agent; the folder and skill commands |
 | `src/inbox.ts`, `src/inboxView.ts` | review inbox: grouping (VS Code-independent) and the Explorer tree |
 | `src/render.ts` | Markdown → HTML with source-line tags |
-| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts` |
+| `src/redlines.ts`, `src/wordDiff.ts` | Changes view: baselines, block matching, word diff |
+| `src/docModel.ts`, `src/textQuote.ts` | the view's text and blocks without a browser; quote anchoring shared with the webview |
+| `src/docx.ts`, `src/wordImport.ts`, `src/zip.ts`, `src/wordCommands.ts` | Word export with comments, comment/tracked-change import, the ZIP container; bundled apart as `dist/word.js`, loaded on first use |
+| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts`, `redlines.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 
@@ -289,8 +303,10 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 
 - Block editing works on disk bytes. If the same file has unsaved edits in a text editor, save or revert them first.
 - The quote is anchored on rendered text. A selection that crosses math or UI elements anchors on the visible text only.
+- The Changes view compares against the copy saved at Send. Your edits in the view are left out, but edits made in the text editor or by other tools after Send show as changes, and an edit inside a change Claude made is part of that change. Blocks are matched on their source lines: a nested list item is matched on its own line, and a table or code block as a whole.
 - Undo history lives in the open view and covers edits made there. It's cleared if another program changes the file in between, so an agent's edits are never overwritten by an undo.
 - Inline `<!-- COMMENT -->` storage is not implemented. By design the `.md` stays clean.
+- Word export is a plain rendering: math is TeX source, Mermaid diagrams are their source, remote images are `[alt text]`, and there is no bibliography styling beyond the viewer's reference list. Word comments made on an equation land on the whole equation.
 
 ## Development
 

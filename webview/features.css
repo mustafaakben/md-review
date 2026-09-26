@@ -8,9 +8,10 @@
   --i-find: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10.0195 10.7266C9.06578 11.5217 7.83875 12 6.5 12C3.46243 12 1 9.53757 1 6.5C1 3.46243 3.46243 1 6.5 1C9.53757 1 12 3.46243 12 6.5C12 7.83875 11.5217 9.06578 10.7266 10.0195L13.8535 13.1464C14.0488 13.3417 14.0488 13.6583 13.8535 13.8536C13.6583 14.0488 13.3417 14.0488 13.1464 13.8536L10.0195 10.7266ZM11 6.5C11 4.01472 8.98528 2 6.5 2C4.01472 2 2 4.01472 2 6.5C2 8.98528 4.01472 11 6.5 11C8.98528 11 11 8.98528 11 6.5Z'/%3E%3C/svg%3E");
   --i-reading: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10.9699 2.32913C10.8981 2.13153 10.7103 2 10.5 2C10.2898 2 10.102 2.13153 10.0301 2.32913L6.46834 12.124L6.13267 11.3184C6.12991 11.3113 6.12699 11.3043 6.12391 11.2974L4.46155 7.30769C4.38391 7.12137 4.20186 7 4.00001 7C3.79816 7 3.6161 7.12137 3.53847 7.30769L1.8761 11.2974C1.87303 11.3043 1.87011 11.3113 1.86735 11.3184L1.03847 13.3077C0.932261 13.5626 1.0528 13.8553 1.3077 13.9615C1.5626 14.0677 1.85534 13.9472 1.96155 13.6923L2.66667 12H5.33334L6.03776 13.6906C6.03897 13.6935 6.04021 13.6965 6.04148 13.6994C6.06887 13.7624 6.10777 13.817 6.15467 13.8618C6.20148 13.9065 6.25776 13.9428 6.32193 13.9672C6.33406 13.9718 6.34638 13.976 6.35885 13.9797C6.46237 14.0102 6.56886 14.0056 6.66467 13.9721C6.67641 13.968 6.688 13.9635 6.69939 13.9585C6.76233 13.9312 6.81686 13.8924 6.86155 13.8456C6.90638 13.7987 6.94275 13.7423 6.96722 13.6781C6.96834 13.6751 6.96944 13.6722 6.9705 13.6692L8.30477 10H12.6952L14.0301 13.6709C14.1245 13.9304 14.4114 14.0643 14.6709 13.9699C14.9304 13.8755 15.0643 13.5886 14.9699 13.3291L10.9699 2.32913ZM10.5 3.96309L12.3316 9H8.6684L10.5 3.96309ZM4.00001 8.8L4.91668 11H3.08334L4.00001 8.8Z'/%3E%3C/svg%3E");
   --i-sparkle: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.46524 9.82962C5.62134 9.94037 5.80806 9.99974 5.99946 9.99948C6.19151 10.0003 6.37897 9.94082 6.53546 9.82948C6.69223 9.71378 6.81095 9.55398 6.87646 9.37048L7.22346 8.30348C7.3077 8.05191 7.44906 7.82327 7.63646 7.63548C7.82305 7.44851 8.05078 7.30776 8.30146 7.22448L9.38746 6.87148C9.56665 6.80759 9.72173 6.68989 9.83146 6.53448C9.94145 6.37908 10.0005 6.19337 10.0005 6.00298C10.0005 5.81259 9.94145 5.62689 9.83146 5.47148C9.71293 5.30613 9.54426 5.18339 9.35046 5.12148L8.28146 4.77548C8.02989 4.69238 7.80123 4.55163 7.61371 4.36447C7.4262 4.1773 7.28503 3.9489 7.20146 3.69748L6.84846 2.61348C6.78519 2.43423 6.66777 2.27908 6.51246 2.16948C6.35557 2.06133 6.16951 2.00342 5.97896 2.00342C5.78841 2.00342 5.60235 2.06133 5.44546 2.16948C5.28572 2.28196 5.16594 2.44237 5.10346 2.62748L4.74846 3.71748C4.66476 3.96155 4.52691 4.18351 4.34524 4.36673C4.16358 4.54996 3.9428 4.6897 3.69946 4.77548L2.61546 5.12648C2.43437 5.19048 2.27775 5.30937 2.16743 5.4666C2.05712 5.62383 1.99859 5.81155 2.00003 6.00361C2.00146 6.19568 2.06277 6.38251 2.17541 6.53808C2.28806 6.69364 2.44643 6.81019 2.62846 6.87148L3.69546 7.21848C3.94767 7.30297 4.17673 7.44506 4.36446 7.63348C4.41519 7.6837 4.46262 7.73715 4.50646 7.79348C4.62481 7.94615 4.71614 8.11797 4.77646 8.30148L5.12846 9.38148C5.19143 9.56222 5.30914 9.71886 5.46524 9.82962ZM4.00746 6.26448L3.15246 5.99948L4.01646 5.71848C4.41071 5.58184 4.76826 5.35637 5.06146 5.05948C5.35281 4.76039 5.57294 4.39943 5.70546 4.00348L5.97046 3.14448L6.25046 4.00648C6.38349 4.40638 6.60809 4.76969 6.90636 5.06744C7.20463 5.36519 7.56833 5.58915 7.96846 5.72148L8.84846 5.99048L7.98746 6.27048C7.58707 6.40272 7.22321 6.62691 6.92505 6.92507C6.62689 7.22324 6.4027 7.58709 6.27046 7.98748L6.00546 8.84448L5.72646 7.98548C5.63026 7.69329 5.48483 7.41968 5.29646 7.17648C5.22699 7.08766 5.15254 7.00286 5.07346 6.92248C4.7738 6.62366 4.4089 6.39842 4.00746 6.26448ZM10.5344 13.8515C10.6703 13.9477 10.8328 13.9994 10.9994 13.9995C11.1642 13.998 11.3245 13.9456 11.4584 13.8495C11.5979 13.751 11.7029 13.611 11.7584 13.4495L12.0064 12.6875C12.0595 12.529 12.1485 12.385 12.2664 12.2665C12.3837 12.148 12.5277 12.0592 12.6864 12.0075L13.4584 11.7555C13.6161 11.701 13.7528 11.5985 13.8494 11.4625C13.9227 11.3595 13.9706 11.2405 13.9891 11.1154C14.0076 10.9903 13.9962 10.8626 13.9558 10.7428C13.9154 10.623 13.8472 10.5144 13.7567 10.4261C13.6662 10.3377 13.5561 10.272 13.4354 10.2345L12.6714 9.98548C12.5132 9.93291 12.3695 9.8443 12.2514 9.72663C12.1334 9.60896 12.0444 9.46547 11.9914 9.30748L11.7394 8.53348C11.685 8.37623 11.5825 8.24011 11.4464 8.14448C11.3443 8.07153 11.2266 8.02359 11.1026 8.00453C10.9787 7.98547 10.8519 7.99582 10.7327 8.03475C10.6135 8.07369 10.5051 8.1401 10.4163 8.22865C10.3274 8.31719 10.2607 8.42538 10.2214 8.54448L9.97435 9.30648C9.92207 9.46413 9.83452 9.60777 9.71835 9.72648C9.60382 9.84272 9.46428 9.9313 9.31035 9.98548L8.53435 10.2385C8.41689 10.2793 8.31057 10.347 8.22382 10.4361C8.13708 10.5252 8.0723 10.6333 8.03464 10.7518C7.99698 10.8704 7.98746 10.996 8.00686 11.1189C8.02625 11.2417 8.07401 11.3583 8.14635 11.4595C8.24456 11.5993 8.38462 11.7044 8.54635 11.7595L9.30935 12.0065C9.46821 12.0599 9.61262 12.1492 9.73135 12.2675C9.84958 12.3857 9.93801 12.5304 9.98935 12.6895L10.2424 13.4635C10.2971 13.6199 10.3992 13.7555 10.5344 13.8515ZM9.62035 11.0585L9.44235 10.9995L9.62635 10.9355C9.92811 10.8305 10.2018 10.6578 10.4264 10.4305C10.6528 10.2015 10.8238 9.92374 10.9264 9.61848L10.9844 9.44048L11.0434 9.62148C11.1453 9.92819 11.3175 10.2069 11.5461 10.4353C11.7748 10.6638 12.0536 10.8357 12.3604 10.9375L12.5554 11.0005L12.3754 11.0595C12.068 11.1617 11.7888 11.3344 11.5601 11.5637C11.3314 11.7931 11.1596 12.0728 11.0584 12.3805L10.9994 12.5615L10.9414 12.3805C10.84 12.0721 10.6676 11.7919 10.4382 11.5623C10.2088 11.3326 9.92863 11.1601 9.62035 11.0585Z'/%3E%3C/svg%3E");
+  --i-diff: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.5 2H2.5C1.673 2 1 2.673 1 3.5V12.5C1 13.327 1.673 14 2.5 14H5.5C6.327 14 7 13.327 7 12.5V3.5C7 2.673 6.327 2 5.5 2ZM2.5 3H5.5C5.775 3 6 3.224 6 3.5V5H2V3.5C2 3.224 2.225 3 2.5 3ZM5.5 13H2.5C2.225 13 2 12.776 2 12.5V6H6V12.5C6 12.776 5.775 13 5.5 13ZM13.5 2H10.5C9.673 2 9 2.673 9 3.5V12.5C9 13.327 9.673 14 10.5 14H13.5C14.327 14 15 13.327 15 12.5V3.5C15 2.673 14.327 2 13.5 2ZM10.5 3H13.5C13.775 3 14 3.224 14 3.5V8H10V3.5C10 3.224 10.225 3 10.5 3ZM13.5 13H10.5C10.225 13 10 12.776 10 12.5V10H14V12.5C14 12.776 13.775 13 13.5 13Z'/%3E%3C/svg%3E");
 }
 #mdr-outline-toggle::before, #mdr-undo::before, #mdr-redo::before, #mdr-find-btn::before, #mdr-reading-btn::before,
-#mdr-send::before, button[data-act="ask-claude"]::before {
+#mdr-send::before, button[data-act="ask-claude"]::before, #mdr-changes-btn::before {
   content: ''; flex: none; width: 16px; height: 16px; background: currentColor;
   -webkit-mask: var(--ico) center / 16px no-repeat; mask: var(--ico) center / 16px no-repeat;
 }
@@ -20,6 +21,7 @@
 #mdr-find-btn::before { --ico: var(--i-find); }
 #mdr-reading-btn::before { --ico: var(--i-reading); }
 #mdr-send::before, button[data-act="ask-claude"]::before { --ico: var(--i-sparkle); }
+#mdr-changes-btn::before { --ico: var(--i-diff); }
 
 /* ---------- toolbar additions ---------- */
 button.mdr-icon-btn { padding: 5px; }
@@ -437,4 +439,65 @@ button.mdr-hp-reanchor { margin: 2px 6px 0; padding: 1px 8px; font-size: 11.5px;
   /* Colour alone can't mark "over target" here: underline it too. */
   .mdr-words.over, .mdr-toc-words.over { text-decoration: underline; font-weight: 700; }
   .mdr-doc .mdr-flash { animation: none; outline: 2px solid Highlight; outline-offset: 2px; }
+}
+/* Changes view: word redlines against the baseline, block marks, and per-change actions. */
+:root {
+  --rl-ins: var(--vscode-gitDecoration-addedResourceForeground, #2e7d32);
+  --rl-ins-bg: var(--vscode-diffEditor-insertedTextBackground, color-mix(in srgb, #2ea043 14%, transparent));
+  --rl-del: var(--vscode-gitDecoration-deletedResourceForeground, #c62828);
+  --rl-del-bg: var(--vscode-diffEditor-removedTextBackground, color-mix(in srgb, #f85149 12%, transparent));
+  --rl-mod: var(--vscode-editorGutter-modifiedBackground, var(--accent));
+}
+/* A reading theme sets the page's colours whatever VS Code's theme is, so the redline follows the page. */
+body[data-reading-theme='paper'] .mdr-layout, body[data-reading-theme='sepia'] .mdr-layout {
+  --rl-ins: #1a7f37; --rl-ins-bg: color-mix(in srgb, #2ea043 14%, transparent); --rl-del: #b42318; --rl-del-bg: color-mix(in srgb, #f85149 12%, transparent); --rl-mod: var(--doc-accent);
+}
+body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .mdr-layout {
+  --rl-ins: #6fdd8b; --rl-ins-bg: color-mix(in srgb, #2ea043 24%, transparent); --rl-del: #ff9b92; --rl-del-bg: color-mix(in srgb, #f85149 20%, transparent); --rl-mod: var(--doc-accent);
+}
+.mdr-toolbar button#mdr-changes-btn[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.mdr-changes {
+  position: fixed; top: calc(var(--bar-h) + 8px); left: 50%; transform: translateX(-50%); z-index: 34; display: flex; align-items: center; gap: 4px;
+  max-width: calc(100vw - 32px); padding: 4px 4px 4px 10px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--vscode-editorWidget-background, var(--bg)); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); font-size: 12.5px;
+}
+.mdr-changes[hidden] { display: none; }
+.mdr-rl-status { margin-right: 6px; color: var(--muted); }
+.mdr-changes button { padding: 1px 8px; font-size: 12px; }
+.mdr-rl-close { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 22px; padding: 0 !important; background: transparent; border-color: transparent; color: var(--muted); }
+.mdr-rl-close::before { content: ''; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--i-close) center / contain no-repeat; mask: var(--i-close) center / contain no-repeat; }
+.mdr-doc ins.mdr-rl-ins { text-decoration: underline; text-decoration-color: var(--rl-ins); text-decoration-thickness: 2px; text-underline-offset: 3px; background: var(--rl-ins-bg); border-radius: 2px; }
+.mdr-doc del.mdr-rl-del { color: color-mix(in srgb, var(--rl-del) 60%, var(--doc-fg)); text-decoration: line-through; text-decoration-thickness: 1.5px; background: var(--rl-del-bg); border-radius: 2px; margin-right: 0.15em; }
+.mdr-doc .mdr-rl { position: relative; }
+.mdr-doc .mdr-rl::after { content: ''; position: absolute; left: -14px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--rl-mod); }
+.mdr-doc .mdr-rl.mdr-rl-add::after { background: var(--rl-ins); }
+.mdr-doc li.mdr-rl::after { left: -30px; }
+.mdr-doc .mdr-rl-block { outline: 1px dashed color-mix(in srgb, var(--rl-mod) 70%, transparent); outline-offset: 3px; }
+.mdr-doc .mdr-rl-block.mdr-rl-add { outline-color: var(--rl-ins); background: var(--rl-ins-bg); }
+.mdr-doc .mdr-rl-moved { outline-style: dotted; }
+.mdr-doc .mdr-rl-current { outline: 2px solid var(--focus); outline-offset: 3px; }
+.mdr-doc .mdr-rl-flash { animation: mdr-rl-flash 1.2s ease-in-out 2; }
+@keyframes mdr-rl-flash { 50% { background: color-mix(in srgb, var(--accent) 16%, transparent); } }
+.mdr-rl-gone { position: relative; margin: 0.6em 0; padding: 4px 10px; border-left: 3px solid var(--rl-del); border-radius: 4px; background: var(--rl-del-bg); }
+.mdr-rl-gone.mdr-rl-moved { border-left-color: var(--rl-mod); background: transparent; outline: 1px dotted var(--rl-mod); opacity: 0.8; }
+.mdr-rl-old { display: block; color: color-mix(in srgb, var(--rl-del) 60%, var(--doc-fg)); text-decoration: line-through; }
+.mdr-rl-moved .mdr-rl-old { color: var(--doc-muted, var(--muted)); text-decoration: none; }
+.mdr-doc .mdr-rl-old > * { margin: 0.3em 0; }
+.mdr-rl-before { margin: 0.6em 0 0.2em; padding: 4px 10px; border-left: 3px solid var(--rl-del); border-radius: 4px; background: var(--rl-del-bg); opacity: 0.9; }
+.mdr-rl-cap { font: 600 11px var(--vscode-font-family, system-ui); text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.mdr-rl-acts { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; vertical-align: middle; font: 12px var(--vscode-font-family, system-ui); text-indent: 0; opacity: 0; transition: opacity 0.12s; }
+/* Over the corner of a table, code block or deleted block, so they take no space. */
+.mdr-rl-acts.mdr-rl-after { display: flex; height: 0; margin: 0; align-items: flex-end; justify-content: flex-end; transform: translateY(-4px); }
+.mdr-rl-gone .mdr-rl-acts { position: absolute; top: 4px; right: 6px; margin: 0; }
+.mdr-rl:hover > .mdr-rl-acts, .mdr-rl:hover + .mdr-rl-acts, .mdr-rl-gone:hover .mdr-rl-acts, .mdr-rl-acts:focus-within, .mdr-rl-current > .mdr-rl-acts, .mdr-rl-current + .mdr-rl-acts, .mdr-rl-gone.mdr-rl-current .mdr-rl-acts { opacity: 1; }
+.mdr-rl-what { color: var(--muted); font-size: 11px; margin-right: 2px; }
+.mdr-rl-acts button { padding: 0 7px; font-size: 11.5px; line-height: 18px; }
+@media (hover: none) { .mdr-rl-acts { opacity: 1; } }
+@media (forced-colors: active) {
+  #mdr-changes-btn::before, .mdr-rl-close::before { forced-color-adjust: none; background: ButtonText; }
+  .mdr-doc ins.mdr-rl-ins { forced-color-adjust: none; color: CanvasText; background: Canvas; text-decoration: underline 2px; text-decoration-color: Highlight; }
+  .mdr-doc del.mdr-rl-del, .mdr-rl-old { forced-color-adjust: none; color: GrayText; background: Canvas; text-decoration: line-through; }
+  .mdr-doc .mdr-rl::after { forced-color-adjust: none; background: Highlight; }
+  .mdr-doc .mdr-rl-block, .mdr-rl-gone, .mdr-rl-before { outline: 2px dashed Highlight; }
+  .mdr-doc .mdr-rl-current { outline: 2px solid Highlight; }
 }

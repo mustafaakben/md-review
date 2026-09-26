@@ -57,8 +57,12 @@ export interface Comment {
   /** Set by the CLI while an agent works on this thread; cleared when it replies or resolves. */
   workingAt?: string;
   workingBy?: string;
-  /** "agent": a draft an agent left as first reviewer, waiting for the reviewer to triage it. */
-  origin?: 'agent';
+  /**
+   * Where a thread written outside the view came from. "agent": a draft an agent
+   * left as first reviewer, waiting for the reviewer to triage it. "word": a
+   * comment or tracked change imported from a Word document.
+   */
+  origin?: 'agent' | 'word';
   /** The Review with Claude run that left this draft (the CLI's --run). */
   reviewRun?: string;
   /** Who first raised a thread the reviewer took over (kept from an agent's draft). */

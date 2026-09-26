@@ -10,6 +10,7 @@ import { createReviewMenu } from './review';
 import { Suggestion, suggestionBlock, suggestionEdit } from './suggest';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
 import { blockAtY, reveal, settle, viewTop } from './reveal';
+import { createRedlines, Changes } from './redlines';
 import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
@@ -24,7 +25,7 @@ interface Comment extends Meta {
   /** Set by the CLI while an agent is on this thread. */
   workingAt?: string; workingBy?: string;
   /** "agent": Claude's draft from Review with Claude, not yet triaged. */
-  origin?: 'agent'; suggestedBy?: string;
+  origin?: 'agent' | 'word'; suggestedBy?: string;
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
 }
 
@@ -56,6 +57,8 @@ let review: ReviewRun | null = null;
 /** After Keep, Do it or Discard on Claude's draft `from`: the card to focus next (null: none left). */
 let triageFocus: { from: string; to: string | null } | null = null;
 let targets: WordTargets | null = null;
+/** The Changes baseline, if any: when it was taken and which threads went out with it. */
+let baseInfo: { at: string; threads: string[]; changed: boolean; touched?: string[] } | null = null;
 let workingTimer: ReturnType<typeof setTimeout> | undefined;
 let lastBanner = '';
 const touched = new Set<Element>();
@@ -86,6 +89,7 @@ app.innerHTML = `
       <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
       <button id="mdr-health-btn" class="mdr-icon-btn" title="Document health" aria-label="Document health" aria-haspopup="dialog" aria-controls="mdr-health" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
+      <button id="mdr-changes-btn" class="mdr-icon-btn" title="${tip('Changes since you sent to Claude', ']')}" aria-label="Show changes" aria-pressed="false" aria-controls="mdr-changes"></button>
       <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button>
@@ -96,6 +100,7 @@ app.innerHTML = `
     </div>
   </header>
   <div id="mdr-find" class="mdr-find mdr-ui" hidden></div>
+  <div id="mdr-changes" class="mdr-changes mdr-ui" role="region" aria-label="Changes" hidden></div>
   <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
   <div id="mdr-review" class="mdr-review-panel mdr-ui" hidden></div>
   <div id="mdr-health" class="mdr-reading-panel mdr-health-panel mdr-ui" role="dialog" aria-label="Document health" hidden></div>
@@ -132,6 +137,12 @@ const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
 const keySheet = createShortcutSheet(document.getElementById('mdr-keys')!);
 const search = createSearch(doc, document.getElementById('mdr-find')!);
 const diagrams = createDiagrams(doc);
+const redlines = createRedlines(doc, document.getElementById('mdr-changes')!, document.getElementById('mdr-changes-btn')!, {
+  post: (m) => post(m),
+  canPaint: () => !editing && !inline,
+  painted: () => void diagrams.refresh(), // a before view can hold a diagram
+  toast: (msg) => toast(msg),
+});
 // VS Code's own theme switch changes the body class; diagrams follow it.
 new MutationObserver(() => void diagrams.refresh()).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 const reading = createReading(
@@ -201,6 +212,10 @@ function paint() {
   secBtn.hidden = true;
   hoverEl = null;
   const at = readingPosition();
+  // Bare blocks first (a no-op with the Changes view off): a patch compares the
+  // document with the blocks last painted, and the redlines' extra elements
+  // would stop it matching.
+  redlines.clear();
   if (!patchDoc()) {
     doc.innerHTML = blocks.join('') + END;
     // Patching needs every block to be its own element(s), with nothing left open.
@@ -219,6 +234,8 @@ function paint() {
     specs.push({ start: s, end: e, make: () => mark(c) });
   }
   wrapRanges(doc, specs, map);
+  // Over the patched blocks too: the marks were taken off before the patch, so every hunk is painted again.
+  redlines.apply();
   renderSidebar();
   afterPaint();
   health.painted(targets); // word counts and checks, when idle
@@ -597,6 +614,14 @@ function openSuggestion(c: Comment): string | null {
   return c.suggestion && !c.suggestion.appliedAt && !c.suggestion.dismissedAt ? '' : null;
 }
 
+/** Sent with the current baseline, and the agent has resolved or replied since: its edit can be shown. */
+function answered(c: Comment): boolean {
+  if (!baseInfo?.changed || c.scope === 'document' || !baseInfo.threads.includes(c.id)) return false;
+  if (baseInfo.touched && !baseInfo.touched.includes(c.id)) return false; // compared, and nothing changed in its text
+  const since = baseInfo.at;
+  return (c.status === 'resolved' && (c.resolvedAt || '') > since) || c.replies.some((r) => r.author !== author && r.createdAt > since);
+}
+
 function card(c: Comment, now = Date.now()): string {
   const open = orphans.has(c.id) ? null : openSuggestion(c); // no text to apply it to
   const replies = c.replies
@@ -615,6 +640,7 @@ function card(c: Comment, now = Date.now()): string {
     mine && c.status !== 'resolved' ? `<button data-act="edit-body">Edit</button>` : '',
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
     c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
+    answered(c) ? `<button data-act="show-change" title="Show what changed in this thread's text since you sent it">Show change</button>` : '',
     c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
   ].join('');
   const replyBox = openReplies.has(c.id)
@@ -875,6 +901,7 @@ roundEl.addEventListener('click', (e) => {
   if (act === 'questions' && round) setFilter({ status: 'all', author: '', severity: '', ids: round.questionIds });
   // This run's drafts only; it also replaces an earlier "Waiting on you".
   else if (act === 'from-claude') setFilter({ status: 'agent', author: '', severity: '', ids: review ? review.ids : undefined });
+  else if (act === 'changes') redlines.setOn(true);
   else if (act === 'dismiss-round' || act === 'dismiss-review') {
     post({ type: 'dismissRound', which: act === 'dismiss-round' ? 'round' : 'review' });
     // The row is about to go; keep focus somewhere useful.
@@ -938,6 +965,8 @@ sidebar.addEventListener('click', (e) => {
       const s = from ? c?.replies.find((r) => r.id === from)?.suggestion : c?.suggestion;
       if (!c || !s) return;
       if (editing || inline) return toast('Finish the edit you have open first.', true);
+      const blk = doc.querySelector(`mark.mdr-hl[data-cid="${CSS.escape(id)}"]`)?.closest<HTMLElement>('[data-ls]');
+      if (blk) redlines.clearIn(blk); // struck-out words aren't part of the text
       const edit = suggestionEdit(doc, id, s.text, (el) => (canInline(el) ? INLINE_KIND[el.tagName] : null));
       if (typeof edit === 'string') {
         // Can't map it in place: open the source so the reviewer can make it by hand.
@@ -962,6 +991,11 @@ sidebar.addEventListener('click', (e) => {
     case 'dismiss-agent':
       nextTriageFocus(cardEl);
       return post({ type: 'deleteComment', id });
+    case 'show-change': {
+      const c = comments.find((x) => x.id === id);
+      if (c) redlines.showThread(id, c.anchor.lineStart, c.anchor.lineEnd);
+      return;
+    }
     default:
       if (!t.closest('textarea')) activate(id, true, false);
   }
@@ -1191,7 +1225,9 @@ document.addEventListener('keydown', (e) => {
   }
   // Escape inside an editor or a comment box belongs to that box, not the find bar.
   if (e.key === 'Escape' && search.isOpen() && !editing && !inline && !isTyping(e.target)) return search.close();
-  if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || editing || inline) return;
+  // `]` and `[` are typed with AltGr (or Option on a Mac) on many layouts.
+  const composed = (e.key === ']' || e.key === '[') && (e.getModifierState('AltGraph') || (isMac && e.altKey && !e.ctrlKey && !e.metaKey));
+  if (((e.ctrlKey || e.metaKey || e.altKey) && !composed) || isTyping(e.target) || editing || inline) return;
   if (e.key === '?') {
     e.preventDefault();
     keySheet.toggle();
@@ -1206,7 +1242,8 @@ document.addEventListener('keydown', (e) => {
   } else if (k === 'e' && !e.shiftKey) {
     e.preventDefault();
     setEditMode(!editMode);
-  } else if (k === 'j' || k === 'n') navigate(1);
+  } else if (e.key === ']' || e.key === '[') redlines.step(e.key === ']' ? 1 : -1);
+  else if (k === 'j' || k === 'n') navigate(1);
   else if (k === 'k' || k === 'p') navigate(-1);
   else if (e.key === '/') {
     e.preventDefault();
@@ -1273,6 +1310,7 @@ function startEdit(el: HTMLElement, raw = false) {
   hidePop();
   editBtn.hidden = true;
   secBtn.hidden = true;
+  redlines.clearIn(el);
   if (!raw && canInline(el)) return startInline(el);
   window.getSelection()?.removeAllRanges();
   post({ type: 'getBlock', ls: Number(el.dataset.ls), le: Number(el.dataset.le) });
@@ -1289,6 +1327,7 @@ const sameBlocks = (a: string[], b: string[]) => a.length === b.length && a.ever
 
 function startInline(el: HTMLElement, caretAtEnd = false) {
   if (editing || inline) return;
+  redlines.clearIn(el);
   docStale = true;
   touched.add(topBlock(el));
   inline = { el, ls: Number(el.dataset.ls), le: Number(el.dataset.le), kind: INLINE_KIND[el.tagName], oldText: el.textContent || '', oldHtml: el.innerHTML, saving: false };
@@ -1314,6 +1353,7 @@ function endInline(restore: boolean) {
   if (restore) el.innerHTML = oldHtml;
   inline = null;
   if (deferredPaint) paint();
+  else if (restore) redlines.apply();
 }
 
 function commitInline() {
@@ -1354,7 +1394,7 @@ doc.addEventListener('focusout', (e) => {
 // Edit mode: clicking a block places the caret in it directly.
 doc.addEventListener('mousedown', (e) => {
   if (!editMode || editing || e.button !== 0) return;
-  if ((e.target as Element).closest('.mdr-task')) return;
+  if ((e.target as Element).closest('.mdr-task, .mdr-rl-ui')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || (inline && inline.el === el)) return;
   if ((e.target as Element).closest('a')) e.preventDefault();
@@ -1365,7 +1405,7 @@ doc.addEventListener('mousedown', (e) => {
 });
 
 doc.addEventListener('dblclick', (e) => {
-  if ((e.target as Element).closest('.mdr-task')) return;
+  if ((e.target as Element).closest('.mdr-task, .mdr-rl-ui')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || inline) return;
   startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
@@ -1500,6 +1540,7 @@ function closeEditor() {
   editing.el.style.display = '';
   editing = null;
   if (deferredPaint) paint();
+  else redlines.apply();
 }
 
 // ---------------------------------------------------------------- host messages
@@ -1508,9 +1549,11 @@ window.addEventListener('message', (ev) => {
   switch (m?.type) {
     case 'render':
       targets = m.targets || null;
+      if (m.changes !== undefined) redlines.set(m.changes as Changes | null, false, !!m.changesFailed);
       // The host re-sends identical HTML often (e.g. twice after a block save);
       // skip the re-render when the view already shows it.
       if (sameBlocks(m.blocks, blocks) && painted && !docStale && !deferredPaint) {
+        if (m.changes !== undefined) redlines.apply();
         if (m.fileName !== fileName) {
           fileName = m.fileName;
           renderSidebar();
@@ -1567,6 +1610,17 @@ window.addEventListener('message', (ev) => {
       review = m.review;
       showWorking();
       break;
+    case 'changes':
+      redlines.set(m.changes, true, !!m.failed);
+      break;
+    case 'baseline': {
+      const key = (b: typeof baseInfo) => (b?.changed ? b.at + b.threads.join() + '|' + (b.touched?.join() ?? '*') : '');
+      const had = key(baseInfo);
+      baseInfo = m.info;
+      // Cards only change when Show change can appear or go.
+      if (key(baseInfo) !== had) renderSidebar();
+      break;
+    }
     case 'agentPrompt':
       copyText(m.prompt).then((ok) =>
         toast(
