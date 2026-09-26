@@ -1,6 +1,7 @@
 import { buildTextMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
+import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
@@ -91,6 +92,7 @@ const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
 const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
 const keySheet = createShortcutSheet(document.getElementById('mdr-keys')!);
 const search = createSearch(doc, document.getElementById('mdr-find')!);
+const diagrams = createDiagrams(doc);
 const reading = createReading(
   doc,
   document.getElementById('mdr-reading-btn')!,
@@ -204,6 +206,7 @@ function paintComments() {
 function afterPaint() {
   outline.rebuild();
   search.refresh();
+  void diagrams.refresh();
 }
 
 /** Locate every comment in the painted text; returns the visible highlights in wrap order. */
@@ -491,6 +494,12 @@ function sendReply(id: string, cardEl: HTMLElement) {
 
 doc.addEventListener('click', (e) => {
   const t = e.target as Element;
+  // Task list checkbox: the host flips `[ ]`/`[x]` on that source line and re-renders.
+  if (t instanceof HTMLInputElement && t.classList.contains('mdr-task')) {
+    if (editing || inline) return e.preventDefault();
+    post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked });
+    return;
+  }
   const a = t.closest('a');
   if (a) {
     e.preventDefault();
@@ -783,6 +792,7 @@ doc.addEventListener('focusout', (e) => {
 // Edit mode: clicking a block places the caret in it directly.
 doc.addEventListener('mousedown', (e) => {
   if (!editMode || editing || e.button !== 0) return;
+  if ((e.target as Element).closest('.mdr-task')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || (inline && inline.el === el)) return;
   if ((e.target as Element).closest('a')) e.preventDefault();
@@ -793,6 +803,7 @@ doc.addEventListener('mousedown', (e) => {
 });
 
 doc.addEventListener('dblclick', (e) => {
+  if ((e.target as Element).closest('.mdr-task')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || inline) return;
   startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
@@ -936,6 +947,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'prefs':
       reading.apply(m.prefs || {});
+      void diagrams.refresh(); // a reading theme can switch light/dark
       break;
     case 'command':
       runCommand(m.command);

@@ -11,6 +11,7 @@ const texmath = require('markdown-it-texmath');
 const katex = require('katex');
 import { frontMatterPlugin } from './frontMatter';
 import { criticPlugin } from './critic';
+import { gfmPlugin } from './gfm';
 
 export type ResolveImage = (src: string) => string;
 
@@ -27,7 +28,7 @@ function cssLength(v: string): string {
 export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
   const md = new MarkdownIt({ html: true, linkify: true, typographer: false });
   md.use(frontMatterPlugin).use(criticPlugin);
-  md.use(footnote).use(sup).use(sub);
+  md.use(footnote).use(sup).use(sub).use(gfmPlugin);
   md.use(texmath, { engine: katex, delimiters: ['dollars', 'brackets'], katexOptions: { throwOnError: false } });
   md.use(attrs, { allowedAttributes: ['id', 'class', 'width', 'height', 'style'] });
 

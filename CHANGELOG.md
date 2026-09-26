@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- GitHub-flavored extras: task lists with checkboxes you can tick (the file changes by one character, and Undo reverts it), GitHub alerts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), `==highlight==`, and syntax colours for code in 19 common languages. Mermaid fences draw as diagrams; Mermaid loads only when a file has one.
 - YAML front matter (pandoc, Quarto, Jekyll, Hugo, Obsidian) shows as a title card with the title, subtitle, authors, date and keywords, instead of a horizontal rule and a heading full of YAML. The raw YAML is one click away, and Alt+double-click edits it.
 - CriticMarkup renders: {++added++}, {--deleted--}, {~~old~>new~~}, {==highlight==} and {>>note<<}. Deletions used to disappear.
 - The viewer no longer drops sidecar fields it doesn't know. Fields an agent, the CLI, or a newer version adds to the file, a comment, its anchor, or a reply now survive every write.

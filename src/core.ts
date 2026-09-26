@@ -3,7 +3,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
-import { applyBlockEdit, readBlock, BlockEditError } from './blockEdit';
+import { applyBlockEdit, readBlock, toggleTask, BlockEditError } from './blockEdit';
 import { renderMarkdown, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
@@ -33,6 +33,7 @@ export type FromWebview =
   | { type: 'saveBlock'; ls: number; le: number; original: string; newText: string }
   | { type: 'saveInline'; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
   | { type: 'openLink'; href: string }
+  | { type: 'toggleTask'; line: number; checked: boolean }
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'sendToAgent'; id?: string }
@@ -183,6 +184,14 @@ export class ReviewSession {
         return;
       case 'openLink':
         this.ctx.openLink(msg.href);
+        return;
+      case 'toggleTask':
+        try {
+          this.assertEditable();
+          this.recorded(() => toggleTask(this.ctx.mdPath, msg.line, msg.checked));
+        } finally {
+          this.render(); // also puts the checkbox back if the write was refused
+        }
         return;
       case 'undo':
       case 'redo':

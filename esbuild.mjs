@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync } from 'fs';
+import { cpSync, mkdirSync, rmSync } from 'fs';
 
 const watch = process.argv.includes('--watch');
 
@@ -9,6 +9,15 @@ cpSync('node_modules/katex/dist/katex.min.css', 'media/katex/katex.min.css');
 cpSync('node_modules/katex/dist/fonts', 'media/katex/fonts', { recursive: true });
 cpSync('webview/style.css', 'media/style.css');
 cpSync('webview/features.css', 'media/features.css');
+// Mermaid, loaded by the webview only for documents with a diagram. The ES
+// module build splits each diagram type into its own chunk, so a flowchart
+// loads a fraction of the library. Source maps are left out.
+rmSync('media/mermaid', { recursive: true, force: true });
+cpSync('node_modules/mermaid/dist/mermaid.esm.min.mjs', 'media/mermaid/mermaid.esm.min.mjs');
+cpSync('node_modules/mermaid/dist/chunks/mermaid.esm.min', 'media/mermaid/chunks/mermaid.esm.min', {
+  recursive: true,
+  filter: (src) => !src.endsWith('.map'),
+});
 
 const builds = [
   // Extension host.

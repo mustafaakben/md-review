@@ -76,3 +76,22 @@ export function applyBlockEdit(filePath: string, lineStart: number, lineEnd: num
   if (!out.equals(buf)) fs.writeFileSync(filePath, out);
   return out;
 }
+
+const TASK_LINE = /^([ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)( |x|X)\]/;
+
+/**
+ * Tick or untick the task list item that starts on `line` (0-based) by
+ * rewriting the single byte between its brackets. Nothing else changes.
+ */
+export function toggleTask(filePath: string, line: number, checked: boolean): void {
+  const buf = fs.readFileSync(filePath);
+  const idx = indexLines(buf);
+  if (!(line >= 0 && line < idx.starts.length)) throw new BlockEditError(`Line ${line + 1} is outside the file.`);
+  const start = idx.starts[line];
+  const end = line + 1 < idx.starts.length ? idx.starts[line + 1] : buf.length;
+  const m = TASK_LINE.exec(buf.subarray(start, end).toString('utf8'));
+  if (!m) throw new BlockEditError('That task changed on disk; the view was refreshed.');
+  if ((m[2] !== ' ') === checked) return;
+  buf[start + Buffer.byteLength(m[1])] = checked ? 0x78 /* x */ : 0x20;
+  fs.writeFileSync(filePath, buf);
+}
