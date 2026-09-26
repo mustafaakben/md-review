@@ -567,9 +567,8 @@ function saveComment() {
   const ta = pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null;
   if (!ta || !pendingAnchor) return;
   const { quote, prefix, suffix, lineStart, lineEnd, scope } = pendingAnchor;
-  const sugg = pop.querySelector('.mdr-sugg-edit:not([hidden]) textarea') as HTMLTextAreaElement | null;
   // A suggestion speaks for itself, so the comment text is optional with one.
-  const suggestion = sugg && sugg.value.replace(/\s+/g, ' ').trim() !== quote.replace(/\s+/g, ' ').trim() ? sugg.value.replace(/\s*\n\s*/g, ' ') : undefined;
+  const suggestion = typedSuggestion();
   const body = ta.value.trim() || (suggestion !== undefined ? (suggestion ? 'Suggested edit.' : 'Suggest deleting this.') : '');
   if (!body) return ta.focus();
   const { kind, severity } = readPicker(pop);
@@ -763,8 +762,16 @@ function undoRedo(which: 'undo' | 'redo') {
   else post({ type: which });
 }
 
-/** The new-comment box has something to save: text, or an open suggestion. */
-const composing = () => !!(pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null)?.value.trim() || !!pop.querySelector('.mdr-sugg-edit:not([hidden])');
+/** The replacement in the new-comment box's Suggest edit field, unless it's unchanged from the quote. */
+function typedSuggestion(): string | undefined {
+  const sugg = pop.querySelector('.mdr-sugg-edit:not([hidden]) textarea') as HTMLTextAreaElement | null;
+  const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+  if (!sugg || !pendingAnchor || flat(sugg.value) === flat(pendingAnchor.quote)) return undefined;
+  return sugg.value.replace(/\s*\n\s*/g, ' ');
+}
+
+/** The new-comment box has something to save: text, or a changed suggestion. */
+const composing = () => !!(pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null)?.value.trim() || typedSuggestion() !== undefined;
 
 /** Save a half-typed new comment or reply, so Submit and Send don't leave it behind. */
 function flushTyping() {
