@@ -16,10 +16,10 @@ test('task list items get a checkbox carrying their source line', () => {
   const html = render('Intro\n\n- [ ] todo\n- [x] done\n- plain\n  1. [X] nested\n');
   assert.match(html, /<ul class="mdr-task-list"/);
   // The box is named by its task, so a screen reader says what it ticks.
-  assert.match(html, /<input type="checkbox" class="mdr-task" data-task-line="2" aria-label="todo">todo/);
-  assert.match(html, /data-task-line="3" checked aria-label="done">done/);
+  assert.match(html, /<input type="checkbox" class="mdr-task" data-task-line="2" data-task-key="\w+" aria-label="todo">todo/);
+  assert.match(html, /data-task-line="3" data-task-key="\w+" checked aria-label="done">done/);
   assert.match(html, /<li data-ls="4"[^>]*>plain/); // not a task
-  assert.match(html, /data-task-line="5" checked/);
+  assert.match(html, /data-task-line="5" data-task-key="\w+" checked/);
   assert.doesNotMatch(render('- [ ]no space\n'), /mdr-task/);
   assert.doesNotMatch(render('- `[ ] code`\n'), /mdr-task/);
   // A reference definition doesn't turn the marker into a link.
@@ -30,6 +30,28 @@ test('a checkbox whose line toggleTask cannot rewrite is disabled', () => {
   assert.match(render('- - [ ] double\n'), /data-task-line="0" disabled/);
   assert.match(render('x[^1]\n\n[^1]: - [ ] in a footnote\n'), /class="mdr-task"[^>]* disabled/);
   assert.doesNotMatch(render('> - [ ] quoted\n'), /disabled/);
+  // A BOM before a first-line task doesn't hide it from toggleTask.
+  assert.doesNotMatch(render('\uFEFF- [ ] first\n'), /disabled/);
+});
+
+test('a click on a line that now holds a different task is refused', () => {
+  fs.mkdirSync(tmp, { recursive: true });
+  const md = path.join(tmp, 'stale.md');
+  fs.writeFileSync(md, '- [ ] a\n- [ ] b\n');
+  const key = (html, line) => new RegExp(`data-task-line="${line}" data-task-key="(\\w+)"`).exec(html)[1];
+  const seen = render(fs.readFileSync(md, 'utf8'));
+  // Someone ticks b elsewhere: the key ignores the tick, so a is still a.
+  fs.writeFileSync(md, '- [ ] a\n- [x] b\n');
+  lib.toggleTask(md, 0, true, key(seen, 0));
+  assert.equal(fs.readFileSync(md, 'utf8'), '- [x] a\n- [x] b\n');
+  // A line is inserted above: line 1 is now a, not b.
+  fs.writeFileSync(md, '- [ ] new\n- [x] a\n- [ ] b\n');
+  assert.throws(() => lib.toggleTask(md, 1, false, key(seen, 1)), /changed on disk/);
+  assert.equal(fs.readFileSync(md, 'utf8'), '- [ ] new\n- [x] a\n- [ ] b\n');
+  // CRLF and BOM don't change the key.
+  fs.writeFileSync(md, '\uFEFF- [ ] a\r\n');
+  lib.toggleTask(md, 0, true, key(render('- [ ] a\n'), 0));
+  assert.equal(fs.readFileSync(md, 'utf8'), '\uFEFF- [x] a\r\n');
 });
 
 test('toggling a task rewrites one byte and keeps CRLF and BOM', () => {

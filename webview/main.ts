@@ -511,7 +511,7 @@ doc.addEventListener('click', (e) => {
     // Repaint whatever comes back, so a refused write unticks the box again.
     docStale = true;
     focusTask = t.dataset.taskLine ?? null;
-    post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked });
+    post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked, key: t.dataset.taskKey });
     return;
   }
   const a = t.closest('a');

@@ -33,7 +33,7 @@ export type FromWebview =
   | { type: 'saveBlock'; ls: number; le: number; original: string; newText: string }
   | { type: 'saveInline'; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
   | { type: 'openLink'; href: string }
-  | { type: 'toggleTask'; line: number; checked: boolean }
+  | { type: 'toggleTask'; line: number; checked: boolean; key?: string }
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'sendToAgent'; id?: string }
@@ -188,7 +188,7 @@ export class ReviewSession {
       case 'toggleTask':
         try {
           this.assertEditable();
-          this.recorded(() => toggleTask(this.ctx.mdPath, msg.line, msg.checked));
+          this.recorded(() => toggleTask(this.ctx.mdPath, msg.line, msg.checked, msg.key));
         } finally {
           this.render(); // the webview repaints even if the HTML is unchanged, so a refused click is undone
         }

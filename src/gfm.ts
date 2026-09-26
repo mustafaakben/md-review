@@ -5,7 +5,7 @@ import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mark = require('markdown-it-mark');
-import { TASK_LINE } from './blockEdit';
+import { TASK_LINE, taskKey } from './blockEdit';
 
 // A small, common set keeps the host bundle and render time low. Unknown
 // languages render as plain code, as before.
@@ -127,14 +127,15 @@ export function gfmPlugin(md: MarkdownIt): void {
           const checked = m[1] !== ' ';
           // Only a box whose line toggleTask can rewrite is clickable (not one
           // in a footnote or behind a second list marker).
-          lines ||= state.src.split('\n');
-          const live = TASK_LINE.test(lines[t.map[0]] || '');
+          lines ||= state.src.replace(/^\uFEFF/, '').split('\n');
+          const src = lines[t.map[0]] || '';
+          const live = TASK_LINE.test(src);
           const label = (inline.children || [])
             .map((c) => (c.type === 'text' || c.type === 'text_special' || c.type === 'code_inline' ? c.content : c.type === 'softbreak' ? ' ' : ''))
             .join('')
             .trim()
             .slice(0, 80);
-          box.content = `<input type="checkbox" class="mdr-task" data-task-line="${t.map[0]}"${checked ? ' checked' : ''}${live ? '' : ' disabled'} aria-label="${esc(label || (checked ? 'Done' : 'To do'))}">`;
+          box.content = `<input type="checkbox" class="mdr-task" data-task-line="${t.map[0]}"${live ? ` data-task-key="${taskKey(src)}"` : ''}${checked ? ' checked' : ''}${live ? '' : ' disabled'} aria-label="${esc(label || (checked ? 'Done' : 'To do'))}">`;
           (inline.children ||= []).unshift(box);
           addClass(t, 'mdr-task-item');
           for (let j = i - 1; j >= 0; j--) {
