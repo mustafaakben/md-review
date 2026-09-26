@@ -212,6 +212,7 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - relative images resolved from the file's folder
 - YAML front matter at the top of the file, shown as a title card (title, subtitle, authors, date, keywords; the raw YAML is under a disclosure)
 - CriticMarkup: `{++added++}`, `{--deleted--}`, `{~~old~>new~~}`, `{==highlight==}`, `{>>note<<}`
+- pandoc citations (`[@key, p. 4]`, `@key`) resolved against the front matter's `bibliography:` (.bib or CSL-JSON), author-date, with a generated References list; pandoc-crossref labels `{#fig:…}`, `{#tbl:…}`, `{#eq:…}`, `{#sec:…}` and `@fig:…` references. Citation text is generated, so comment quotes skip it and paragraphs with citations edit as source.
 - task lists (`- [ ]` / `- [x]`; clicking a box writes that one character), GitHub alerts (`> [!NOTE]` and friends), `==highlight==`
 - syntax highlighting for fenced code with a common language tag (bash, C/C++, CSS, diff, Go, Java, JS/TS, JSON, Julia, LaTeX, Markdown, Python, R, Rust, SQL, XML/HTML, YAML)
 - ```` ```mermaid ```` diagrams, drawn in the view; the Mermaid library loads on first use

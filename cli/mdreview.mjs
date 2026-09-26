@@ -181,7 +181,8 @@ function lineIndex(src) {
 let prepared = null;
 function prepare(src) {
   if (prepared?.src === src) return prepared;
-  const masked = src
+  // Citations first, while `[x](url)` still shows it's a link, not a citation.
+  const masked = maskCitations(src)
     .replace(/\]\([^)\n]*\)/g, (m) => ']' + blank(m.slice(1)))
     .replace(/\[\^[^\]\n]*\]/g, blank)
     // Never across $…$ math, where `<`, `>`, and `{k=v}` are LaTeX, not markup.
@@ -189,6 +190,33 @@ function prepare(src) {
     .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m) => (m.includes('$') ? m : blank(m)));
   prepared = { src, ...keyed(masked), lineAt: lineIndex(src) };
   return prepared;
+}
+
+// Citations and cross-refs render as generated text the viewer leaves out of
+// quotes, so blank them too: `[see @a, p. 4]`, `@a [p. 4]`, `@fig:x`. Bare
+// `@key` is only a citation when the front matter names a bibliography.
+const CITE_KEY = String.raw`[\p{L}\p{N}_]+(?:[:.#$%&\-+?~/]+[\p{L}\p{N}_]+)*`;
+// One line, bounded, so a stray `[` can't reach across paragraphs or go quadratic.
+const BRACKET_CITE = new RegExp(String.raw`\[(?:[^\[\]\n\x60]{0,200}?[^\p{L}\p{N}_@\[\]\n\\\x60])?-?@${CITE_KEY}[^\[\]\n\x60]{0,200}\](?![(\[])`, 'gu');
+const BARE_CITE = new RegExp(String.raw`(?<![\p{L}\p{N}_@.\\/:-])@${CITE_KEY}(?: \[[^\]@\n]*\](?!\())?`, 'gu');
+const XREF_CITE = new RegExp(String.raw`(?<![\p{L}\p{N}_@.\\/:-])@(?:fig|tbl|eq|sec):${CITE_KEY}`, 'giu');
+const XREF_BRACKET = /\[[^\[\]\n`]{0,200}@(?:fig|tbl|eq|sec):[^\[\]\n`]{0,200}\](?![(\[])/gi;
+const CODE = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[ \t]*$|(?![\s\S]))|`[^`\n]+`/gm;
+function maskCitations(src) {
+  if (!src.includes('@')) return src;
+  const fm = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(src);
+  // Same rule as the viewer: a bibliography that names at least one file.
+  const bib = fm && /^bibliography:[ \t]*(?!(?:\[\s*\]|""|''|~|null)[ \t]*(?:#.*)?$)(?:[^\s#]|\r?\n[ \t]+-[ \t]*\S)/m.test(fm[1]);
+  const head = fm ? fm[0].length : 0;
+  const body = src.slice(head);
+  // Code shows as written, so leave `@x` in fences and backticks alone.
+  const code = [...body.matchAll(CODE)].map((m) => [m.index, m.index + m[0].length]);
+  const mask = (m, ...a) => {
+    const at = a[a.length - 2];
+    return code.some(([s, e]) => at < e && at + m.length > s) ? m : blank(m);
+  };
+  const out = bib ? body.replace(BRACKET_CITE, mask).replace(BARE_CITE, mask) : body.replace(XREF_BRACKET, mask).replace(XREF_CITE, mask);
+  return src.slice(0, head) + out;
 }
 
 function locate(src, anchor) {

@@ -520,7 +520,11 @@ doc.addEventListener('click', (e) => {
     if (editMode || inline) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#')) {
-      document.getElementById(decodeURIComponent(href.slice(1)))?.scrollIntoView({ block: 'center' });
+      let id = href.slice(1);
+      try {
+        id = decodeURIComponent(id);
+      } catch {} // a citation key may hold a bare %
+      document.getElementById(id)?.scrollIntoView({ block: 'center' });
     } else if (href) post({ type: 'openLink', href });
     return;
   }
@@ -727,7 +731,8 @@ editModeBtn.addEventListener('click', () => setEditMode(!editMode));
 
 function canInline(el: HTMLElement): boolean {
   if (!INLINE_KIND[el.tagName]) return false;
-  return !el.querySelector('img, .katex, pre, .mdr-wrap, ul, ol, table, input');
+  // Citations and cross-refs show generated text, so those blocks edit as source.
+  return !el.querySelector('img, .katex, pre, .mdr-wrap, ul, ol, table, input, .mdr-ui');
 }
 
 function startEdit(el: HTMLElement, raw = false) {
