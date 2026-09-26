@@ -9,10 +9,15 @@
 // Only that verified candidate is written, via the byte-exact spliceBlock().
 // If no candidate verifies, nothing is written and the caller falls back to
 // raw-source editing.
+//
+// Verifying a paragraph or heading doesn't need the whole file: see
+// localPlain(). Anything else is checked by re-parsing the whole file.
 import * as fs from 'fs';
 import type MarkdownIt from 'markdown-it';
 import { readBlock, spliceBlock, BlockEditError } from './blockEdit';
-import { rendererFor } from './render';
+import { rendererFor, renderedParse, Parse } from './render';
+
+type Token = Parse['tokens'][number];
 
 const plain = (src: string) => src;
 
@@ -36,11 +41,10 @@ function inlineText(children: any[] | null): string {
   return s;
 }
 
-/** Plain text of the block of `kind` that starts at source line `ls`. */
-export function plainAt(md: MarkdownIt, text: string, ls: number, kind: BlockKind): string | null {
-  const toks = md.parse(text, {});
-  const i = toks.findIndex((t) => t.type === `${kind}_open` && t.map && t.map[0] === ls);
-  if (i < 0) return null;
+const blockAt = (toks: Token[], ls: number, kind: BlockKind) =>
+  toks.findIndex((t) => t.type === `${kind}_open` && t.map && t.map[0] === ls);
+
+function plainOf(toks: Token[], i: number, kind: BlockKind): string {
   const level = toks[i].level;
   let out = '';
   for (let k = i + 1; k < toks.length; k++) {
@@ -49,6 +53,86 @@ export function plainAt(md: MarkdownIt, text: string, ls: number, kind: BlockKin
     if (t.type === 'inline') out += inlineText(t.children) + ' ';
   }
   return out;
+}
+
+/** Plain text of the block of `kind` that starts at source line `ls`. */
+export function plainAt(md: MarkdownIt, text: string, ls: number, kind: BlockKind): string | null {
+  const toks = md.parse(text, {});
+  const i = blockAt(toks, ls, kind);
+  return i < 0 ? null : plainOf(toks, i, kind);
+}
+
+/**
+ * Where a top-level paragraph or heading can be re-checked on its own: its
+ * lines, what follows them, and the file's link reference definitions.
+ */
+interface Local {
+  indent: string;
+  tail: string;
+  env: Parse['env'];
+  notes: string;
+}
+
+const indentOf = (s: string) => /^[ \t]*/.exec(s)![0];
+// An inline footnote renumbers every note after it, and a block-math opener
+// can match a closing delimiter far below: neither shows in the block alone.
+const needsWholeFile = (s: string) => /\^\[|\$\$|\\\[/.test(s);
+
+/** Labels of the footnote references in the block at toks[i], in order. */
+function noteLabels(toks: Token[], i: number): string {
+  const labels: string[] = [];
+  for (let k = i + 1; k < toks.length && toks[k].level > toks[i].level; k++) {
+    for (const c of toks[k].children || []) if (c.type === 'footnote_ref') labels.push(c.meta.label);
+  }
+  return JSON.stringify(labels);
+}
+
+/** The whole file's link and footnote definitions, as inline parsing leaves them. */
+function definitions(env: Parse['env']): Parse['env'] {
+  const out: Parse['env'] = { references: { ...env.references } };
+  const notes = env.footnotes;
+  if (notes) out.footnotes = { refs: { ...notes.refs }, list: notes.list?.map((n: object) => ({ ...n })) };
+  return out;
+}
+
+/**
+ * Whether the block at toks[i] (lines [ls, le) of `lines`) can be checked
+ * locally. Parsing is line by line from the top, so a block that starts at the
+ * top level, after a blank line or a block that ends on its own line, is
+ * parsed from a fresh state: the same lines give the same tokens wherever they
+ * are. Its end depends only on the lines after it (a blank line, a heading, a
+ * setext underline, a table's delimiter row), so two of those come along.
+ * Inline parsing also needs the link and footnote definitions, from anywhere
+ * in the file. Footnote numbers follow the order of first references, so they
+ * stay put while the block refers to the same notes in the same order.
+ */
+function localContext(toks: Token[], i: number, env: Parse['env'], lines: string[], ls: number, le: number, kind: BlockKind, src: string): Local | undefined {
+  if (kind !== 'paragraph' && kind !== 'heading') return undefined;
+  const open = toks[i];
+  if (open.level !== 0 || !open.map || open.map[1] !== le || needsWholeFile(src)) return undefined;
+  const prev = toks[i - 1];
+  const freshStart =
+    ls === 0 ||
+    !lines[ls - 1].trim() ||
+    (prev && prev.level === 0 && ['heading_close', 'hr', 'fence'].includes(prev.type));
+  if (!freshStart) return undefined;
+  return { indent: indentOf(src), tail: lines.slice(le, le + 2).join('\n'), env, notes: noteLabels(toks, i) };
+}
+
+/**
+ * Plain text of `block` standing in for the original lines, parsed locally, or
+ * undefined when only a whole-file parse can tell.
+ */
+function localPlain(md: MarkdownIt, local: Local, block: string, kind: BlockKind): string | undefined {
+  if (indentOf(block) !== local.indent || needsWholeFile(block)) return undefined;
+  const body = block.replace(/\r\n/g, '\n').replace(/\n$/, '');
+  const n = body.split('\n').length;
+  const toks = md.parse(local.tail ? `${body}\n${local.tail}` : body, definitions(local.env));
+  const open = toks[0];
+  // It must still be one block of the same kind spanning exactly these lines.
+  if (!open || open.type !== `${kind}_open` || open.level !== 0 || !open.map || open.map[0] !== 0 || open.map[1] !== n) return undefined;
+  if (noteLabels(toks, 0) !== local.notes) return undefined;
+  return plainOf(toks, 0, kind);
 }
 
 /** For each rendered character, the index of the source character it came from. */
@@ -122,16 +206,23 @@ export function applyInlineEdit(filePath: string, ls: number, le: number, kind: 
   const src = readBlock(buf, ls, le);
   const bom = buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf ? 3 : 0;
   const docText = buf.subarray(bom).toString('utf8');
-  const current = plainAt(md, docText, ls, kind);
-  if (current === null || collapse(current) !== collapse(oldText)) {
+  // The file matches the render on screen (the session checks), so its tokens
+  // are usually still at hand.
+  const { tokens, env } = renderedParse(docText) ?? (() => {
+    const env = {};
+    return { tokens: md.parse(docText, env), env };
+  })();
+  const i = blockAt(tokens, ls, kind);
+  if (i < 0 || collapse(plainOf(tokens, i, kind)) !== collapse(oldText)) {
     throw new BlockEditError('The file changed on disk since this block was rendered. The view has been refreshed — please try again.');
   }
   if (!collapse(newText)) throw new InlineMapError('To delete a whole block, use the source editor.', src);
   if (collapse(newText) === collapse(oldText)) return src;
 
+  const local = localContext(tokens, i, env, docText.split(/\r\n?|\n/), ls, le, kind, src);
   for (const cand of candidates(src, oldText, newText)) {
     const out = spliceBlock(buf, ls, le, src, cand);
-    const got = plainAt(md, out.subarray(bom).toString('utf8'), ls, kind);
+    const got = (local && localPlain(md, local, cand, kind)) ?? plainAt(md, out.subarray(bom).toString('utf8'), ls, kind);
     if (got !== null && collapse(got) === collapse(newText)) {
       fs.writeFileSync(filePath, out);
       return cand;

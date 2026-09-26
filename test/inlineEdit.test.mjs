@@ -103,3 +103,74 @@ onFixture('bold table header cell', 30, 31, 'tr', (t) => t.replace('Station func
 onFixture('table body cell', 32, 33, 'tr', (t) => t.replace('variable demand', 'fluctuating demand'), lines[32].replace('variable demand', 'fluctuating demand'));
 onFixture('paragraph with citations', 10, 11, 'paragraph', (t) => t.replace('(Rivera & Chen, 2021)', '(Rivera & Chen, 2021, p. 52)'), lines[10].replace('(Rivera & Chen, 2021)', '(Rivera & Chen, 2021, p. 52)'));
 onFixture('italic *Note.* paragraph', 82, 83, 'paragraph', (t) => t.replace('Note.', 'Notes.'), lines[82].replace('*Note.*', '*Notes.*'));
+
+// ---- checking only the edited block must agree with checking the whole file ----
+// The old way re-parsed the whole file for every candidate. For many edits in
+// many surroundings (including ones that try to change the block's structure),
+// the file written, or the refusal, must be exactly what the old way gives.
+test('block-only verification writes exactly what whole-file verification would', () => {
+  let seed = 12345;
+  const rand = (n) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % n);
+  const collapse = (s) => s.replace(/\s+/g, ' ').trim();
+  const P = 'The quick **brown** fox [jumps](https://x.y) over `the` lazy dog.\nA second line with $x^2$ and [a ref][r] and a note[^1] here.';
+  const H = '## A heading with *style* here';
+  const before = [
+    '', 'Intro para.\n\n', '- item one\n- item two\n\n', '> quoted text\n\n', '| a | b |\n|---|---|\n| 1 | 2 |\n\n',
+    '```\ncode\n```\n', '# Title\n', '[^1]: The note.\n\n', '    indented code\n\n', '<div>\nhtml\n</div>\n\n', '---\n\n', '1. first\n\n   more\n\n',
+    '| a | b |\n|---|---|\n| 1 | 2 |\n', '<!-- c -->\n', '$$\nx\n$$\n', '***\n', 'Setext\n===\n', '- a\n\n  b\n\n',
+  ];
+  const after = [
+    '', '\n', '\nNext para.\n', '\n---\n', '\n===\n', '\n|---|---|\n', '\n- list\n', '\n> quote\n', '\n    code\n',
+    '\n[r]: https://ref.example\n', '\n[^1]: A note.\n', '\n$$\nx\n$$\n',
+  ];
+  const inserts = ['|', ' | ', '- ', '\n', '    ', '# ', '> ', '1. ', '===', '---', '```', '$$', '[^1]', '^[n]', '[r]', '*', '**', '_', '`', '{.c}', '<div>', ' ', 'word', '\\[', ']', '[', '~~', '{++', '++}', '\n\n'];
+  let checked = 0;
+  for (let n = 0; n < 1500; n++) {
+    const block = rand(4) === 0 ? H : P;
+    const kind = block === H ? 'heading' : 'paragraph';
+    const pre = before[rand(before.length)];
+    const text0 = pre + block + after[rand(after.length)] + (rand(3) === 0 ? '\n[r]: https://r.example\n\n[^1]: Note.\n' : '');
+    const text = rand(5) === 0 ? text0.replace(/\n/g, '\r\n') : text0;
+    const buf = Buffer.from(text);
+    const toks = md.parse(text, {});
+    const ls = pre.split('\n').length - 1;
+    const open = toks.find((t) => t.type === `${kind}_open` && t.map && t.map[0] === ls && t.level === 0);
+    if (!open) continue;
+    const le = open.map[1];
+    const oldText = lib.plainAt(md, text, ls, kind);
+    let newText = oldText;
+    for (let e = 1 + rand(2); e > 0; e--) {
+      const at = rand(newText.length + 1);
+      if (rand(3) === 0) newText = newText.slice(0, at) + newText.slice(at + 1 + rand(4));
+      else newText = newText.slice(0, at) + inserts[rand(inserts.length)] + newText.slice(at);
+    }
+    if (!collapse(newText) || collapse(newText) === collapse(oldText)) continue;
+
+    // The old way.
+    const src = lib.readBlock(buf, ls, le);
+    let want = null;
+    for (const cand of lib.candidates(src, oldText, newText)) {
+      const out = lib.spliceBlock(buf, ls, le, src, cand);
+      const got = lib.plainAt(md, out.toString('utf8'), ls, kind);
+      if (got !== null && collapse(got) === collapse(newText)) {
+        want = out;
+        break;
+      }
+    }
+
+    const f = setup('fuzz.md', buf);
+    if (rand(2)) lib.renderMarkdown(text, (x) => x); // tokens of the render on screen
+    let got = null;
+    try {
+      lib.applyInlineEdit(f, ls, le, kind, oldText, newText);
+      got = fs.readFileSync(f);
+    } catch (err) {
+      if (!(err instanceof lib.InlineMapError)) throw err;
+    }
+    const where = `case ${n}: ${JSON.stringify(text)} edited to ${JSON.stringify(newText)}`;
+    if (want === null) assert.equal(got, null, where);
+    else assert.equal(got?.toString(), want.toString(), where);
+    checked++;
+  }
+  assert.ok(checked > 800, `only ${checked} cases ran`);
+});

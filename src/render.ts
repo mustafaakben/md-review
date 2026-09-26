@@ -126,6 +126,19 @@ export function rendererFor(resolveImage: ResolveImage): MarkdownIt {
   return md;
 }
 
+type Token = ReturnType<MarkdownIt['parse']>[number];
+export interface Parse {
+  tokens: Token[];
+  env: Record<string, any>;
+}
+
+/** Render, keeping the parse so an in-view edit can find its block in it. */
+export function renderParsed(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): { html: string; parse: Parse } {
+  const md = rendererFor(resolveImage);
+  const tokens = md.parse(text, env);
+  return { html: md.renderer.render(tokens, md.options, env), parse: { tokens, env } };
+}
+
 export function renderMarkdown(text: string, resolveImage: ResolveImage, env: RenderEnv = {}): string {
-  return rendererFor(resolveImage).render(text, env);
+  return renderParsed(text, resolveImage, env).html;
 }

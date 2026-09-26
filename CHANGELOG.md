@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Saving an edit made in the view takes a few milliseconds instead of up to two seconds on long documents: a changed paragraph or heading is checked on its own rather than by re-reading the whole file (list items, table cells and quotes still check the whole file, once instead of twice).
 - Rendering is about 2–4× faster on long documents: formulas are rendered once and reused while you edit, and documents with many footnotes no longer slow down quadratically (a workaround for a markdown-it-footnote bug).
 - An edit in the view renders the document once instead of up to four times (the edit, a timer, the file watcher, and VS Code reloading the file each triggered a full render), cutting the extension's work per edit by about 70%.
 - Live agent status: after **Send to Claude**, the comments pane shows "Claude is working · 2 of 5" with a progress bar, and the thread Claude is on pulses. When it's done you get one summary (resolved, and questions for you) with **Show questions**; a background panel shows it as a notification. The CLI's `next` and `context` mark the thread they hand out, and `reply` and `resolve` clear the mark.
