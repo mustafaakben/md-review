@@ -279,24 +279,69 @@ export function loadBibliography(file: string, platform: NodeJS.Platform = proce
   return bib;
 }
 
+/**
+ * `p` with links followed. When it doesn't exist, its deepest existing folder
+ * is resolved and the rest appended, so a missing file under a linked folder
+ * is judged by where the link leads.
+ */
+function realOr(file: string, p: typeof path = path): string {
+  const abs = p.resolve(file);
+  let dir = abs;
+  const rest: string[] = [];
+  for (;;) {
+    try {
+      return p.join(fs.realpathSync(dir), ...rest);
+    } catch {
+      const up = p.dirname(dir);
+      if (up === dir) return abs;
+      rest.unshift(p.basename(dir));
+      dir = up;
+    }
+  }
+}
+
+/** Whether `abs` or any folder above it is a link to a network path (read without following it). */
+function linksToNetwork(abs: string, p: typeof path, platform: NodeJS.Platform): boolean {
+  for (let dir = abs; ; ) {
+    try {
+      if (fs.lstatSync(dir).isSymbolicLink() && isNetworkPath(p.resolve(p.dirname(dir), fs.readlinkSync(dir)), platform)) return true;
+    } catch {
+      // missing: nothing to follow here
+    }
+    const up = p.dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+}
+
+/** Folders for insideRoots, with links followed. Resolve them once when checking many files. */
+export function realRoots(roots: string[], platform: NodeJS.Platform = process.platform): string[] {
+  // A network root is never resolved (that would touch the share); files under it are refused anyway.
+  return roots.map((r) => (isNetworkPath(r, platform) ? r : realOr(r)));
+}
+
+/**
+ * True if `file` (after following links) is inside one of `roots`, which
+ * realRoots has resolved. Following a link can reach out to a network share
+ * (slow, and on Windows it sends credentials), so a network path, or a link
+ * to one, is never looked at and counts as outside.
+ */
+export function insideRealRoots(file: string, real: string[], platform: NodeJS.Platform = process.platform): boolean {
+  const p = platform === 'win32' ? path.win32 : path;
+  const abs = p.resolve(file);
+  if (isNetworkPath(abs, platform)) return false;
+  if (linksToNetwork(abs, p, platform)) return false;
+  const target = realOr(abs, p);
+  if (isNetworkPath(target, platform)) return false;
+  return real.some((r) => {
+    const rel = p.relative(r, target);
+    return rel === '' || (!!rel && !rel.startsWith('..') && !p.isAbsolute(rel));
+  });
+}
+
 /** True if `file` (after following links) is inside one of `roots`. */
 export function insideRoots(file: string, roots: string[]): boolean {
-  let real: string;
-  try {
-    real = fs.realpathSync(file);
-  } catch {
-    real = path.resolve(file);
-  }
-  return roots.some((root) => {
-    let r: string;
-    try {
-      r = fs.realpathSync(root);
-    } catch {
-      r = path.resolve(root);
-    }
-    const rel = path.relative(r, real);
-    return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
-  });
+  return insideRealRoots(file, realRoots(roots));
 }
 
 // ---- formatting ----

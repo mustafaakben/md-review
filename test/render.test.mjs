@@ -135,7 +135,8 @@ test('images on a Windows drive are local paths, not URLs with a one-letter sche
     return `vscode-resource:${seen.length}`;
   });
   assert.deepEqual(seen, ['C:\\figs\\a.png', 'C:/figs/b.png', 'D:\\my figs\\c.png']);
-  assert.match(html, /<img src="vscode-resource:1" alt="a"> <img src="vscode-resource:2" alt="b"> <img src="vscode-resource:3" alt="c">/);
+  // data-mdr-src keeps the source as written, for the health panel's file check.
+  assert.match(html, /<img src="vscode-resource:1" alt="a" data-mdr-src="C:%5Cfigs%5Ca.png"> <img src="vscode-resource:2" alt="b" data-mdr-src="C:\/figs\/b.png"> <img src="vscode-resource:3" alt="c" data-mdr-src="D:%5Cmy%20figs%5Cc.png">/);
   // Real schemes, protocol-relative URLs and anchors are left alone.
   const other = renderMarkdown('![x](https://e.org/x.png) ![y](data:image/png;base64,AA) ![z](//e.org/z.png) ![w](file:///tmp/w.png)\n', () => 'RESOLVED');
   assert.doesNotMatch(other, /RESOLVED/);
