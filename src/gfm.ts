@@ -130,7 +130,7 @@ export function gfmPlugin(md: MarkdownIt): void {
           lines ||= state.src.split('\n');
           const live = TASK_LINE.test(lines[t.map[0]] || '');
           const label = (inline.children || [])
-            .map((c) => (c.type === 'text' || c.type === 'code_inline' ? c.content : c.type === 'softbreak' ? ' ' : ''))
+            .map((c) => (c.type === 'text' || c.type === 'text_special' || c.type === 'code_inline' ? c.content : c.type === 'softbreak' ? ' ' : ''))
             .join('')
             .trim()
             .slice(0, 80);
