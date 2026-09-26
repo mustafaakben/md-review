@@ -27,13 +27,13 @@ const isSeverity = (s: unknown): s is Severity => s === 'major' || s === 'minor'
 export function metaPicker(m: Meta, altLabel: (n: number) => string): string {
   const kind = isKind(m.kind) ? m.kind : 'comment';
   const kinds = (Object.keys(KIND_LABEL) as Kind[])
-    .map((k) => `<button type="button" class="mdr-chip mdr-kind-${k}${k === kind ? ' on' : ''}" data-kind="${k}" role="radio" aria-checked="${k === kind}" title="${KIND_TIP[k]}">${KIND_LABEL[k]}</button>`)
+    .map((k) => `<button type="button" class="mdr-chip mdr-kind-${k}${k === kind ? ' on' : ''}" data-kind="${k}" aria-pressed="${k === kind}" title="${KIND_TIP[k]}">${KIND_LABEL[k]}</button>`)
     .join('');
   const sevs = SEVERITIES.map(
     (s, i) =>
       `<button type="button" class="mdr-chip mdr-sev-${s}${m.severity === s ? ' on' : ''}" data-severity="${s}" aria-pressed="${m.severity === s}" title="${SEVERITY_LABEL[s]} (${altLabel(i + 1)})">${SEVERITY_LABEL[s]}</button>`,
   ).join('');
-  return `<div class="mdr-meta-pick"><div class="mdr-chips" role="radiogroup" aria-label="Kind">${kinds}</div><div class="mdr-chips" role="group" aria-label="Severity">${sevs}</div></div>`;
+  return `<div class="mdr-meta-pick"><div class="mdr-chips" role="group" aria-label="Kind">${kinds}</div><div class="mdr-chips" role="group" aria-label="Severity">${sevs}</div></div>`;
 }
 
 /** Handle a click inside a picker; returns true when it was a chip. */
@@ -45,22 +45,28 @@ export function pickerClick(t: Element): boolean {
     pick.querySelectorAll('[data-kind]').forEach((b) => {
       const on = b === chip;
       b.classList.toggle('on', on);
-      b.setAttribute('aria-checked', String(on));
+      b.setAttribute('aria-pressed', String(on));
     });
   } else if (chip.dataset.severity) setSeverity(pick, chip.classList.contains('on') ? null : (chip.dataset.severity as Severity));
   return true;
 }
 
-/** Alt+1/2/3 in a comment box toggles Major/Minor/Nit. */
+/** Alt+1/2/3 in a comment box toggles Major/Minor/Nit (the browser harness; VS Code sends a command). */
 export function pickerKey(e: KeyboardEvent, root: Element): boolean {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
   // e.code, not e.key: Alt+digit types other characters on macOS.
   const n = /^Digit([123])$/.exec(e.code)?.[1];
-  const pick = root.querySelector('.mdr-meta-pick');
-  if (!n || !pick) return false;
-  const s = SEVERITIES[Number(n) - 1];
-  setSeverity(pick, pick.querySelector(`[data-severity="${s}"]`)?.classList.contains('on') ? null : s);
+  if (!n || !toggleSeverity(root, Number(n))) return false;
   e.preventDefault();
+  return true;
+}
+
+/** Toggle the nth severity (1 = Major) in the picker inside `root`. */
+export function toggleSeverity(root: Element, n: number): boolean {
+  const pick = root.querySelector('.mdr-meta-pick');
+  const s = SEVERITIES[n - 1];
+  if (!pick || !s) return false;
+  setSeverity(pick, pick.querySelector(`[data-severity="${s}"]`)?.classList.contains('on') ? null : s);
   return true;
 }
 
@@ -71,6 +77,12 @@ function setSeverity(pick: Element, s: Severity | null) {
     b.setAttribute('aria-pressed', String(on));
   });
 }
+
+/** What the picker shows for a thread: unknown values show as a plain comment with no severity. */
+export const pickerValue = (m: Meta): { kind: Kind; severity: Severity | null } => ({
+  kind: isKind(m.kind) ? m.kind : 'comment',
+  severity: isSeverity(m.severity) ? m.severity : null,
+});
 
 export function readPicker(root: Element): { kind: Kind; severity: Severity | null } {
   const k = (root.querySelector('.mdr-meta-pick [data-kind].on') as HTMLElement | null)?.dataset.kind;
@@ -92,33 +104,52 @@ export const severityRank = (m: Meta) => (isSeverity(m.severity) ? SEVERITIES.in
 
 // ---------------------------------------------------------------- word snapping
 
-const WORD = /[\p{L}\p{N}_'’]/u;
+// CJK has no spaces between words, so snapping would grow to a whole clause.
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const LETTER = /[\p{L}\p{N}_]/u;
+const letter = (c: string | undefined) => !!c && LETTER.test(c) && !CJK.test(c);
+/** Letters, plus an apostrophe inside a word ("don't"), but not a closing quote. */
+const inWord = (t: string, i: number) => letter(t[i]) || ((t[i] === "'" || t[i] === '’') && letter(t[i - 1]) && letter(t[i + 1]));
 
 /**
  * Grow a selection that starts or ends inside a word to the whole word, so a
- * drag that stops at "choos" quotes "choose". Only within one text node.
+ * drag that stops at "choos" quotes "choose". Words can cross inline markup
+ * ("**bo**ld") but not the block.
  */
 export function snapToWords(range: Range): Range {
   const r = range.cloneRange();
-  const s = r.startContainer;
-  if (s.nodeType === Node.TEXT_NODE) {
-    const t = s.textContent || '';
-    let i = r.startOffset;
-    if (i > 0 && i < t.length && WORD.test(t[i - 1]) && WORD.test(t[i])) {
-      while (i > 0 && WORD.test(t[i - 1])) i--;
-      r.setStart(s, i);
-    }
-  }
-  const e = r.endContainer;
-  if (e.nodeType === Node.TEXT_NODE) {
-    const t = e.textContent || '';
-    let i = r.endOffset;
-    if (i > 0 && i < t.length && WORD.test(t[i - 1]) && WORD.test(t[i])) {
-      while (i < t.length && WORD.test(t[i])) i++;
-      r.setEnd(e, i);
-    }
-  }
+  snapEdge(r, true);
+  snapEdge(r, false);
   return r;
+}
+
+function snapEdge(r: Range, start: boolean): void {
+  const node = start ? r.startContainer : r.endContainer;
+  if (node.nodeType !== Node.TEXT_NODE || !node.parentElement) return;
+  const block = node.parentElement.closest('[data-ls]') || node.parentElement;
+  const nodes: Text[] = [];
+  const walk = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest('.mdr-ui') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) nodes.push(n as Text);
+  const k = nodes.indexOf(node as Text);
+  if (k < 0) return;
+  const starts: number[] = [];
+  let t = '';
+  for (const n of nodes) {
+    starts.push(t.length);
+    t += n.data;
+  }
+  let i = starts[k] + (start ? r.startOffset : r.endOffset);
+  if (!(i > 0 && i < t.length && inWord(t, i - 1) && inWord(t, i))) return;
+  if (start) while (i > 0 && inWord(t, i - 1)) i--;
+  else while (i < t.length && inWord(t, i)) i++;
+  // The text node holding character i (start) or i - 1 (end).
+  const c = start ? i : i - 1;
+  let j = nodes.length - 1;
+  while (j > 0 && starts[j] > c) j--;
+  if (start) r.setStart(nodes[j], i - starts[j]);
+  else r.setEnd(nodes[j], i - starts[j]);
 }
 
 // ---------------------------------------------------------------- sections
@@ -132,8 +163,9 @@ export function sectionLines(h: HTMLElement, doc: HTMLElement): [number, number]
   let end: number;
   if (next) end = Number(next.dataset.ls);
   else {
-    const blocks = doc.querySelectorAll<HTMLElement>('[data-le]');
-    end = blocks.length ? Number(blocks[blocks.length - 1].dataset.le) : Number(h.dataset.le);
+    // The last line of any block: footnotes render at the end but keep their own lines.
+    end = Number(h.dataset.le);
+    doc.querySelectorAll<HTMLElement>('[data-le]').forEach((b) => (end = Math.max(end, Number(b.dataset.le))));
   }
   return [Number(h.dataset.ls) + 1, Math.max(Number(h.dataset.ls) + 1, end)];
 }

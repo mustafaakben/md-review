@@ -38,6 +38,9 @@ export function activate(context: vscode.ExtensionContext) {
         ['mdReview.zoomOut', { type: 'command', command: 'zoomOut' }],
         ['mdReview.zoomReset', { type: 'command', command: 'zoomReset' }],
         ['mdReview.readingView', { type: 'command', command: 'reading' }],
+        ['mdReview.severity1', { type: 'command', command: 'severity1' }],
+        ['mdReview.severity2', { type: 'command', command: 'severity2' }],
+        ['mdReview.severity3', { type: 'command', command: 'severity3' }],
       ] as const
     ).map(([id, msg]) => vscode.commands.registerCommand(id, () => MdReviewEditorProvider.postToActive(msg))),
   );

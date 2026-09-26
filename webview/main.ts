@@ -5,7 +5,7 @@ import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
-import { Meta, metaPicker, pickerClick, pickerKey, readPicker, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
+import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -353,6 +353,17 @@ function hidePop() {
   pop.hidden = true;
   pop.innerHTML = '';
   pendingAnchor = null;
+  returnFocus = null;
+}
+
+/** Where focus goes when a comment box opened from a button or heading closes. */
+let returnFocus: HTMLElement | null = null;
+
+/** Close the comment box after Save, Cancel or Escape. */
+function closeBox() {
+  const back = returnFocus;
+  hidePop();
+  back?.focus({ preventScroll: true });
 }
 
 function placePop(rect: DOMRect) {
@@ -406,6 +417,18 @@ document.addEventListener('mouseup', (ev) => {
 
 const altDigit = (n: number) => keyLabel(`Alt+${n}`);
 
+// VS Code binds Alt+1/2/3 to severity only while a comment box has focus (they
+// otherwise switch editor tabs), so tell the host when that changes.
+let composing = false;
+const trackComposing = () =>
+  queueMicrotask(() => {
+    const on = !!document.activeElement?.closest('.mdr-pop, .mdr-card')?.querySelector('.mdr-meta-pick');
+    if (on !== composing && !standalone) post({ type: 'composing', on });
+    composing = on;
+  });
+document.addEventListener('focusin', trackComposing);
+document.addEventListener('focusout', trackComposing);
+
 function openCommentBox(top: number) {
   const a = pendingAnchor!;
   const what =
@@ -428,6 +451,13 @@ function commentOnSelection() {
   if (isTyping(document.activeElement) || editing || inline) return;
   if (editMode) return toast('Turn off edit mode to comment.');
   const range = selectionRange();
+  // A heading focused from the outline (Enter) gets a comment on its whole section.
+  const h = document.activeElement as HTMLElement | null;
+  if (!range && h && doc.contains(h) && /^H[1-6]$/.test(h.tagName)) {
+    commentOnSection(h);
+    returnFocus = h;
+    return;
+  }
   if (!range) return toast('Select some text first, then press ' + keyLabel('Mod+Alt+M') + ' to comment on it.');
   pop.innerHTML = '';
   placePop(range.getBoundingClientRect());
@@ -447,14 +477,14 @@ pop.addEventListener('click', (e) => {
   } else if (act === 'save-comment') {
     saveComment();
   } else if (act === 'cancel') {
-    hidePop();
+    closeBox();
   }
 });
 
 pop.addEventListener('keydown', (e) => {
-  if (pickerKey(e, pop)) return;
+  if (standalone && pickerKey(e, pop)) return;
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) saveComment();
-  if (e.key === 'Escape') hidePop();
+  if (e.key === 'Escape') closeBox();
 });
 
 function saveComment() {
@@ -465,7 +495,7 @@ function saveComment() {
   const { quote, prefix, suffix, lineStart, lineEnd, scope } = pendingAnchor;
   const { kind, severity } = readPicker(pop);
   post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope } });
-  hidePop();
+  closeBox();
   window.getSelection()?.removeAllRanges();
 }
 
@@ -508,7 +538,12 @@ sidebar.addEventListener('click', (e) => {
       const { kind, severity } = readPicker(cardEl);
       const c = comments.find((x) => x.id === id);
       editingBodies.delete(id);
-      if (c && (kind !== (c.kind || 'comment') || severity !== (c.severity || null))) post({ type: 'setMeta', id, meta: { kind, severity } });
+      // Send only what changed, so a kind or severity this version doesn't know survives a body edit.
+      const was = pickerValue(c || {});
+      const meta: { kind?: string; severity?: string | null } = {};
+      if (kind !== was.kind) meta.kind = kind;
+      if (severity !== was.severity) meta.severity = severity;
+      if (c && Object.keys(meta).length) post({ type: 'setMeta', id, meta });
       if (body && body !== c?.body) post({ type: 'editBody', id, body });
       else renderSidebar();
       return;
@@ -524,7 +559,7 @@ sidebar.addEventListener('click', (e) => {
 
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
-  if (cardEl && pickerKey(e, cardEl)) return;
+  if (cardEl && standalone && pickerKey(e, cardEl)) return;
   // Shift or Alt with Ctrl/Cmd+Enter is Submit review / Send to Claude, not "save".
   if (!cardEl || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
   if ((e.target as Element).classList.contains('mdr-body-edit')) {
@@ -670,6 +705,13 @@ function runCommand(cmd: string) {
       return setSidebarOpen(document.body.classList.contains('mdr-side-collapsed'));
     case 'shortcuts':
       return keySheet.toggle();
+    case 'severity1':
+    case 'severity2':
+    case 'severity3': {
+      const root = document.activeElement?.closest('.mdr-pop, .mdr-card');
+      if (root) toggleSeverity(root, Number(cmd.slice(-1)));
+      return;
+    }
   }
 }
 
@@ -708,7 +750,8 @@ document.addEventListener('keydown', (e) => {
   } else if (keySheet.isOpen()) return;
   else if (k === 'c' && !e.shiftKey) {
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.rangeCount && doc.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    const onHeading = /^H[1-6]$/.test((e.target as Element).tagName) && doc.contains(e.target as Node);
+    if (onHeading || (sel && !sel.isCollapsed && sel.rangeCount && doc.contains(sel.getRangeAt(0).commonAncestorContainer))) {
       e.preventDefault();
       commentOnSelection();
     }
@@ -915,6 +958,7 @@ function commentOnDocument() {
   window.getSelection()?.removeAllRanges();
   placePop(docCommentBtn.getBoundingClientRect());
   openCommentBox(parseFloat(pop.style.top));
+  returnFocus = docCommentBtn;
 }
 
 const secBtn = document.getElementById('mdr-sec-btn') as HTMLButtonElement;

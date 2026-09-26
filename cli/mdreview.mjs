@@ -250,20 +250,43 @@ function readSource(md) {
 }
 /** Last line (1-based) of the section whose heading is on line `h`: before the next heading at its level or above. */
 function sectionEnd(lines, h) {
-  const m = /^(#{1,6})[ \t]/.exec(lines[h - 1] || '');
-  const level = m ? m[1].length : /^=+\s*$/.test(lines[h] || '') ? 1 : 2; // ATX, else setext
+  const atx = (t) => /^ {0,3}(#{1,6})(?:[ \t]|$)/.exec(t);
+  const m = atx(lines[h - 1] || '');
+  const level = m ? m[1].length : /^ {0,3}=+[ \t]*$/.test(lines[h] || '') ? 1 : 2; // ATX, else setext
   let fence = null;
+  let para = 0; // first line of the paragraph just above, which a setext underline turns into a heading
   for (let n = h + 1; n <= lines.length; n++) {
     const t = lines[n - 1];
-    const f = /^ {0,3}(`{3,}|~{3,})/.exec(t);
-    if (f && (!fence || f[1][0] === fence[0])) fence = fence ? null : f[1];
-    if (fence) continue;
-    const a = /^ {0,3}(#{1,6})[ \t]/.exec(t);
-    if (a && a[1].length <= level) return n - 1;
-    const setext = /^ {0,3}(=+|-+)\s*$/.exec(lines[n] || '');
-    if (setext && t.trim() && (setext[1][0] === '=' ? 1 : 2) <= level && !/^\s*[-*+]\s/.test(t)) return n - 1;
+    if (fence) {
+      // Closed only by the same character, at least as long, and nothing after it.
+      const c = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(t);
+      if (c && c[1][0] === fence[0] && c[1].length >= fence.length) fence = null;
+      continue;
+    }
+    const f = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(t);
+    if (f && !(f[1][0] === '`' && f[2].includes('`'))) {
+      fence = f[1];
+      para = 0;
+      continue;
+    }
+    const a = atx(t);
+    if (a) {
+      if (a[1].length <= level) return n - 1;
+      para = 0;
+      continue;
+    }
+    const u = /^ {0,3}(=+|-+)[ \t]*$/.exec(t);
+    if (u && para) {
+      if ((u[1][0] === '=' ? 1 : 2) <= level) return para - 1;
+      para = 0;
+      continue;
+    }
+    if (!t.trim() || /^ {0,3}(?:[-*+][ \t]|\d+[.)][ \t]|>)/.test(t) || /^ {4}/.test(t) && !para) para = 0;
+    else if (!para) para = n;
   }
-  return lines.length;
+  let end = lines.length;
+  while (end > h && !lines[end - 1].trim()) end--;
+  return end;
 }
 const SEVERITY_RANK = { major: 0, minor: 1, nit: 2 };
 const severityRank = (c) => SEVERITY_RANK[c.severity] ?? 3;
@@ -288,7 +311,7 @@ function contextOf(md, c) {
 function describe(c) {
   const lines = c.anchor?.lineStart ? `L${c.anchor.lineStart}-${c.anchor.lineEnd}` : 'L?';
   const tags = tagsOf(c);
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}\n  quote: "${c.anchor?.quote}"\n  body:  ${c.body}`;
+  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}${c.scope === 'document' ? '' : `\n  quote: "${c.anchor?.quote}"`}\n  body:  ${c.body}`;
   for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}`;
   return s;
 }

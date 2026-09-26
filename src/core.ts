@@ -38,7 +38,8 @@ export type FromWebview =
   | { type: 'undo' }
   | { type: 'redo' }
   | { type: 'sendToAgent'; id?: string }
-  | { type: 'setPrefs'; prefs: Record<string, unknown> };
+  | { type: 'setPrefs'; prefs: Record<string, unknown> }
+  | { type: 'composing'; on: boolean };
 
 export interface HostContext {
   mdPath: string;
@@ -212,6 +213,8 @@ export class ReviewSession {
         return this.sendToAgent(msg.id);
       case 'setPrefs':
         this.ctx.setPrefs?.(msg.prefs);
+        return;
+      case 'composing': // a VS Code context key for Alt+1/2/3; set by the extension
         return;
     }
   }

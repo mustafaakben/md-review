@@ -67,3 +67,38 @@ test('CLI: a section thread shows the whole section; a document thread has no li
   assert.match(run('context', 'p.md', 'c_doc'), /about: {3}the whole document/);
   assert.match(run('next', 'p.md'), /^\[c_doc\] SUBMITTED/);
 });
+
+test('CLI: a section ends at the next heading, not at fences, rules or deeper headings', () => {
+  const dir = path.join(tmp, 'ends');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const end = (lines, quote) => {
+    fs.writeFileSync(path.join(dir, 'e.md'), lines.join('\n'));
+    const c = { id: 'c1', author: 'R', createdAt: '2026-09-26T10:00:00.000Z', anchor: anchor(quote, 1), body: 'b', status: 'submitted', scope: 'section', replies: [] };
+    fs.writeFileSync(path.join(dir, 'e.md.comments.json'), JSON.stringify({ schemaVersion: 1, file: 'e.md', comments: [c] }));
+    const out = JSON.parse(execFileSync(process.execPath, [cli, 'context', 'e.md', 'c1', '--json'], { cwd: dir, encoding: 'utf8' }));
+    return out.lineEnd;
+  };
+  // A --- after a closing fence or an ATX heading is a rule, not a setext underline.
+  assert.equal(end(['## S', '', '```', 'code', '```', '---', '', 'after', '', '## T', ''], 'S'), 9);
+  assert.equal(end(['## S', '', '### Sub', '---', '', 'x', '', '## T'], 'S'), 7);
+  // A longer fence isn't closed by a shorter one inside it.
+  assert.equal(end(['## S', '', '````', '```', '# inside', '```', '````', '', '## T'], 'S'), 8);
+  // Indented ### is level 3, so it stays inside a level-2 section.
+  assert.equal(end(['## S', '', '  ### Ind', '', 'x', '', '## T'], 'S'), 6);
+  // A setext heading ends the section at the line before its text.
+  assert.equal(end(['## S', '', 'x', '', 'Next', '----', '', 'y'], 'S'), 4);
+  // The last section ends at the last non-blank line.
+  assert.equal(end(['## S', '', 'x', '', ''], 'S'), 3);
+});
+
+test('CLI: describe prints no empty quote for a document thread', () => {
+  const dir = path.join(tmp, 'desc');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'd.md'), '# T\n');
+  const c = { id: 'c1', author: 'R', createdAt: '2026-09-26T10:00:00.000Z', anchor: anchor('', 0, 0), body: 'b', status: 'submitted', scope: 'document', replies: [] };
+  fs.writeFileSync(path.join(dir, 'd.md.comments.json'), JSON.stringify({ schemaVersion: 1, file: 'd.md', comments: [c] }));
+  const out = execFileSync(process.execPath, [cli, 'list', 'd.md'], { cwd: dir, encoding: 'utf8' });
+  assert.doesNotMatch(out, /quote: ""/);
+});
