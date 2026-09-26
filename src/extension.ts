@@ -4,6 +4,16 @@ import { addClaudeSkill, sendFolderToClaude, sendWorkspaceToClaude } from './age
 import { initAgentPrompts } from './agentRun';
 import type { FromWebview } from './core';
 import { InboxView } from './inboxView';
+import * as render from './render';
+import * as commentStore from './commentStore';
+import * as bibliography from './bibliography';
+import * as localImage from './localImage';
+
+// The Word commands are their own file (dist/word.js), read on first use rather
+// than at start-up. It takes these modules from this bundle instead of carrying
+// its own copies (see esbuild.mjs).
+export const shared = { render, commentStore, bibliography, localImage };
+const word = () => require('./word.js') as typeof import('./wordCommands');
 
 export function activate(context: vscode.ExtensionContext) {
   initAgentPrompts(context);
@@ -33,6 +43,8 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand('mdReview.inbox.refresh', () => inbox.refresh()),
     vscode.commands.registerCommand('mdReview.inbox.sendAll', () => sendWorkspaceToClaude(context)),
+    vscode.commands.registerCommand('mdReview.exportWord', (uri?: vscode.Uri) => word().exportToWord(uri)),
+    vscode.commands.registerCommand('mdReview.importWord', (uri?: vscode.Uri) => word().importFromWord(uri)),
     ...(
       [
         ['mdReview.undo', { type: 'command', command: 'undo' }],
