@@ -343,6 +343,14 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
 @keyframes mdr-fade-in { from { opacity: 0; } }
 @keyframes mdr-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
 @keyframes mdr-pulse { 0% { box-shadow: inset 0 -2px 0 var(--c), 0 0 0 0 color-mix(in srgb, var(--c) 45%, transparent); } 100% { box-shadow: inset 0 -2px 0 var(--c), 0 0 0 6px transparent; } }
+/* Forced colors (Windows high contrast) repaints backgrounds as Canvas, which would erase every mask icon. */
+@media (forced-colors: active) {
+  /* !important: the per-icon rules above are id-specific and set background: currentColor. */
+  button::before, .mdr-toggle::before { forced-color-adjust: none; background: ButtonText !important; }
+  .mdr-file::before, .mdr-empty::before { forced-color-adjust: none; background: CanvasText !important; }
+  button:disabled::before { background: GrayText !important; }
+  .mdr-pill::before { forced-color-adjust: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
