@@ -610,7 +610,13 @@ function showWorking() {
   sidebar.querySelectorAll<HTMLElement>('.mdr-card').forEach((el) => {
     const w = on.has(el.dataset.id!);
     el.classList.toggle('mdr-working', w);
-    if (!w) el.querySelector('.mdr-working-line')?.remove();
+    const line = w ? null : el.querySelector('.mdr-working-line');
+    if (line) {
+      line.remove();
+      // The card no longer matches its stored HTML: repaint it next time.
+      const i = sidebarKeys.indexOf('c:' + el.dataset.id);
+      if (i >= 0) sidebarParts[i] = '';
+    }
   });
   clearTimeout(workingTimer);
   const left = [nextExpiry(comments, now), reviewing].filter((x): x is number => x !== null);
