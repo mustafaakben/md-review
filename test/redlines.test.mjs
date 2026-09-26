@@ -21,11 +21,17 @@ function session(name, bytes) {
   fs.writeFileSync(md, bytes);
   fs.rmSync(md + '.comments.json', { force: true });
   const posted = [];
-  const saved = { value: undefined, writes: 0 };
+  const mem = lib.memoryBaselines();
+  const saved = {
+    writes: 0,
+    get meta() { return mem.get(); },
+    get text() { return mem.read()?.toString('utf8'); },
+  };
+  const resolveImage = (x) => x;
   const s = new lib.ReviewSession({
-    mdPath: md, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage: (x) => x,
+    mdPath: md, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage,
     getText: () => fs.readFileSync(md, 'utf8').replace(/^\uFEFF/, ''), isDirty: () => false, openLink: () => {},
-    baselines: { load: () => saved.value, save: (b) => { saved.value = b; saved.writes++; } },
+    baselines: { get: () => mem.get(), read: () => mem.read(), set: (b, bytes) => { saved.writes++; mem.set(b, bytes); } },
   });
   s.handle({ type: 'ready' });
   const last = (type) => posted.filter((m) => m.type === type).at(-1);
@@ -35,7 +41,7 @@ function session(name, bytes) {
   };
   /** The latest hunks the view got, with a render or on their own. */
   const shown = () => posted.filter((m) => m.type === 'changes' || (m.type === 'render' && m.changes !== undefined)).at(-1).changes;
-  return { md, s, posted, saved, last, changes, shown };
+  return { md, s, posted, saved, last, changes, shown, resolveImage };
 }
 
 /** Comment on `quote`, send, then let the "agent" rewrite the file. */
@@ -159,15 +165,15 @@ test('Keep folds a change into the baseline; Accept all drops it; nothing is wri
   assert.ok(fs.readFileSync(t.md).equals(file), 'Keep never touches the file');
   ch = t.last('changes').changes;
   assert.deepEqual(ch.hunks.map((h) => h.cur.ls), [4]);
-  assert.ok(Buffer.from(t.saved.value.current.data, 'base64').toString().includes('ALPHA'), 'the kept text is now part of the baseline');
+  assert.ok(t.saved.text.includes('ALPHA'), 'the kept text is now part of the baseline');
   // The view renumbers the baseline it has instead of being sent it again.
   assert.equal(ch.baseHtml, undefined);
   assert.deepEqual(ch.baseShift.steps, [{ lo: 2, at: 3, delta: 0 }]);
   t.s.handle({ type: 'acceptChanges' });
   assert.equal(t.last('changes').changes, null);
   assert.equal(t.last('baseline').info, null);
-  assert.equal(t.saved.value.current, null);
-  assert.equal(t.saved.value.past.length, 1);
+  assert.equal(t.saved.meta, undefined);
+  assert.equal(t.saved.text, undefined, 'the copy is gone too');
   assert.deepEqual(fs.readdirSync(tmp).filter((f) => f.startsWith('keep.md')).sort(), ['keep.md', 'keep.md.comments.json']);
 });
 
@@ -181,15 +187,15 @@ test("your own edits in the view after a Send aren't Claude's changes, and Undo 
   let now = t.shown();
   assert.deepEqual(now.hunks.map((h) => h.cur.ls), [2], 'only Claude\'s change shows');
   assert.equal(now.baseHtml, undefined);
-  assert.equal(Buffer.from(t.saved.value.current.data, 'base64').toString(), '# T\n\nalpha.\n\nbeta.\n\nGAMMA.\n\ndelta.\n');
+  assert.equal(t.saved.text, '# T\n\nalpha.\n\nbeta.\n\nGAMMA.\n\ndelta.\n');
   // An edit inside Claude's change stays part of it.
   t.s.handle({ type: 'saveBlock', ls: 2, le: 3, original: 'ALPHA.\n', newText: 'ALPHA!\n' });
   now = t.shown();
   assert.deepEqual(now.hunks.map((h) => h.cur.ls), [2]);
-  assert.ok(Buffer.from(t.saved.value.current.data, 'base64').toString().includes('alpha.'));
+  assert.ok(t.saved.text.includes('alpha.'));
   t.s.handle({ type: 'undo' });
   t.s.handle({ type: 'undo' });
-  assert.equal(Buffer.from(t.saved.value.current.data, 'base64').toString(), '# T\n\nalpha.\n\nbeta.\n\ngamma.\n');
+  assert.equal(t.saved.text, '# T\n\nalpha.\n\nbeta.\n\ngamma.\n');
   assert.deepEqual(t.shown().hunks.map((h) => h.cur.ls), [2]);
   // A change that shows lines the view's copy never had brings the baseline again.
   t.s.handle({ type: 'redo' });
@@ -199,37 +205,42 @@ test("your own edits in the view after a Send aren't Claude's changes, and Undo 
   assert.ok(last.baseHtml.includes('delta'));
 });
 
-test('baseline lifecycle: a new Send keeps an unreviewed baseline, replaces a reviewed one, and only a few are kept', () => {
+test('baseline lifecycle: a new Send keeps an unreviewed or untouched baseline, replaces a reviewed one', () => {
   const t = session('life.md', '# T\n\none.\n\ntwo.\n');
   t.s.handle({ type: 'addComment', anchor: anchor('one', 3), body: 'a' });
   t.s.handle({ type: 'sendToAgent' });
-  const first = t.saved.value.current;
+  const first = t.saved.meta;
   assert.ok(first && first.threads.length === 1);
-  assert.equal(Buffer.from(first.data, 'base64').toString(), '# T\n\none.\n\ntwo.\n');
+  assert.deepEqual(first.spans, { [first.threads[0]]: [2, 3] }, "the thread's lines in the copy");
+  assert.equal(t.saved.text, '# T\n\none.\n\ntwo.\n');
   assert.deepEqual(t.last('baseline').info, { at: first.at, threads: first.threads, changed: false });
-  // The agent edits; the reviewer sends another thread before reviewing.
+  // Sent again before Claude changed anything: the threads add up, the copy and its time stay.
+  t.s.handle({ type: 'addComment', anchor: anchor('two', 5), body: 'b' });
+  t.s.handle({ type: 'sendToAgent' });
+  assert.equal(t.saved.meta.at, first.at);
+  assert.equal(t.saved.meta.threads.length, 2);
+  // The agent edits; the reviewer sends again before reviewing.
   fs.writeFileSync(t.md, '# T\n\nONE.\n\ntwo.\n');
   t.s.render();
   assert.equal(t.last('baseline').info.changed, true);
-  t.s.handle({ type: 'addComment', anchor: anchor('two', 5), body: 'b' });
   t.s.handle({ type: 'sendToAgent' });
-  const second = t.saved.value.current;
+  const second = t.saved.meta;
   assert.equal(second.id, first.id, 'still compares against the copy from before the first round');
   assert.equal(second.threads.length, 2);
   // Reviewed (kept) → the next Send starts from the file as it is.
   const ch = t.changes();
   t.s.handle({ type: 'keepChange', v: ch.v, i: 0 });
   assert.equal(t.last('baseline').info.changed, false);
+  assert.equal(t.saved.meta.settled, true);
   t.s.handle({ type: 'sendToAgent' });
-  assert.notEqual(t.saved.value.current.at, undefined);
-  assert.equal(Buffer.from(t.saved.value.current.data, 'base64').toString(), '# T\n\nONE.\n\ntwo.\n');
-  // Accepted baselines are kept, but only a few.
-  for (let n = 0; n < 5; n++) {
-    t.s.handle({ type: 'acceptChanges' });
-    t.s.handle({ type: 'sendToAgent' });
-  }
-  assert.ok(t.saved.value.current);
-  assert.equal(t.saved.value.past.length, lib.KEEP_BASELINES - 1);
+  assert.equal(t.saved.meta.settled, undefined, 'a new copy');
+  assert.equal(t.saved.text, '# T\n\nONE.\n\ntwo.\n');
+  // An open Changes bar hears about the new copy at once.
+  assert.equal(t.last('changes').changes.baseId, t.saved.meta.id);
+  t.s.handle({ type: 'acceptChanges' });
+  assert.equal(t.saved.meta, undefined);
+  t.s.handle({ type: 'sendToAgent' });
+  assert.ok(t.saved.meta);
 });
 
 test('a finished round says how many blocks changed', () => {
@@ -243,4 +254,200 @@ test('a finished round says how many blocks changed', () => {
   const r = t.last('round').round;
   assert.equal(r.finished, true);
   assert.equal(r.changes, 2);
+});
+
+/** Send `base`, let the agent write `agent`, then Keep or Revert every change, picking with `pick`. */
+function settleAll(name, base, agent, mode, pick) {
+  const t = session(name, base);
+  t.s.handle({ type: 'addComment', anchor: anchor('a', 1), body: 'x' });
+  t.s.handle({ type: 'sendToAgent' });
+  fs.writeFileSync(t.md, agent);
+  t.s.render();
+  let ch = t.changes();
+  for (let k = 0; k < 60 && ch && ch.hunks.length; k++) {
+    const errors = t.posted.filter((m) => m.type === 'error').length;
+    t.s.handle({ type: mode === 'keep' ? 'keepChange' : 'revertChange', v: ch.v, i: pick(ch.hunks.length) });
+    assert.equal(t.posted.filter((m) => m.type === 'error').length, errors, t.last('error')?.message);
+    ch = t.shown();
+  }
+  assert.deepEqual(ch?.hunks ?? [], [], 'nothing left to settle');
+  return t;
+}
+
+const rng = (seed) => (n) => {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let x = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+  return Math.floor((((x ^ (x >>> 14)) >>> 0) / 2 ** 32) * n);
+};
+
+/** Revert all, in several orders, gives back the baseline's bytes; Keep all makes the baseline the file. */
+function roundTrips(name, base, agent, orders = 4) {
+  const rnd = rng(name.length);
+  for (let o = 0; o < orders; o++) {
+    const pick = o === 0 ? () => 0 : o === 1 ? (n) => n - 1 : rnd;
+    const t = settleAll(`${name}-r${o}.md`, base, agent, 'revert', pick);
+    assert.equal(fs.readFileSync(t.md).toString('latin1'), Buffer.from(base).toString('latin1'), `${name}: revert order ${o}`);
+    const k = settleAll(`${name}-k${o}.md`, base, agent, 'keep', pick);
+    assert.ok(fs.readFileSync(k.md).equals(Buffer.from(agent)), `${name}: Keep never writes the file`);
+    assert.equal(k.saved.text.replace(/^﻿/, '').replace(/\r\n/g, '\n'), agent.toString().replace(/^﻿/, '').replace(/\r\n/g, '\n'), `${name}: keep order ${o}`);
+  }
+}
+
+const crlf = (s) => '\uFEFF' + s.replace(/\n/g, '\r\n');
+for (const [name, base, agent] of [
+  ['ref-def after a changed block', 'Para [x] one.\n\n[x]: http://a\n\nOld.\n\nEnd.\n', 'Para [x] two.\n\n[x]: http://a\n\nEnd.\n'],
+  ['ref-def between replaced blocks', 'Alpha one.\n[x]: http://a\n\nBeta.\n', 'Gamma two.\n[x]: http://a\n\nDelta three.\n\nBeta.\n'],
+  ['footnote no longer referenced', 'Note[^1] here.\n\n[^1]: a note.\n\nMore.\n', 'Note here.\n\n[^1]: a note.\n\nMore text.\n'],
+  ['first block deleted', 'First.\n\nSecond.\n\nThird.\n', 'Second.\n\nThird.\n'],
+  ['only block deleted', 'Only.\n', ''],
+  ['everything replaced', 'One.\n\nTwo.\n', '# New\n\n- a\n- b\n'],
+  ['tight list: item removed, added, changed', '- a one\n- b two\n- c three\n\nAfter.\n', '- a one\n- c three changed\n- d four\n\nAfter.\n'],
+  ['loose list', '- a one\n\n- b two\n\n- c three\n', '- a one\n\n- c three\n\n- d new\n'],
+  ['list turned into paragraphs', 'Intro.\n- a\n- b\n', 'Intro.\n\nA para.\n\nB para.\n'],
+  ['table row changed, table deleted', '| a | b |\n|---|---|\n| 1 | 2 |\n\nText.\n\n| c |\n|---|\n| 3 |\n', '| a | b |\n|---|---|\n| 1 | 9 |\n\nText.\n'],
+  ['quote split', '> one\n>\n> two\n\nEnd.\n', '> one changed\n\nEnd.\n'],
+  ['moved block', 'A block.\n\nB block.\n\nC block.\n', 'B block.\n\nC block.\n\nA block.\n'],
+]) {
+  test(`Revert all in any order is the baseline, Keep all is the file: ${name}`, () => roundTrips(name.replace(/\W+/g, '-'), base, agent));
+  test(`... with CRLF and a BOM: ${name}`, () => roundTrips('crlf-' + name.replace(/\W+/g, '-'), crlf(base), crlf(agent)));
+}
+
+test('Revert all and Keep all round-trip on generated documents', () => {
+  const rnd = rng(11);
+  const W = ['alpha', 'beta', 'gamma', 'delta', 'eps', 'zeta'];
+  let u = 0;
+  const para = () => Array.from({ length: 1 + rnd(4) }, () => W[rnd(W.length)]).join(' ') + ` u${u++}.`;
+  const chunk = () => [
+    () => '#'.repeat(1 + rnd(2)) + ' ' + para(),
+    () => Array.from({ length: 1 + rnd(3) }, () => '- ' + para()).join('\n'),
+    () => '```\n' + para() + '\n```',
+    () => '> ' + para() + '\n>\n> ' + para(),
+    () => '| a | b |\n|---|---|\n| ' + para() + ' | x |',
+    para,
+    para,
+  ][rnd(7)]();
+  for (let n = 0; n < 60; n++) {
+    const doc = Array.from({ length: 1 + rnd(5) }, chunk);
+    if (rnd(2)) doc.splice(rnd(doc.length + 1), 0, '[x]: http://a');
+    const next = [...doc];
+    for (let k = 0, m = 1 + rnd(3); k < m; k++) {
+      const i = rnd(next.length + 1);
+      const r = rnd(3);
+      if (r === 0) next.splice(i, 0, chunk());
+      else if (next[i] && next[i] !== '[x]: http://a') r === 1 ? next.splice(i, 1) : (next[i] = chunk());
+    }
+    const [eol, bom, fin] = [rnd(3) ? '\n' : '\r\n', rnd(4) ? '' : '\uFEFF', rnd(4) ? 1 : 0];
+    const enc = (d) => bom + d.join('\n\n').replace(/\n/g, eol) + (fin ? eol : '');
+    const base = enc(doc);
+    const agent = enc(next);
+    if (base === agent) continue;
+    roundTrips(`gen${n}`, base, agent, 2);
+  }
+});
+
+/** Workspace state as VS Code keeps it: every value is serialized on write. */
+function fakeState(init = {}) {
+  const data = new Map(Object.entries(init).map(([k, v]) => [k, JSON.stringify(v)]));
+  const writes = [];
+  return {
+    writes,
+    get: (k) => (data.has(k) ? JSON.parse(data.get(k)) : undefined),
+    update: (k, v) => {
+      const json = v === undefined ? undefined : JSON.stringify(v);
+      writes.push([k, json?.length ?? 0]);
+      if (json === undefined) data.delete(k);
+      else data.set(k, json);
+    },
+    keys: () => [...data.keys()],
+  };
+}
+
+test('baseline store: bytes in files named by the path, details in state, oldest dropped over the limits', () => {
+  const dir = path.join(tmp, 'store');
+  fs.rmSync(dir, { recursive: true, force: true });
+  const state = fakeState({ 'mdReview.baselines:/old.md': { bytes: 'x'.repeat(1000) } });
+  const st = new lib.BaselineStore(dir, state, { maxFiles: 2, maxBytes: 25, win32: true });
+  assert.deepEqual(state.keys(), [], 'copies kept in state by earlier builds are removed');
+  assert.equal(st.key('C:\\Docs\\A.md'), st.key('c:\\docs\\a.md'), 'case-folded on Windows');
+  assert.notEqual(new lib.BaselineStore(dir, state, { win32: false }).key('/d/A.md'), new lib.BaselineStore(dir, state, { win32: false }).key('/d/a.md'));
+  const meta = (id) => ({ id, at: 'now', threads: ['t'] });
+  const a = st.forFile('/d/a.md');
+  const b = st.forFile('/d/b.md');
+  const c = st.forFile('/d/c.md');
+  a.set(meta('A'), Buffer.from('a'.repeat(10)));
+  b.set(meta('B'), Buffer.from('b'.repeat(10)));
+  assert.equal(a.read().toString(), 'a'.repeat(10));
+  assert.deepEqual(a.get(), meta('A'));
+  assert.ok(state.writes.every(([, n]) => n < 400), 'no bytes in state');
+  // Details alone don't rewrite the file.
+  a.set({ ...meta('A'), settled: true });
+  assert.equal(a.read().toString(), 'a'.repeat(10));
+  c.set(meta('C'), Buffer.from('c'.repeat(10))); // three files: b is now the oldest
+  assert.equal(b.get(), undefined);
+  assert.equal(b.read(), undefined);
+  assert.ok(a.get() && c.get());
+  c.set(meta('C2'), Buffer.from('c'.repeat(20))); // 30 bytes: over the size limit
+  assert.equal(a.get(), undefined);
+  assert.equal(c.read().length, 20);
+  c.set(null);
+  assert.equal(c.read(), undefined);
+  assert.deepEqual(fs.readdirSync(dir), []);
+  assert.equal(state.get('mdReview.baselines'), undefined);
+});
+
+test("with the view off, your edit costs no parse of the baseline and writes no bytes to state", () => {
+  const dir = path.join(tmp, 'store2');
+  fs.rmSync(dir, { recursive: true, force: true });
+  const state = fakeState();
+  const md = path.join(tmp, 'cost.md');
+  const para = (n) => `Paragraph ${n} with some words in it.\n\n`;
+  const baseText = '# T\n\n' + Array.from({ length: 400 }, (_, n) => para(n)).join('');
+  fs.writeFileSync(md, baseText);
+  fs.rmSync(md + '.comments.json', { force: true });
+  const resolveImage = (x) => x;
+  const parsed = [];
+  const r = lib.rendererFor(resolveImage);
+  const parse = r.parse.bind(r);
+  r.parse = (src, env) => (parsed.push(src), parse(src, env));
+  const posted = [];
+  const s = new lib.ReviewSession({
+    mdPath: md, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage,
+    getText: () => fs.readFileSync(md, 'utf8'), isDirty: () => false, openLink: () => {},
+    baselines: new lib.BaselineStore(dir, state).forFile(md),
+  });
+  try {
+    s.handle({ type: 'ready' });
+    s.handle({ type: 'addComment', anchor: anchor('Paragraph 1', 5), body: 'x' });
+    s.handle({ type: 'sendToAgent' });
+    fs.writeFileSync(md, baseText.replace('Paragraph 1 ', 'Paragraph one '));
+    s.render();
+    parsed.length = 0;
+    state.writes.length = 0;
+    s.handle({ type: 'saveBlock', ls: 300, le: 301, original: para(149).slice(0, -1), newText: 'Mine.\n' });
+    assert.equal(posted.filter((m) => m.type === 'error').length, 0);
+    assert.ok(!parsed.includes(baseText), 'the baseline was not parsed');
+    assert.equal(parsed.length, 1, 'only the file, to render it');
+    assert.ok(state.writes.every(([, n]) => n < 400), 'state holds details only');
+    const saved = fs.readFileSync(path.join(dir, fs.readdirSync(dir)[0]), 'utf8');
+    assert.ok(saved.includes('Mine.') && saved.includes('Paragraph 1 '), 'your edit is in the copy, Claude\'s is not');
+  } finally {
+    r.parse = parse;
+  }
+});
+
+test('a copy into a file with no line break keeps the source\'s CRLF', () => {
+  const src = Buffer.from('One.\r\n\r\nTwo.\r\n');
+  assert.equal(lib.spliceLines(Buffer.from(''), 0, 0, src, 0, 3).toString(), 'One.\r\n\r\nTwo.\r\n');
+});
+
+test('Keep all leaves nothing unreviewed, even when only blank lines differ', () => {
+  const t = settleAll('keepstuck.md', '```\nx\n```\n', 'zeta.\n\n> theta.\n', 'keep', () => 0);
+  assert.equal(t.saved.text, 'zeta.\n\n> theta.\n');
+  assert.equal(t.saved.meta.settled, true);
+  assert.equal(t.last('baseline').info.changed, false);
+});
+
+test('Chinese, Japanese and Korean text diffs by character', () => {
+  assert.deepEqual(lib.diffWords('我们今天去', '我们明天去'), [[0, '我们'], [-1, '今'], [1, '明'], [0, '天去']]);
 });

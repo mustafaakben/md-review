@@ -11,3 +11,4 @@ export { loadBibliography, parseBibTeX, parseCslJson } from './bibliography';
 export * from './agentLaunch';
 export * from './redlines';
 export * from './wordDiff';
+export * from './baselineStore';

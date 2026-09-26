@@ -53,7 +53,7 @@ let review: ReviewRun | null = null;
 /** After Keep, Do it or Discard on Claude's draft `from`: the card to focus next (null: none left). */
 let triageFocus: { from: string; to: string | null } | null = null;
 /** The Changes baseline, if any: when it was taken and which threads went out with it. */
-let baseInfo: { at: string; threads: string[]; changed: boolean } | null = null;
+let baseInfo: { at: string; threads: string[]; changed: boolean; touched?: string[] } | null = null;
 let workingTimer: ReturnType<typeof setTimeout> | undefined;
 let lastBanner = '';
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
@@ -454,6 +454,7 @@ function openSuggestion(c: Comment): string | null {
 /** Sent with the current baseline, and the agent has resolved or replied since: its edit can be shown. */
 function answered(c: Comment): boolean {
   if (!baseInfo?.changed || c.scope === 'document' || !baseInfo.threads.includes(c.id)) return false;
+  if (baseInfo.touched && !baseInfo.touched.includes(c.id)) return false; // compared, and nothing changed in its text
   const since = baseInfo.at;
   return (c.status === 'resolved' && (c.resolvedAt || '') > since) || c.replies.some((r) => r.author !== author && r.createdAt > since);
 }
@@ -1036,7 +1037,9 @@ document.addEventListener('keydown', (e) => {
   }
   // Escape inside an editor or a comment box belongs to that box, not the find bar.
   if (e.key === 'Escape' && search.isOpen() && !editing && !inline && !isTyping(e.target)) return search.close();
-  if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || editing || inline) return;
+  // `]` and `[` are typed with AltGr (or Option on a Mac) on many layouts.
+  const composed = (e.key === ']' || e.key === '[') && (e.getModifierState('AltGraph') || (isMac && e.altKey && !e.ctrlKey && !e.metaKey));
+  if (((e.ctrlKey || e.metaKey || e.altKey) && !composed) || isTyping(e.target) || editing || inline) return;
   if (e.key === '?') {
     e.preventDefault();
     keySheet.toggle();
@@ -1346,7 +1349,7 @@ window.addEventListener('message', (ev) => {
   const m = ev.data;
   switch (m?.type) {
     case 'render':
-      if (m.changes !== undefined) redlines.set(m.changes as Changes | null, false);
+      if (m.changes !== undefined) redlines.set(m.changes as Changes | null, false, !!m.changesFailed);
       // The host re-sends identical HTML often (e.g. twice after a block save);
       // skip the re-render when the view already shows it.
       if (m.html === html && painted && !docStale && !deferredPaint) {
@@ -1405,10 +1408,10 @@ window.addEventListener('message', (ev) => {
       showWorking();
       break;
     case 'changes':
-      redlines.set(m.changes);
+      redlines.set(m.changes, true, !!m.failed);
       break;
     case 'baseline': {
-      const key = (b: typeof baseInfo) => (b?.changed ? b.at + b.threads.join() : '');
+      const key = (b: typeof baseInfo) => (b?.changed ? b.at + b.threads.join() + '|' + (b.touched?.join() ?? '*') : '');
       const had = key(baseInfo);
       baseInfo = m.info;
       // Cards only change when Show change can appear or go.

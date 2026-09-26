@@ -4,12 +4,10 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
-import type { Baselines } from './redlines';
+import { BaselineStore } from './baselineStore';
 import { runAgent } from './agentRun';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
-/** Changes baselines per file, in workspace storage (never next to the document). */
-const BASELINES_KEY = 'mdReview.baselines:';
 
 function readDisk(p: string): string | undefined {
   try {
@@ -35,7 +33,12 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     return false;
   }
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  /** Changes baselines: files in the extension's storage (never next to the document), details in workspace state. */
+  private baselines: BaselineStore;
+
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.baselines = new BaselineStore(vscode.Uri.joinPath(context.storageUri ?? context.globalStorageUri, 'baselines').fsPath, context.workspaceState);
+  }
 
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     const mdPath = document.uri.fsPath;
@@ -85,10 +88,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         // Keep other open MD Review panels in step.
         for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
-      baselines: {
-        load: () => this.context.workspaceState.get<Baselines>(BASELINES_KEY + mdPath),
-        save: (b) => void this.context.workspaceState.update(BASELINES_KEY + mdPath, b.current || b.past.length ? b : undefined),
-      },
+      baselines: this.baselines.forFile(mdPath),
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
       notify: (message) => {

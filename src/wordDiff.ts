@@ -66,7 +66,10 @@ export function diffSeq<T>(a: readonly T[], b: readonly T[], maxD = Infinity): E
   return [...new Array<Edit>(p).fill(0), ...mid, ...new Array<Edit>(s).fill(0)];
 }
 
-const TOKEN = /\s+|[\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)*|[^\s\p{L}\p{N}_]/gu;
+// Chinese, Japanese and Korean text is compared character by character (it has no spaces between words).
+const CJK = String.raw`\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}`;
+const WORD = String.raw`(?:(?![${CJK}])[\p{L}\p{N}_])+`;
+const TOKEN = new RegExp(String.raw`\s+|[${CJK}]|${WORD}(?:['’]${WORD})*|[^\s\p{L}\p{N}_]`, 'gu');
 
 export function words(text: string): string[] {
   return text.match(TOKEN) || [];

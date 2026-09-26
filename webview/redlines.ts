@@ -8,14 +8,16 @@
 import { diffWords, Edit } from '../src/wordDiff';
 
 export interface Block { ls: number; le: number; type: string }
-export interface Hunk { kind: 'changed' | 'inserted' | 'deleted'; moved?: boolean; cur?: Block; base?: Block; c: [number, number]; b: [number, number] }
+export interface Hunk { kind: 'changed' | 'inserted' | 'deleted'; moved?: boolean; pair?: number; cur?: Block; base?: Block; c: [number, number]; b: [number, number] }
 /** Lines [lo, at) of the baseline were replaced and the lines from `at` on moved by `delta` (a Keep, or your own edit). */
 export interface BaseStep { lo: number; at: number; delta: number }
-export interface Changes { v: string; at: string; baseHtml?: string; baseShift?: { from: string; steps: BaseStep[] }; baseId: string; hunks: Hunk[] }
+export interface Changes { v: string; at: string; baseHtml?: string; baseShift?: { from: string; steps: BaseStep[] }; baseId: string; hunks: Hunk[]; spans?: Record<string, [number, number]> }
 
 const SKIP = '.katex-mathml, .mdr-ui, .mdr-front-raw, script, style';
 /** Blocks shown before/after instead of word by word. */
 const WHOLE = 'table, pre, .mdr-wrap, hr';
+/** Blocks whose actions go after them rather than inside: these and headings (a heading's name is its text). */
+const AFTER = WHOLE + ', h1, h2, h3, h4, h5, h6';
 const HAS_WHOLE = '.katex, img, svg, table, pre, .mdr-wrap';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -135,14 +137,14 @@ function paintWords(el: HTMLElement, runs: [Edit, string][]): void {
 export interface Redlines {
   isOn(): boolean;
   setOn(on: boolean): void;
-  /** New hunks from the host (null: no baseline). `paint` false when a full repaint follows anyway. */
-  set(ch: Changes | null, paint?: boolean): void;
+  /** New hunks from the host (null: no baseline). `paint` false when a full repaint follows anyway; `failed` when the host couldn't compare. */
+  set(ch: Changes | null, paint?: boolean, failed?: boolean): void;
   /** Paint the current hunks over the document (after every full paint). */
   apply(): void;
   /** Remove the redline from one block, before it's edited. */
   clearIn(el: HTMLElement): void;
   step(d: 1 | -1): void;
-  /** Scroll to the changes inside a thread's text; turns the view on first if needed. */
+  /** Scroll to the changes inside a thread's text (its lines when sent, if the host doesn't know them); turns the view on first if needed. */
   showThread(id: string, lineStart: number, lineEnd: number): void;
 }
 
@@ -156,8 +158,13 @@ export function createRedlines(
 ): Redlines {
   let on = false;
   let data: Changes | null | undefined; // undefined: not loaded yet
+  let failed = false;
   let base: { id: string; idx: Map<number, HTMLElement[]> } | null = null;
   let cache = new Map<string, [Edit, string][]>();
+  /** Word diffs used by the last paint: the cache keeps only these. */
+  let used = new Map<string, [Edit, string][]>();
+  /** The action chips this code made; a click only counts on one of them, not on look-alike markup in the document. */
+  let chips = new WeakSet<Element>();
   let shown: Painted[] = [];
   let current = -1;
   let pending: (() => void) | null = null;
@@ -183,6 +190,7 @@ export function createRedlines(
     const n = count();
     status.textContent =
       data === undefined ? 'Loading changes…'
+      : failed ? "Couldn't compare the file with its saved copy."
       : !data ? 'Nothing to compare yet. Send to Claude saves a copy of the file to compare against.'
       : n ? `${n} changed block${n === 1 ? '' : 's'} since ${when(data.at)}`
       : `No changes since ${when(data.at)}`;
@@ -208,6 +216,7 @@ export function createRedlines(
 
   function chip(i: number, what: string, withBefore: boolean): HTMLElement {
     const c = document.createElement('span');
+    chips.add(c);
     c.className = 'mdr-rl-acts mdr-ui mdr-rl-ui';
     c.setAttribute('role', 'group');
     c.setAttribute('aria-label', `Change ${i + 1}: ${what}`);
@@ -219,9 +228,9 @@ export function createRedlines(
     return c;
   }
 
-  /** Put the actions inside a text block (after its own text), or after a table, code block or diagram. */
+  /** Put the actions inside a text block (after its own text), or after a heading, table, code block or diagram. */
   function attach(el: HTMLElement, c: HTMLElement) {
-    if (el.matches(WHOLE)) {
+    if (el.matches(AFTER)) {
       c.classList.add('mdr-rl-after');
       el.after(c);
     } else {
@@ -264,8 +273,8 @@ export function createRedlines(
       const a = h.kind === 'inserted' ? '' : textOf(old!);
       const b = textOf(el);
       const key = a + '\u0001' + b;
-      runs = cache.get(key) ?? null;
-      if (!runs) cache.set(key, (runs = diffWords(a, b)));
+      runs = cache.get(key) ?? used.get(key) ?? diffWords(a, b);
+      used.set(key, runs);
       if (!runs.some(([e]) => e !== 0)) runs = null; // only markup changed
     }
     if (runs) {
@@ -296,13 +305,21 @@ export function createRedlines(
       if (v === on) return;
       on = v;
       if (!on) {
+        // Focus in a chip that is going away moves to the toggle.
+        if (document.activeElement?.closest('.mdr-rl-ui')) btn.focus();
         clear();
         pending = null;
+        // Let go of the baseline and the word diffs; the host sends them again next time.
+        base = null;
+        cache = new Map();
+        used = new Map();
+        chips = new WeakSet();
       } else data = undefined;
       renderBar();
       opts.post({ type: 'showChanges', on });
     },
-    set(ch, paint = true) {
+    set(ch, paint = true, fail = false) {
+      failed = fail;
       // The baseline comes once per version; parse it once, inert (no images load).
       if (ch?.baseHtml !== undefined) {
         const tpl = document.createElement('template');
@@ -329,7 +346,9 @@ export function createRedlines(
       if (data === null) pending = null; // no baseline: nothing to go to
       if (!on || !data || !opts.canPaint()) return;
       const cur = indexOf(doc);
+      used = new Map();
       shown = data.hunks.map((h, i) => paintHunk(i, h, cur));
+      cache = used;
       if (current >= data.hunks.length) current = -1;
       opts.painted();
       const run = pending;
@@ -344,24 +363,32 @@ export function createRedlines(
         pending = () => api.step(d);
         return api.setOn(true);
       }
-      const n = shown.length;
+      // In reading order, over the changes that could be shown.
+      const order = shown
+        .filter((p) => targetOf(p))
+        .sort((a, b) => (targetOf(a)!.compareDocumentPosition(targetOf(b)!) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+        .map((p) => p.i);
+      const n = order.length;
       if (!n) return;
-      current = current < 0 ? (d > 0 ? 0 : n - 1) : (current + d + n) % n;
-      focusHunk([current]);
+      const at = order.indexOf(current);
+      focusHunk([order[at < 0 ? (d > 0 ? 0 : n - 1) : (at + d + n) % n]]);
     },
     showThread(id, lineStart, lineEnd) {
       const go = () => {
-        const lo = lineStart - 1;
+        // The thread's lines in the baseline, kept up to date by the host through Keep and your edits.
+        const [lo, hi] = data?.spans?.[id] ?? [lineStart - 1, lineEnd];
         const hits: number[] = [];
         shown.forEach((p, i) => {
           const h = data!.hunks[i];
           const marked = !!p.el && (p.el.querySelector(`mark.mdr-hl[data-cid="${CSS.escape(id)}"]`) || p.el.closest(`mark.mdr-hl[data-cid="${CSS.escape(id)}"]`));
-          // Thread lines were taken before the agent's edit, so they are baseline lines.
           const [bs, be] = h.b;
-          const overlaps = lineStart > 0 && (bs === be ? bs >= lo && bs <= lineEnd : bs < lineEnd && be > lo);
-          if (marked || overlaps) hits.push(i);
+          const overlaps = hi > lo && (bs === be ? bs >= lo && bs <= hi : bs < hi && be > lo);
+          if (targetOf(p) && (marked || overlaps)) hits.push(i);
         });
-        if (!hits.length) return opts.toast("No changed blocks in this thread's text.");
+        if (!hits.length) {
+          doc.querySelectorAll('.mdr-rl-current').forEach((x) => x.classList.remove('mdr-rl-current'));
+          return opts.toast("No changed blocks in this thread's text.");
+        }
         focusHunk(hits);
       };
       if (on && data !== undefined) return go();
@@ -388,9 +415,10 @@ export function createRedlines(
 
   doc.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLElement>('[data-rl]');
-    if (!b || !data) return;
+    const c = b?.closest<HTMLElement>('.mdr-rl-acts.mdr-rl-ui');
+    if (!b || !c || !chips.has(c) || !data) return;
     e.preventDefault();
-    const i = Number(b.closest<HTMLElement>('[data-rl-i]')!.dataset.rlI);
+    const i = Number(c.dataset.rlI);
     const act = b.dataset.rl;
     if (act === 'before') {
       if (before.has(i)) before.delete(i);
@@ -407,7 +435,10 @@ export function createRedlines(
   bar.addEventListener('click', (e) => {
     const act = (e.target as Element).closest<HTMLElement>('[data-rlbar]')?.dataset.rlbar;
     if (act === 'prev' || act === 'next') api.step(act === 'next' ? 1 : -1);
-    else if (act === 'accept') opts.post({ type: 'acceptChanges' });
+    else if (act === 'accept') {
+      opts.post({ type: 'acceptChanges' });
+      btn.focus(); // Accept all is about to be disabled
+    }
     else if (act === 'close') {
       api.setOn(false);
       btn.focus();
