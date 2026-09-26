@@ -43,9 +43,7 @@ function live(r: StaticRange): Range | null {
   return l;
 }
 
-function top(r: StaticRange): number {
-  return live(r)?.getBoundingClientRect().top ?? -Infinity;
-}
+
 
 export interface Search {
   open(): void;
@@ -108,16 +106,20 @@ export function createSearch(doc: HTMLElement, bar: HTMLElement): Search {
       if (ranges.length) {
         if (keepIndex && prev >= 0) index = Math.min(prev, ranges.length - 1);
         else {
-          // Start from the first match below the top of the viewport (matches
-          // are in document order, so binary search).
-          let lo = 0;
-          let hi = ranges.length;
-          while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (top(ranges[mid]) >= 60) hi = mid;
-            else lo = mid + 1;
-          }
-          index = lo < ranges.length ? lo : 0;
+          // Start from the first match below the top of the viewport. One
+          // reused live Range measures them (hidden text measures as 0).
+          const probe = document.createRange();
+          index = ranges.findIndex((r) => {
+            try {
+              probe.setStart(r.startContainer, r.startOffset);
+              probe.setEnd(r.endContainer, r.endOffset);
+            } catch {
+              return false;
+            }
+            return probe.getBoundingClientRect().top >= 60;
+          });
+          probe.detach();
+          if (index < 0) index = 0;
         }
       }
     }
