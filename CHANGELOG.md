@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- YAML front matter (pandoc, Quarto, Jekyll, Hugo, Obsidian) shows as a title card with the title, subtitle, authors, date and keywords, instead of a horizontal rule and a heading full of YAML. The raw YAML is one click away, and Alt+double-click edits it.
+- CriticMarkup renders: {++added++}, {--deleted--}, {~~old~>new~~}, {==highlight==} and {>>note<<}. Deletions used to disappear.
 - The viewer no longer drops sidecar fields it doesn't know. Fields an agent, the CLI, or a newer version adds to the file, a comment, its anchor, or a reply now survive every write.
 - Keyboard shortcuts on both Windows/Linux and macOS, with native keys on each (⌘, ⌥, ⇧⌘Z for redo). New: comment on the selection (Ctrl+Alt+M / ⌥⌘M, or `c`), Submit review (Ctrl+Shift+Enter / ⇧⌘↩), Send to Claude (Ctrl+Alt+Enter / ⌥⌘↩), toggle the comments pane (Ctrl+Alt+P / ⌥⌘P), and `e` for edit mode. Tooltips show the keys for your platform, and `?` (or the keyboard icon) opens a shortcuts sheet.
 - **Send Open Reviews in Folder to Claude** (Explorer right-click on a folder, or the Command Palette): one Claude Code session works through every file with open threads.
