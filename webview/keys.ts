@@ -60,7 +60,6 @@ const SHEET: { title: string; rows: Row[] }[] = [
   {
     title: 'Edit',
     rows: [
-      { label: 'Edit mode on / off', keys: [['E']] },
       { label: 'Save an edit / cancel it', keys: [['Enter', 'Escape']] },
       { label: 'Save raw Markdown (' + (isMac ? 'Option' : 'Alt') + '+double-click)', keys: [['Mod+Enter']] },
       { label: 'Undo edit', keys: [['Mod+Z']] },

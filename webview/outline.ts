@@ -21,6 +21,7 @@ export function createOutline(
   toggleBtn?: HTMLElement,
   /** Word count markup for a heading's section. */
   words: (h: HTMLElement) => string = () => '',
+  headingTop: (h: HTMLElement) => number = h => h.getBoundingClientRect().top,
 ): Outline {
   let heads: HTMLElement[] = [];
   let current = -1;
@@ -35,7 +36,7 @@ export function createOutline(
     let hi = heads.length - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (heads[mid].getBoundingClientRect().top <= 90) {
+      if (headingTop(heads[mid]) <= 90) {
         i = mid;
         lo = mid + 1;
       } else hi = mid - 1;

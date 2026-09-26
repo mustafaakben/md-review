@@ -75,7 +75,7 @@ body { font-family: var(--font); font-size: 15px; line-height: 1.7; -webkit-font
 
 /* ---------- icons ---------- */
 .mdr-file::before, .mdr-empty::before, #mdr-edit-btn::before, .mdr-toggle::before,
-#mdr-edit-mode::before, #mdr-submit::before, #mdr-side-toggle::before,
+#mdr-submit::before, #mdr-side-toggle::before,
 button[data-act="new-comment"]::before, button[data-act="reply"]::before, button[data-act="send"]::before,
 button[data-act="edit-body"]::before, button[data-act="resolve"]::before, button[data-act="reopen"]::before,
 button[data-act="delete"]::before {
@@ -83,7 +83,7 @@ button[data-act="delete"]::before {
   -webkit-mask: var(--ico) center / 16px no-repeat; mask: var(--ico) center / 16px no-repeat;
 }
 .mdr-file::before { --ico: var(--i-markdown); opacity: 0.7; }
-#mdr-edit-mode::before, #mdr-edit-btn::before, button[data-act="edit-body"]::before { --ico: var(--i-edit); }
+#mdr-edit-btn::before, button[data-act="edit-body"]::before { --ico: var(--i-edit); }
 #mdr-submit::before, button[data-act="send"]::before { --ico: var(--i-send); }
 #mdr-side-toggle::before { --ico: var(--i-side-on); }
 #mdr-side-toggle[aria-expanded="false"]::before { --ico: var(--i-side-off); }
@@ -437,12 +437,10 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
   transition: top 0.12s var(--ease), background-color 0.12s, color 0.12s; animation: mdr-fade-in 0.12s var(--ease);
 }
 .mdr-edit-btn:hover { background: var(--hover); color: var(--accent); }
-.mdr-edit-mode .mdr-edit-btn { display: none; }
 .mdr-body-edit { min-height: 60px; }
 
 /* ---------- seamless editing ---------- */
-button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.mdr-edit-mode .mdr-doc [data-ls] { cursor: text; }
+.mdr-doc p[data-ls], .mdr-doc li[data-ls], .mdr-doc tr[data-ls], .mdr-doc :is(h1,h2,h3,h4,h5,h6)[data-ls] { cursor: text; }
 .mdr-doc .mdr-inline-editing {
   outline: none; caret-color: var(--accent);
   box-shadow: -12px 0 0 -9px var(--accent) !important;
@@ -470,3 +468,31 @@ button.mdr-mode.on, .mdr-toolbar button.mdr-mode.on { background: color-mix(in s
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Continuous writing canvas. The editor owns text and selection; its preview
+   decorations never add an editing frame, active-line fill, or gutter. */
+.mdr-writing { min-width: 0; position: relative; }
+.mdr-writing [hidden] { display: none !important; }
+#mdr-canvas { padding-top: 54px; }
+.mdr-save-status { position: absolute; top: 17px; right: 24px; font-size: 11px; color: var(--muted); }
+.mdr-save-status.error { color: var(--vscode-errorForeground, #b44); }
+.mdr-conflict { margin: 12px 24px; padding: 12px; border: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; }
+#mdr-canvas .cm-editor { outline: none; }
+#mdr-canvas .cm-line { background: none; }
+#mdr-canvas .mdr-live-h1 { font-size: 1.85em; font-weight: 650; letter-spacing: -.025em; line-height: 1.35; }
+#mdr-canvas .mdr-live-h2 { font-size: 1.4em; font-weight: 650; letter-spacing: -.015em; line-height: 1.4; }
+#mdr-canvas .mdr-live-h3 { font-size: 1.18em; font-weight: 650; }
+#mdr-canvas :is(.mdr-live-h4,.mdr-live-h5,.mdr-live-h6) { font-weight: 650; }
+.mdr-live-strong { font-weight: 700; }
+.mdr-live-em { font-style: italic; }
+.mdr-live-strike { text-decoration: line-through; }
+.mdr-live-syntax { color: var(--doc-muted); opacity: .55; }
+.mdr-live-code { font-family: var(--vscode-editor-font-family, monospace); font-size: .9em; }
+.mdr-live-link { color: var(--doc-accent); text-decoration: underline; text-underline-offset: 3px; }
+.mdr-live-fence { font-family: var(--vscode-editor-font-family, monospace); font-size: .9em; }
+.mdr-live-quote { border-left: 2px solid var(--doc-rule); padding-left: 18px !important; color: var(--doc-muted); }
+.mdr-live-comment { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+.mdr-rich { cursor: text; }
+.mdr-rich > :first-child { margin-top: 0; }
+.mdr-rich > :last-child { margin-bottom: 0; }
+#mdr-canvas .cm-tooltip { background: var(--doc-bg); color: var(--doc-fg); }

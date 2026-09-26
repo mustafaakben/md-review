@@ -1,6 +1,7 @@
 // Host-side message handling, independent of the VS Code API so the same code
 // drives both the extension and the browser test harness.
 import * as crypto from 'crypto';
+import { applySourceEdit, sourceText, SourceChange } from './sourceEdit';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
@@ -49,7 +50,9 @@ export interface BaselineInfo {
 }
 
 export type ToWebview =
-  | { type: 'render'; blocks: string[]; fileName: string; targets?: WordTargets; changes?: Changes | null; changesFailed?: boolean }
+  | { type: 'render'; source: string; blocks: string[]; fileName: string; targets?: WordTargets; changes?: Changes | null; changesFailed?: boolean }
+  | { type: 'sourceSaved'; seq: number; source: string }
+  | { type: 'sourceConflict'; seq: number; message: string }
   | { type: 'linkCheck'; missing: string[]; seq?: number }
   | { type: 'changes'; changes: Changes | null; failed?: boolean }
   | { type: 'baseline'; info: BaselineInfo | null }
@@ -105,6 +108,7 @@ export interface ReviewRun {
 
 export type FromWebview =
   | { type: 'ready' }
+  | { type: 'saveSource'; original: string; changes: SourceChange[]; seq: number }
   | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta; suggestion?: string }
   /** Apply a suggestion: the block's rendered text before and after, as for saveInline. */
   | { type: 'applySuggestion'; id: string; from?: string; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
@@ -315,7 +319,7 @@ export class ReviewSession {
       changes = null; // a text the parser rejects: show no redlines rather than fail the render
       changesFailed = true;
     }
-    this.ctx.post({ type: 'render', blocks, fileName: path.basename(this.ctx.mdPath), targets: env.front?.targets, changes, changesFailed });
+    this.ctx.post({ type: 'render', source: sourceText(text), blocks, fileName: path.basename(this.ctx.mdPath), targets: env.front?.targets, changes, changesFailed });
     this.syncHistory();
     this.postBaseline();
   }
@@ -821,6 +825,18 @@ export class ReviewSession {
         this.assertEditable();
         const text = readBlock(fs.readFileSync(this.ctx.mdPath), msg.ls, msg.le);
         this.ctx.post({ type: 'block', ls: msg.ls, le: msg.le, text });
+        return;
+      }
+      case 'saveSource': {
+        try {
+          if (this.ctx.isDirty()) throw new Error('Another editor has unsaved changes. Save those first. Your writing remains here.');
+          let source = '';
+          this.recorded(() => { source = applySourceEdit(this.ctx.mdPath, msg.original, msg.changes); }, YOURS);
+          this.ctx.post({ type: 'sourceSaved', seq: msg.seq, source });
+          this.render(true);
+        } catch (e: any) {
+          this.ctx.post({ type: 'sourceConflict', seq: msg.seq, message: e.message || String(e) });
+        }
         return;
       }
       case 'saveBlock':

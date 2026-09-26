@@ -65,24 +65,24 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) or `c` to go straight to the comment box.
 - In the comment box, pick a kind: **Comment** (asks for a change), **Question** (asks for an answer, not an edit) or **Praise** (no action). Optionally mark it **Major**, **Minor** or **Nit** (Alt+1/2/3, ⌥1/2/3 on macOS). Plain comments look exactly as before.
 - Selections snap to whole words, so a drag that stops mid-word quotes the whole word.
-- **Suggest edit.** In the comment box, **Suggest edit** opens a "Replace with" box holding the selection. Rewrite it (or clear it to suggest deleting it) and save. The card shows the change as a small redline with **Apply**, which rewrites just that text in the file through the same checked path as typing in the view, then resolves the thread. Undo reverts it. If the quote spans blocks or sits next to math or citations, Apply opens the source instead.
+- **Suggest edit.** In the comment box, **Suggest edit** opens a "Replace with" box holding the selection. Rewrite it (or clear it to suggest deleting it) and save. The card shows the change as a small redline with **Apply**, which rewrites just that text in the file through the checked rendered-text edit path, then resolves the thread. Undo reverts it. If the quote spans blocks or sits next to math or citations, Apply opens the source instead.
 - **Whole sections and the whole document.** Hover a heading and click the comment icon at its right to comment on that section. **Comment on document** in the comments pane is for notes about the whole file.
 - The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
-- Each thread has Reply, Resolve/Reopen, and (for drafts) Delete.
+- Each thread has Reply, Resolve/Reopen, and Delete. A draft is deleted at once; a submitted or resolved thread asks "Delete thread?" first, since deleting it removes its replies too and can't be undone.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
 - The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. The choice is remembered, and clicking a highlighted comment in the text reopens the pane.
 
-**Editing: seamless, no boxes.**
-- Turn on **Edit** in the toolbar, then click anywhere in a paragraph, heading, list item, or table row and type. You can also double-click text, or use the pencil that appears in the left margin on hover.
-- **Enter** or clicking away saves. **Esc** cancels.
-- Bold/italic/link markup around your change is kept. For example, retyping a word inside `**Station function**` keeps the `**`.
-- How it works: the host diffs the rendered text before and after your edit and maps the change onto the Markdown source. It re-renders the candidate and **writes only if the result shows exactly what you typed**. Only that block's source lines are rewritten, and every other byte (including CRLF/LF endings) is left alone.
-- If a change can't be mapped with certainty (blocks with math, images, or code, or typing Markdown syntax), nothing is written. The raw Markdown for that block opens instead.
-- **Alt+double-click** (Option+double-click on macOS) always opens the raw Markdown of a block.
-- If the file changed on disk since it was rendered (say, Claude edited it), the edit is refused and the view refreshes.
-- Ctrl+B/I/U (⌘B/I/U) are disabled while editing, since formatting isn't a text change. Use Alt+double-click (Option+double-click) to add markup.
+**Writing: a continuous live Markdown canvas.**
+- Click anywhere and write. The document is one editor: there are no block editing boxes, active-paragraph fills, or Edit/Done switches.
+- Type `# Heading` or `## Section` and the line takes on heading styling as you write. Markdown markers appear near the cursor and hide when you move away. Bold, italic, strikethrough, inline code, and links render in the same canvas.
+- **Enter** continues writing on a new line. Lists and quotes continue their markers automatically; Enter on an empty list item exits the list. Backspace and selection work across paragraph boundaries.
+- Changes save automatically after a short pause and when focus leaves the document. A quiet status shows **Unsaved**, **Saving…**, or **Saved**. Ctrl+S / ⌘S flushes a pending save.
+- Tables, math, images, citations, and fenced code use the existing renderer when the cursor is outside them. Move into a complex block to edit its Markdown directly in the same canvas.
+- Select a passage and click **Comment**, or press Ctrl+Alt+M / ⌥⌘M. Pending writing saves before the comment is created. The comments pane, outline, document health, and agent workflow remain alongside the editor.
+- Saves apply source transactions rather than re-serializing Markdown. The host checks the original document before writing and preserves untouched bytes, including BOM and existing line endings. New lines use the file's line-ending style.
+- If another editor changes the file while you have unsaved writing, your draft stays in the canvas and automatic saves stop. **Copy my writing** preserves the draft on the clipboard; **Load updated file** loads the external version. The VS Code view also retains an unsaved draft in its saved view state for recovery when it reopens.
 
-**Undo.** Ctrl+Z (⌘Z) undoes your last edit in the view and Ctrl+Y or Ctrl+Shift+Z (⇧⌘Z) redoes it; the undo and redo arrows in the toolbar do the same. They grey out as soon as there is nothing to undo, including right after another program changes the file. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
+**Undo.** Ctrl+Z / ⌘Z and Ctrl+Shift+Z / ⇧⌘Z undo and redo writing continuously, including new paragraphs and formatting. The toolbar arrows do the same. In the Changes view, undo and redo use the host's byte-exact history for review actions. External revisions are checked before writes, so stale writing cannot silently replace another editor's changes.
 
 **Getting around.**
 - **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O / ⇧⌘O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
@@ -139,7 +139,6 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 | Find in document | Ctrl+F or `/` | ⌘F or `/` |
 | Outline | Ctrl+Shift+O | ⇧⌘O |
 | Comments pane | Ctrl+Alt+P | ⌥⌘P |
-| Edit mode on / off | `e` | `e` |
 | Undo / redo edit | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | ⌘Z / ⇧⌘Z |
 | Zoom in / out / reset | Ctrl+= / Ctrl+− / Ctrl+0 | ⌘= / ⌘− / ⌘0 |
 | Keyboard shortcuts | `?` | `?` |
@@ -295,16 +294,17 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/redlines.ts`, `src/wordDiff.ts` | Changes view: baselines, block matching, word diff |
 | `src/docModel.ts`, `src/textQuote.ts` | the view's text and blocks without a browser; quote anchoring shared with the webview |
 | `src/docx.ts`, `src/wordImport.ts`, `src/zip.ts`, `src/wordCommands.ts` | Word export with comments, comment/tracked-change import, the ZIP container; bundled apart as `dist/word.js`, loaded on first use |
+| `webview/liveEditor.ts`, `src/sourceEdit.ts` | Continuous live Markdown editor, autosave and checked source transactions |
 | `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts`, `redlines.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 
 ## Known limits
 
-- Block editing works on disk bytes. If the same file has unsaved edits in a text editor, save or revert them first.
+- Saving works on disk bytes. If the same file has unsaved edits in another text editor, save or revert them first; the canvas keeps your draft while the conflict is unresolved.
 - The quote is anchored on rendered text. A selection that crosses math or UI elements anchors on the visible text only.
 - The Changes view compares against the copy saved at Send. Your edits in the view are left out, but edits made in the text editor or by other tools after Send show as changes, and an edit inside a change Claude made is part of that change. Blocks are matched on their source lines: a nested list item is matched on its own line, and a table or code block as a whole.
-- Undo history lives in the open view and covers edits made there. It's cleared if another program changes the file in between, so an agent's edits are never overwritten by an undo.
+- Writing undo history lives in the open view. Reloading the view starts a fresh undo history; unsaved draft recovery is separate. External file revisions are checked before every save.
 - Inline `<!-- COMMENT -->` storage is not implemented. By design the `.md` stays clean.
 - Word export is a plain rendering: math is TeX source, Mermaid diagrams are their source, remote images are `[alt text]`, and there is no bibliography styling beyond the viewer's reference list. Word comments made on an equation land on the whole equation.
 

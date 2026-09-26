@@ -20,3 +20,5 @@ export { buildDocModel, modelFromHtml, tokenizeHtml, linesAt, isLocalImage } fro
 export { writeZip, readZip, openZip, crc32, ZipError, LIMITS as zipLimits } from './zip';
 export { exportDocx, exportTargetProblem, threadsToExport, writeDocxFile, xml as xmlEscape } from './docx';
 export { importDocx, readDocx, placeQuote, splitMeta, widenToWords, xmlTokens } from './wordImport';
+
+export * from './sourceEdit';

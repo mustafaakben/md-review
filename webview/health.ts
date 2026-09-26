@@ -314,6 +314,7 @@ export function createHealth(o: Options): Health {
     const k = (turn.get(it.key) ?? -1) + 1;
     turn.set(it.key, k);
     const el = els[k % els.length];
+    if (!el.dispatchEvent(new CustomEvent('mdr-reveal', { bubbles: true, cancelable: true }))) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.classList.remove('mdr-flash');
     void el.offsetWidth; // restart the animation

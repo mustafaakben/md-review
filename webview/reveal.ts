@@ -97,6 +97,7 @@ export function settle(delta: () => number | null, frames = 8, done?: () => void
 }
 
 export function reveal(target: Target | null | undefined, place: Place, smooth = true): void {
+  if (target instanceof Element && !target.dispatchEvent(new CustomEvent('mdr-reveal', { bubbles: true, cancelable: true }))) return;
   if (!target) return;
   const node = target instanceof Range ? target.startContainer : target;
   const delta = () => {

@@ -1,3 +1,4 @@
+import { createLiveEditor, LiveSelection } from './liveEditor';
 import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
@@ -94,9 +95,8 @@ app.innerHTML = `
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
       <button id="mdr-changes-btn" class="mdr-icon-btn" title="${tip('Changes since you sent to Claude', ']')}" aria-label="Show changes" aria-pressed="false" aria-controls="mdr-changes"></button>
       <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
-      <span class="mdr-hint">Select text to comment · double-click text to edit</span>
+      <span class="mdr-hint">Click to edit · select text to comment</span>
       <button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button>
-      <button id="mdr-edit-mode" class="mdr-mode" title="${tip('Edit mode: click any paragraph, heading, list item, or table row and type', 'E')}">Edit</button>
       <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
       <button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button>
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
@@ -109,7 +109,7 @@ app.innerHTML = `
   <div id="mdr-health" class="mdr-reading-panel mdr-health-panel mdr-ui" role="dialog" aria-label="Document health" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
-    <main id="mdr-doc" class="mdr-doc"></main>
+    <main class="mdr-writing"><div id="mdr-save-status" class="mdr-save-status mdr-ui" role="status" aria-live="polite"></div><div id="mdr-conflict" class="mdr-conflict mdr-ui" hidden><span>Your writing is preserved. Copy it before loading the updated file.</span><button id="mdr-copy-draft">Copy my writing</button><button id="mdr-load-disk">Load updated file</button></div><div id="mdr-canvas" class="mdr-doc"></div><div id="mdr-doc" class="mdr-doc" hidden></div></main>
     <aside class="mdr-sidebar mdr-ui">
       <div class="mdr-side-head">
         <div class="mdr-filters"></div>
@@ -123,7 +123,7 @@ app.innerHTML = `
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
   <div id="mdr-keys" class="mdr-keys mdr-ui" hidden></div>
-  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text (or double-click it). ${altName}+double-click edits the raw Markdown." aria-label="Edit" hidden></button>
+  <button id="mdr-edit-btn" class="mdr-edit-btn mdr-ui" title="Edit this text. ${altName}+double-click edits the raw Markdown." aria-label="Edit" hidden></button>
   <button id="mdr-sec-btn" class="mdr-sec-btn mdr-ui" title="Comment on this whole section" aria-label="Comment on this section" hidden></button>`;
 const doc = document.getElementById('mdr-doc')!;
 const sidebar = document.getElementById('mdr-threads')!;
@@ -185,6 +185,7 @@ const outline = createOutline(
   (open) => vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open }),
   outlineBtn,
   (h) => health.sectionWords(h),
+  (h) => doc.hidden ? live.lineTop(Number(h.dataset.ls || 0) + 1) : h.getBoundingClientRect().top,
 );
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -195,7 +196,12 @@ const fmt = (iso: string | null) => {
   const d = new Date(iso);
   return isNaN(+d) ? iso : dateFmt.format(d);
 };
-const post = (m: unknown) => vscode.postMessage(m);
+const post = (m: unknown) => {
+  const type = (m as { type: string }).type;
+  if (['sendToAgent', 'startReview', 'submitReview', 'applySuggestion', 'revertChange'].includes(type) && live.dirty) {
+    live.whenSaved(() => vscode.postMessage(m));
+  } else vscode.postMessage(m);
+};
 
 function toast(msg: string, isError = false) {
   toastEl.textContent = msg;
@@ -410,6 +416,7 @@ function readingPosition(): Position {
 }
 
 function restorePosition(at: Position) {
+  if (doc.hidden) return;
   const el = at && findBlock(at);
   if (!el) {
     restoring = undefined;
@@ -560,7 +567,7 @@ function renderSidebar() {
   if (!visible.length && comments.length) {
     add('e:filter', `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`);
   } else if (!visible.length) {
-    add('e:none', `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`);
+    add('e:none', `<div class="mdr-empty">Select text in the document to add a comment.<br><br>Write naturally. Use # for headings, **bold** for emphasis, and Enter to keep going. Your changes save automatically.</div>`);
   }
   const now = Date.now(); // one clock for every card's working state
   const cards = (cs: Comment[]) => cs.forEach((c) => add('c:' + c.id, card(c, now)));
@@ -680,7 +687,7 @@ function card(c: Comment, now = Date.now()): string {
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
     c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
     answered(c) ? `<button data-act="show-change" title="Show what changed in this thread's text since you sent it">Show change</button>` : '',
-    c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
+    `<button data-act="delete" class="danger" title="${c.status === 'draft' ? 'Delete this draft' : 'Delete this thread and its replies'}">Delete</button>`,
   ].join('');
   const replyBox = openReplies.has(c.id)
     ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
@@ -712,7 +719,10 @@ function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   marks.forEach((m) => m.classList.add('active'));
   const cardEl = sidebar.querySelector(`.mdr-card[data-id="${id}"]`);
   cardEl?.classList.add('active');
-  if (scrollDoc) reveal(marks[0], 'center');
+  if (scrollDoc) {
+    if (!redlines.isOn()) live.jump(comments.find(c => c.id === id)?.anchor.lineStart || 1);
+    else reveal(marks[0], 'center');
+  }
   // In one column the thread list is below the document, in the same scroll:
   // there the highlight wins.
   if (scrollCard && cardEl && !(scrollDoc && matchMedia('(max-width: 620px)').matches)) {
@@ -784,7 +794,7 @@ function syncPop() {
 /** Anchor the current document selection, or return null when there is none to comment on. */
 function selectionRange(): Range | null {
   const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount || editing || inline || editMode) return null;
+  if (!sel || sel.isCollapsed || !sel.rangeCount || editing || (inline && (inline.saving || inline.el.textContent !== inline.oldText))) return null;
   const range = snapToWords(sel.getRangeAt(0));
   if (!doc.contains(range.commonAncestorContainer)) return null;
   // Show the snapped range, so what's highlighted is what gets quoted.
@@ -808,14 +818,14 @@ function selectionRange(): Range | null {
 }
 
 document.addEventListener('mouseup', (ev) => {
-  if ((ev.target as Element).closest?.('.mdr-pop')) return;
+  if ((ev.target as Element).closest?.('.mdr-pop, #mdr-canvas')) return;
   setTimeout(() => {
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount || editing || inline || editMode) {
+    if (!sel || sel.isCollapsed || !sel.rangeCount || editing || inline?.saving) {
       if (!pop.querySelector('textarea')) hidePop();
       return;
     }
-    const range = selectionRange();
+    const range = inline && !inline.saving && inline.el.textContent !== inline.oldText ? sel.getRangeAt(0) : selectionRange();
     if (!range) return;
     pop.innerHTML = `<button class="mdr-primary" data-act="new-comment" title="${tip('Comment', 'Mod+Alt+M', 'C')}">Comment</button>`;
     placePop(range);
@@ -857,11 +867,12 @@ function openCommentBox(top: number) {
 
 /** Keyboard route to a new comment: open the comment box on the current selection. */
 function commentOnSelection() {
+  if (!redlines.isOn()) return liveComment();
   const box = pop.querySelector('textarea') as HTMLTextAreaElement | null;
   if (box) return box.focus();
+  if (saveSelection()) return;
   // AltGr is Ctrl+Alt on Windows, so AltGr+M (µ) typed in a text box can arrive here: stay quiet.
-  if (isTyping(document.activeElement) || editing || inline) return;
-  if (editMode) return toast('Turn off edit mode to comment.');
+  if ((isTyping(document.activeElement) && !inline) || editing || inline?.saving) return;
   const range = selectionRange();
   // A heading focused from the outline (Enter) gets a comment on its whole section.
   const h = document.activeElement as HTMLElement | null;
@@ -884,6 +895,8 @@ pop.addEventListener('mousedown', (e) => {
 pop.addEventListener('click', (e) => {
   if (pickerClick(e.target as Element)) return;
   const act = (e.target as Element).closest('[data-act]')?.getAttribute('data-act');
+  if (act === 'live-comment') return liveComment();
+  if (act === 'new-comment' && saveSelection()) return;
   if (act === 'new-comment' && pendingAnchor) {
     openCommentBox(pop.getBoundingClientRect().top + window.scrollY);
   } else if (act === 'toggle-sugg') {
@@ -911,6 +924,14 @@ pop.addEventListener('keydown', (e) => {
 
 /** Health panel: move an orphaned thread onto the selected passage, captured as for a new comment. */
 function reanchorTo(id: string) {
+  if (!redlines.isOn()) {
+    const selected = live.selection();
+    if (!selected) return toast('Select the passage this comment is about first.');
+    if (live.conflicted) return toast('Resolve the file conflict before moving the comment.', true);
+    live.whenSaved(() => post({ type: 'reanchor', id, anchor: { quote: selected.quote, prefix: '', suffix: '', lineStart: selected.lineStart, lineEnd: selected.lineEnd } }));
+    hidePop();
+    return;
+  }
   // The open comment box owns pendingAnchor: don't take it from a comment being written.
   if (composing()) return toast('Save or cancel the comment you are writing first.');
   if (!selectionRange() || !pendingAnchor || !pendingAnchor.lineStart) return toast('Select the passage this comment is about, then press Re-anchor to selection.');
@@ -996,8 +1017,20 @@ sidebar.addEventListener('click', (e) => {
       else renderSidebar();
       return;
     }
-    case 'delete':
+    case 'delete': {
+      // A draft goes at once; a sent thread (and its replies) takes a second click, since there's no undo.
+      const btn = t.closest('[data-act="delete"]') as HTMLButtonElement;
+      if (comments.find((x) => x.id === id)?.status !== 'draft' && !btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Delete thread?';
+        setTimeout(() => {
+          delete btn.dataset.armed;
+          btn.textContent = 'Delete';
+        }, 4000);
+        return;
+      }
       return post({ type: 'deleteComment', id });
+    }
     case 'apply-sugg': {
       const c = comments.find((x) => x.id === id);
       const from = (t.closest('[data-from]') as HTMLElement).dataset.from || '';
@@ -1094,7 +1127,7 @@ doc.addEventListener('click', (e) => {
   const a = t.closest('a');
   if (a) {
     e.preventDefault();
-    if (editMode || inline) return;
+    if (inline) return;
     const href = a.getAttribute('href') || '';
     if (href.startsWith('#')) {
       let id = href.slice(1);
@@ -1114,7 +1147,7 @@ document.getElementById('mdr-keys-btn')!.addEventListener('click', () => keyShee
 sendBtn.addEventListener('click', () => post({ type: 'sendToAgent' }));
 undoBtn.addEventListener('click', () => post({ type: 'undo' }));
 redoBtn.addEventListener('click', () => post({ type: 'redo' }));
-document.getElementById('mdr-find-btn')!.addEventListener('click', () => search.open());
+document.getElementById('mdr-find-btn')!.addEventListener('click', () => redlines.isOn() ? search.open() : live.find());
 // A keyboard press (detail 0) moves focus into the outline; a mouse click leaves it alone.
 outlineBtn.addEventListener('click', (e) => outline.setOpen(!outline.isOpen(), e.detail === 0));
 outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
@@ -1159,6 +1192,7 @@ function isTyping(t: EventTarget | null): boolean {
 
 /** Undo/redo: native inside a text field, otherwise the last file edit. */
 function undoRedo(which: 'undo' | 'redo') {
+  if (!redlines.isOn()) { live[which](); return; }
   if (isTyping(document.activeElement)) document.execCommand(which);
   else post({ type: which });
 }
@@ -1192,7 +1226,7 @@ function runCommand(cmd: string) {
     case 'redo':
       return undoRedo(cmd);
     case 'find':
-      return search.open();
+      return redlines.isOn() ? search.open() : live.find();
     case 'next':
     case 'prev':
       // Alt+Up/Down reach here even while typing a comment or editing text.
@@ -1237,6 +1271,7 @@ function runCommand(cmd: string) {
 }
 
 document.addEventListener('keydown', (e) => {
+  if ((e.target as Element).closest('#mdr-canvas')) return;
   const mod = hasMod(e);
   const k = e.key.toLowerCase();
   const code = e.code; // Option on macOS changes e.key (⌥M types µ), so match letters by key position
@@ -1278,9 +1313,7 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       commentOnSelection();
     }
-  } else if (k === 'e' && !e.shiftKey) {
-    e.preventDefault();
-    setEditMode(!editMode);
+
   } else if (e.key === ']' || e.key === '[') redlines.step(e.key === ']' ? 1 : -1);
   else if (k === 'j' || k === 'n') navigate(1);
   else if (k === 'k' || k === 'p') navigate(-1);
@@ -1323,20 +1356,52 @@ setSidebarOpen((vscode.getState() || {}).sidebarOpen ?? true);
 // when a block can't be edited inline (math, images, code) or on Alt+double-click.
 const INLINE_KIND: Record<string, string> = { P: 'paragraph', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', LI: 'list_item', TR: 'tr' };
 const EDITABLE = 'p[data-ls], h1[data-ls], h2[data-ls], h3[data-ls], h4[data-ls], h5[data-ls], h6[data-ls], li[data-ls], tr[data-ls], .mdr-wrap[data-ls], pre[data-ls], hr[data-ls]';
-let editMode = false;
 let inline: { el: HTMLElement; ls: number; le: number; kind: string; oldText: string; oldHtml: string; saving: boolean } | null = null;
-const editModeBtn = document.getElementById('mdr-edit-mode') as HTMLButtonElement;
+let nextInline: { ls: string; tag: string; offset: number } | null = null;
+let nextSelection: { ls: string; tag: string; start: number; end: number } | null = null;
 
-function setEditMode(on: boolean) {
-  editMode = on;
-  document.body.classList.toggle('mdr-edit-mode', on);
-  editModeBtn.classList.toggle('on', on);
-  editModeBtn.textContent = on ? 'Done editing' : 'Edit';
-  vscode.setState({ ...(vscode.getState() || {}), editMode: on });
-  if (!on) commitInline();
-  hidePop();
+/** Save newly typed words before anchoring a comment to them. */
+function saveSelection(): boolean {
+  if (!inline || inline.el.textContent === inline.oldText) return false;
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  if (!inline.el.contains(range.commonAncestorContainer)) return false;
+  const before = range.cloneRange();
+  before.selectNodeContents(inline.el);
+  before.setEnd(range.startContainer, range.startOffset);
+  const start = before.toString().length;
+  nextSelection = { ls: String(inline.ls), tag: inline.el.tagName, start, end: start + range.toString().length };
+  commitInline();
+  return true;
 }
-editModeBtn.addEventListener('click', () => setEditMode(!editMode));
+
+/** Capture a caret as a text offset, so a saved block can be rendered again. */
+function caretOffset(el: HTMLElement): number {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount || !el.contains(sel.focusNode)) return 0;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.setEnd(sel.focusNode!, sel.focusOffset);
+  return range.toString().length;
+}
+function placeCaret(el: HTMLElement, offset: number) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const n = node.textContent!.length;
+    if (offset <= n) {
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.collapse(true);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    offset -= n;
+  }
+}
 
 function canInline(el: HTMLElement): boolean {
   if (!INLINE_KIND[el.tagName]) return false;
@@ -1366,6 +1431,8 @@ const sameBlocks = (a: string[], b: string[]) => a.length === b.length && a.ever
 
 function startInline(el: HTMLElement, caretAtEnd = false) {
   if (editing || inline) return;
+  editBtn.hidden = true;
+  secBtn.hidden = true;
   redlines.clearIn(el);
   docStale = true;
   touched.add(topBlock(el));
@@ -1373,7 +1440,9 @@ function startInline(el: HTMLElement, caretAtEnd = false) {
   el.contentEditable = 'true';
   el.spellcheck = true;
   el.classList.add('mdr-inline-editing');
+  const offset = caretOffset(el);
   el.focus();
+  placeCaret(el, offset);
   if (caretAtEnd) {
     const r = document.createRange();
     r.selectNodeContents(el);
@@ -1407,6 +1476,7 @@ function commitInline() {
 
 doc.addEventListener('keydown', (e) => {
   if (!inline || !inline.el.contains(e.target as Node)) return;
+  if (e.isComposing) return;
   if (e.key === 'Enter') {
     e.preventDefault();
     commitInline();
@@ -1417,6 +1487,7 @@ doc.addEventListener('keydown', (e) => {
     e.preventDefault(); // formatting can't be expressed as a plain-text change
   }
 });
+doc.addEventListener('input', () => { if (inline) hidePop(); });
 doc.addEventListener('beforeinput', (e) => {
   if (inline && /^(insertParagraph|insertLineBreak|format)/.test((e as InputEvent).inputType)) e.preventDefault();
 });
@@ -1427,34 +1498,51 @@ doc.addEventListener('paste', (e) => {
   document.execCommand('insertText', false, text);
 });
 doc.addEventListener('focusout', (e) => {
-  if (inline && e.target === inline.el) setTimeout(() => commitInline(), 0);
+  const leaving = inline;
+  if (leaving && e.target === leaving.el) setTimeout(() => {
+    if (inline === leaving) commitInline();
+  }, 0);
 });
 
-// Edit mode: clicking a block places the caret in it directly.
-doc.addEventListener('mousedown', (e) => {
-  if (!editMode || editing || e.button !== 0) return;
-  if ((e.target as Element).closest('.mdr-task, .mdr-rl-ui')) return;
+// A single click edits; a drag or double-click remains a normal text selection.
+// Wait for the click's selection before enabling contenteditable, so reading and
+// commenting do not require a separate mode.
+doc.addEventListener('click', (e) => {
+  if (editing || e.button !== 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+  if ((e.target as Element).closest('a, button, input, .mdr-ui, .mdr-rl-ui')) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.isCollapsed) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
-  if (!el || !doc.contains(el) || (inline && inline.el === el)) return;
-  if ((e.target as Element).closest('a')) e.preventDefault();
-  if (inline) commitInline();
-  if (inline) return; // previous block still saving
-  if (canInline(el)) startInline(el);
-  else startEdit(el, true);
+  if (!el || !canInline(el) || inline?.el === el) return;
+  const offset = caretOffset(el);
+  if (inline) {
+    nextInline = { ls: el.dataset.ls!, tag: el.tagName, offset };
+    commitInline();
+    if (inline) return;
+    nextInline = null;
+  }
+  hidePop();
+  startInline(el);
+  placeCaret(el, offset);
 });
 
 doc.addEventListener('dblclick', (e) => {
+  if (!e.altKey) return; // native word selection
   if ((e.target as Element).closest('.mdr-task, .mdr-rl-ui')) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
-  if (!el || !doc.contains(el) || inline) return;
-  startEdit(el, e.altKey); // Alt+double-click = raw Markdown source
+  if (!el || !doc.contains(el)) return;
+  if (inline) {
+    if (inline.el.textContent !== inline.oldText) return;
+    endInline(false);
+  }
+  startEdit(el, true);
 });
 
 // Hover edit (pencil) button in the left gutter of the block under the pointer.
 const editBtn = document.getElementById('mdr-edit-btn') as HTMLButtonElement;
 let hoverEl: HTMLElement | null = null;
 doc.addEventListener('mousemove', (e) => {
-  if (editing || inline || editMode) return;
+  if (editing || inline) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
   if (!el || !doc.contains(el) || el === hoverEl) return;
   hoverEl = el;
@@ -1525,7 +1613,7 @@ editBtn.addEventListener('click', () => {
   if (canInline(el)) startInline(el, true);
   else startEdit(el, true);
 });
-setEditMode(!!(vscode.getState() || {}).editMode);
+
 
 function openEditor(ls: number, le: number, text: string) {
   const el = doc.querySelector(`.mdr-pending[data-ls="${ls}"][data-le="${le}"]`) as HTMLElement | null
@@ -1583,10 +1671,88 @@ function closeEditor() {
 }
 
 // ---------------------------------------------------------------- host messages
+const canvas = document.getElementById('mdr-canvas')!;
+let liveSelection: LiveSelection | null = null;
+const live = createLiveEditor(canvas, {
+  recovery: saved.liveDraft,
+  draft: (value) => vscode.setState({ ...(vscode.getState() || {}), liveDraft: value }),
+  send: post,
+  status: (message, conflict = false) => {
+    const status = document.getElementById('mdr-save-status')!;
+    status.textContent = message;
+    status.classList.toggle('error', conflict);
+    document.getElementById('mdr-conflict')!.hidden = !conflict;
+  },
+  selection: (selection) => {
+    liveSelection = selection;
+    if (pop.querySelector('textarea')) return;
+    if (!selection) return hidePop();
+    popAnchor = null;
+    pop.innerHTML = `<button class="mdr-primary" data-act="live-comment">Comment</button>`;
+    pop.hidden = false;
+    pop.style.left = `${Math.max(8, Math.min(window.innerWidth - 330, selection.rect.left))}px`;
+    pop.style.top = `${selection.rect.bottom + window.scrollY + 8}px`;
+  },
+  comment: () => liveComment(),
+  thread: (id) => activate(id, false, true),
+  link: (href) => {
+    if (href.startsWith('#')) {
+      let id = href.slice(1); try { id = decodeURIComponent(id); } catch {}
+      const target = doc.querySelector(`[id="${CSS.escape(id)}"]`);
+      if (target) reveal(target, 'center');
+    } else if (href) post({ type: 'openLink', href });
+  },
+  history: (canUndo, canRedo) => { undoBtn.disabled = !canUndo; redoBtn.disabled = !canRedo; },
+});
+function liveComment() {
+  const selected = live.selection() || liveSelection;
+  if (!selected) return toast('Select a passage to comment on it.');
+  if (live.conflicted) return toast('Copy your writing and resolve the file conflict before commenting.', true);
+  live.whenSaved(() => {
+    pendingAnchor = { quote: selected.quote, prefix: '', suffix: '', lineStart: selected.lineStart, lineEnd: selected.lineEnd };
+    // Context from the rendered source disambiguates repeated quotations.
+    const map = textMap(doc);
+    const block = doc.querySelector(`[data-ls="${selected.lineStart - 1}"]`);
+    const nodeIndex = block ? map.nodes.findIndex(node => block.contains(node)) : -1;
+    const start = nodeIndex < 0 ? 0 : map.starts[nodeIndex];
+    const at = map.text.indexOf(selected.quote, start);
+    if (at >= 0) {
+      pendingAnchor.prefix = map.text.slice(Math.max(0, at - 32), at);
+      pendingAnchor.suffix = map.text.slice(at + selected.quote.length, at + selected.quote.length + 32);
+    }
+    popAnchor = null;
+    pop.hidden = false;
+    pop.style.left = `${Math.max(8, Math.min(window.innerWidth - 330, selected.rect.left))}px`;
+    openCommentBox(selected.rect.bottom + window.scrollY + 8);
+  });
+}
+const conflictCopy = document.getElementById('mdr-copy-draft')!;
+conflictCopy.addEventListener('click', () => copyText(live.text()).then(ok => toast(ok ? 'Your writing is on the clipboard.' : 'Could not copy your writing.', !ok)));
+document.getElementById('mdr-load-disk')!.addEventListener('click', () => {
+  // Keep a local recovery copy even when the user chooses the external version.
+  vscode.setState({ ...(vscode.getState() || {}), recoveredWriting: live.text() });
+  live.reload();
+});
+function showCanvas() {
+  const reviewing = redlines.isOn();
+  canvas.hidden = reviewing;
+  doc.hidden = !reviewing;
+}
+new MutationObserver(showCanvas).observe(document.getElementById('mdr-changes-btn')!, { attributes: true, attributeFilter: ['aria-pressed'] });
+// Existing navigation/health controls identify rendered source lines. Route
+// those jumps into the persistent editor instead of the rendering mirror.
+doc.addEventListener('mdr-reveal', (event) => {
+  if (!doc.hidden) return;
+  const target = event.target as HTMLElement;
+  const line = target.closest('[data-ls]')?.getAttribute('data-ls');
+  if (line !== null && line !== undefined) { event.preventDefault(); live.jump(Number(line) + 1); }
+});
+
 window.addEventListener('message', (ev) => {
   const m = ev.data;
   switch (m?.type) {
     case 'render':
+      live.receive(m.source ?? '', m.blocks);
       targets = m.targets || null;
       if (m.changes !== undefined) redlines.set(m.changes as Changes | null, false, !!m.changesFailed);
       // The host re-sends identical HTML often (e.g. twice after a block save);
@@ -1602,14 +1768,45 @@ window.addEventListener('message', (ev) => {
         fileName = m.fileName;
         paint();
       }
+      if (nextSelection && !inline && !editing) {
+        const next = nextSelection;
+        nextSelection = null;
+        const el = doc.querySelector(`${next.tag}[data-ls="${next.ls}"]`) as HTMLElement | null;
+        if (el) {
+          placeCaret(el, next.start);
+          const begin = window.getSelection()!.getRangeAt(0).cloneRange();
+          placeCaret(el, next.end);
+          const sel = window.getSelection()!;
+          begin.setEnd(sel.focusNode!, sel.focusOffset);
+          sel.removeAllRanges();
+          sel.addRange(begin);
+          commentOnSelection();
+        }
+      }
+      if (nextInline && !inline && !editing) {
+        const next = nextInline;
+        nextInline = null;
+        const el = doc.querySelector(`${next.tag}[data-ls="${next.ls}"]`) as HTMLElement | null;
+        if (el && canInline(el)) {
+          startInline(el);
+          placeCaret(el, next.offset);
+        }
+      }
       if (!(saved as any)._restored) {
         (saved as any)._restored = true;
         if (saved.position) restorePosition(saved.position);
         else if (saved.scrollY) window.scrollTo(0, saved.scrollY);
       }
       break;
+    case 'sourceSaved':
+      live.saved(m.seq, m.source);
+      break;
+    case 'sourceConflict':
+      live.failed(m.seq, m.message);
+      break;
     case 'comments':
       comments = m.data.comments || [];
+      live.setThreads(comments);
       author = m.author;
       // A remembered From Claude filter with nothing left to triage opens on All instead.
       if (!commentsSeen && filter.status === 'agent' && !comments.some(isAgentDraft)) setFilter({ status: 'all' }, false);
@@ -1618,22 +1815,24 @@ window.addEventListener('message', (ev) => {
       paintComments();
       break;
     case 'block':
-      openEditor(m.ls, m.le, m.text);
+      if (doc.hidden) live.jump(m.ls + 1);
+      else openEditor(m.ls, m.le, m.text);
       break;
     case 'blockSaved':
       endInline(false);
       closeEditor();
-      toast('Saved — only the edited lines were written.');
+      // Saving is automatic; keep the reading surface quiet.
       break;
     case 'error':
+      nextInline = null;
+      nextSelection = null;
       doc.querySelectorAll('.mdr-pending').forEach((x) => x.classList.remove('mdr-pending'));
       toast(m.message, true);
       endInline(true);
       if (/changed on disk/.test(m.message)) closeEditor();
       break;
     case 'history':
-      undoBtn.disabled = !m.canUndo;
-      redoBtn.disabled = !m.canRedo;
+      if (redlines.isOn()) { undoBtn.disabled = !m.canUndo; redoBtn.disabled = !m.canRedo; }
       break;
     case 'toast':
       toast(m.message);
@@ -1675,6 +1874,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'prefs':
       reading.apply(m.prefs || {});
+      live.refreshTheme();
       void diagrams.refresh(); // a reading theme can switch light/dark
       break;
     case 'command':
@@ -1684,6 +1884,9 @@ window.addEventListener('message', (ev) => {
       focusThread(m.id);
       break;
     case 'inlineFailed': {
+      if (doc.hidden) { live.jump(m.ls + 1); toast('This change needs a Markdown edit. Edit the text here in the canvas.', true); break; }
+      nextInline = null;
+      nextSelection = null;
       endInline(true);
       doc.querySelector(`[data-ls="${m.ls}"][data-le="${m.le}"]`)?.classList.add('mdr-pending');
       openEditor(m.ls, m.le, m.text);
