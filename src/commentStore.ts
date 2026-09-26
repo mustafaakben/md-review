@@ -15,11 +15,19 @@ export type Scope = 'section' | 'document';
 export const KINDS: Kind[] = ['comment', 'question', 'praise'];
 export const SEVERITIES: Severity[] = ['major', 'minor', 'nit'];
 
+/** Replacement text for the thread's quote ('' deletes it), from the reviewer or the agent. */
+export interface Suggestion {
+  text: string;
+  appliedAt?: string;
+  dismissedAt?: string;
+}
+
 export interface Reply {
   id: string;
   author: string;
   createdAt: string;
   body: string;
+  suggestion?: Suggestion;
 }
 
 export interface Anchor {
@@ -45,6 +53,7 @@ export interface Comment {
   kind?: Kind;
   severity?: Severity;
   scope?: Scope;
+  suggestion?: Suggestion;
   /** Set by the CLI while an agent works on this thread; cleared when it replies or resolves. */
   workingAt?: string;
   workingBy?: string;
@@ -196,6 +205,20 @@ export function addComment(data: Sidecar, author: string, anchor: Anchor, body: 
   applyMeta(c, meta);
   data.comments.push(c);
   return c;
+}
+
+/** The comment's own suggestion, or the one on reply `from`. */
+export function suggestionOf(c: Comment, from?: string): Suggestion | undefined {
+  return from ? c.replies.find((r) => r.id === from)?.suggestion : c.suggestion;
+}
+
+/** The suggestion still waiting on the reviewer: the newest one neither applied nor dismissed. */
+export function openSuggestion(c: Comment): { from?: string; s: Suggestion } | null {
+  for (let i = c.replies.length - 1; i >= 0; i--) {
+    const s = c.replies[i].suggestion;
+    if (s && !s.appliedAt && !s.dismissedAt) return { from: c.replies[i].id, s };
+  }
+  return c.suggestion && !c.suggestion.appliedAt && !c.suggestion.dismissedAt ? { s: c.suggestion } : null;
 }
 
 export function addReply(data: Sidecar, id: string, author: string, body: string): Reply {
