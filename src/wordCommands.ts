@@ -12,7 +12,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as store from './commentStore';
-import { exportDocx } from './docx';
+import { exportDocx, exportTargetProblem, writeDocxFile } from './docx';
 import { importDocx } from './wordImport';
 import { LIMITS } from './zip';
 
@@ -57,7 +57,7 @@ export async function exportToWord(uri?: vscode.Uri): Promise<void> {
     return;
   }
   const mdPath = md.fsPath;
-  const replies: vscode.QuickPickItem = { label: 'Include replies', description: 'as extra paragraphs in each Word comment', picked: true };
+  const replies: vscode.QuickPickItem = { label: 'Include replies', description: 'as Word replies in the same thread', picked: true };
   const resolved: vscode.QuickPickItem = { label: 'Include resolved threads', picked: false };
   const picks = await vscode.window.showQuickPick([replies, resolved], {
     canPickMany: true,
@@ -70,6 +70,11 @@ export async function exportToWord(uri?: vscode.Uri): Promise<void> {
 
   const out = path.join(path.dirname(mdPath), path.basename(mdPath).replace(/\.(md|markdown|mdown|mkd)$/i, '') + '.docx');
   const name = path.basename(out);
+  const problem = exportTargetProblem(out);
+  if (problem) {
+    void vscode.window.showErrorMessage(`Couldn't export to Word: ${problem}.`);
+    return;
+  }
   if (fs.existsSync(out)) {
     const replace = 'Replace';
     const ok = await vscode.window.showWarningMessage(`${name} already exists. Replace it?`, { modal: true }, replace);
@@ -85,11 +90,11 @@ export async function exportToWord(uri?: vscode.Uri): Promise<void> {
       includeReplies: picks.includes(replies),
       includeResolved: picks.includes(resolved),
     });
-    fs.writeFileSync(out, res.docx);
+    writeDocxFile(out, res.docx);
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    const hint = err.code === 'EBUSY' || err.code === 'EPERM' ? ' If it is open in Word, close it and try again.' : '';
-    void vscode.window.showErrorMessage(`Couldn't export ${name}: ${err.message}.${hint}`);
+    const busy = err.code === 'EBUSY' || err.code === 'EPERM';
+    void vscode.window.showErrorMessage(busy ? `Couldn't replace ${name}: it may be open in Word. Close it in Word and try again.` : `Couldn't export ${name}: ${err.message}.`);
     return;
   }
   const what = res.exported ? `with ${plural(res.exported, 'comment')}` : 'with no comments';

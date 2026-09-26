@@ -75,9 +75,13 @@ export function xmlTokens(src: string): XTok[] {
     const name = /^[^\s/>]*/.exec(inner)![0];
     if (!name) continue;
     const attrs: Record<string, string> = {};
-    const ar = /([^\s=/]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    // The value is optional, as in docModel's parseAttrs: required, a long run with no "=" is quadratic.
+    const ar = /([^\s=/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'))?/g;
     const rest = inner.slice(name.length);
-    for (let a = ar.exec(rest); a; a = ar.exec(rest)) attrs[a[1]] = unescapeXml(a[2] ?? a[3] ?? '');
+    for (let a = ar.exec(rest); a; a = ar.exec(rest)) {
+      const v = a[2] ?? a[3];
+      if (v !== undefined) attrs[a[1]] = unescapeXml(v);
+    }
     out.push({ t: 'open', name, attrs, self: /\/\s*$/.test(rest) });
   }
   return out;
@@ -433,16 +437,24 @@ export interface ImportResult {
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
 
-/** The thread a Word comment repeats: same author, its body starts the same, same quote. */
-function duplicateOf(existing: Comment[], author: string, body: string, quote: string): Comment | undefined {
-  const b = norm(body);
-  const q = norm(quote);
-  return existing.find((c) => {
-    // (An unplaced import starts with the quote it could not find.)
-    const cb = norm(c.body.replace(/^“[\s\S]*?”\n\n/, ''));
-    if (!cb || c.author !== author || !b.startsWith(cb)) return false;
-    const cq = norm(c.anchor.quote);
-    return c.scope === 'document' || !cq || !q || q.includes(cq) || cq.includes(q);
+/** Same place: both whole-document, or the same quote on the same line or between the same words. */
+function sameAnchor(a: Comment, b: Comment): boolean {
+  if ((a.scope === 'document') !== (b.scope === 'document')) return false;
+  if (a.scope === 'document') return true;
+  const x = a.anchor;
+  const y = b.anchor;
+  if (norm(x.quote) !== norm(y.quote)) return false;
+  return x.lineStart === y.lineStart || (norm(x.prefix) === norm(y.prefix) && norm(x.suffix) === norm(y.suffix));
+}
+
+/** The thread a Word comment repeats: same author, same body, same place. */
+function duplicateOf(existing: Comment[], c: Comment): Comment | undefined {
+  const b = norm(c.body);
+  return existing.find((e) => {
+    if (e.author !== c.author) return false;
+    if (norm(e.body) === b) return sameAnchor(e, c);
+    // A thread exported with its quote gone comes back unplaced, that quote in front of its body.
+    return c.scope === 'document' && e.scope !== 'document' && !!e.anchor.quote && b === norm(`“${e.anchor.quote}”\n\n${e.body}`);
   });
 }
 
@@ -451,15 +463,17 @@ const META_WORDS = 'question|praise|major|minor|nit|section|whole document|resol
 const META = new RegExp(`^\\[((?:${META_WORDS})(?: · (?:${META_WORDS}))*)\\]$`);
 
 // The "Suggested edit: …" line MD Review's export writes last (docx.ts suggestionLine).
-const SUGGESTION = /\nSuggested edit: (?:replace with “([\s\S]*)”|delete this text)$/;
+// Tried only on the text from the last such line: over the whole text the greedy quote is quadratic.
+const SUGGESTION = /^\nSuggested edit: (?:replace with “([\s\S]*)”|delete this text)$/;
 
 /** Take MD Review's own suggested-edit and kind/severity/scope lines back out of an exported comment. */
 export function splitMeta(text: string): { body: string; meta: Partial<Comment> } {
   const meta: Partial<Comment> = {};
-  const sg = SUGGESTION.exec(text);
+  const at = text.lastIndexOf('\nSuggested edit: ');
+  const sg = at < 0 ? null : SUGGESTION.exec(text.slice(at));
   if (sg) {
     meta.suggestion = { text: sg[1] ?? '' };
-    text = text.slice(0, sg.index);
+    text = text.slice(0, at);
   }
   const lines = text.split('\n');
   const i = lines.findIndex((l) => META.test(l.trim()));
@@ -489,11 +503,6 @@ export function importDocx(markdown: string, docx: Buffer, opts: ImportOptions =
   /** A new thread, or the existing one it repeats (flagged `dup`). */
   const make = (author: string, date: string | undefined, body: string, quote: Quote | null, extra: Partial<Comment> = {}): { c: Comment; dup: boolean } => {
     const anchor = quote && extra.scope !== 'document' ? placeQuote(model, quote) : null;
-    const dup = duplicateOf([...existing, ...out], author, body, anchor?.quote ?? quote?.quote ?? '');
-    if (dup) {
-      res.duplicates++;
-      return { c: dup, dup: true };
-    }
     const c: Comment = {
       id: newId('c'),
       author,
@@ -507,15 +516,20 @@ export function importDocx(markdown: string, docx: Buffer, opts: ImportOptions =
       origin: 'word',
       ...extra,
     };
-    if (extra.scope === 'document') {
-      // Exported from MD Review as a whole-document thread: stays one.
-    } else if (!anchor) {
+    // (Exported from MD Review as a whole-document thread: stays one.)
+    const unplaced = extra.scope !== 'document' && !anchor;
+    if (unplaced) {
       c.scope = 'document';
       delete c.suggestion; // nothing to apply it to
       // (An unanchored comment exported by MD Review is already in quotes.)
       if (quote?.quote) c.body = `“${quote.quote.replace(/^“([\s\S]*)”$/, '$1')}”\n\n${body}`;
-      res.unplaced++;
     }
+    const dup = duplicateOf([...existing, ...out], c);
+    if (dup) {
+      res.duplicates++;
+      return { c: dup, dup: true };
+    }
+    if (unplaced) res.unplaced++;
     res.imported++;
     out.push(c);
     return { c, dup: false };

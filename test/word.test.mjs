@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -563,6 +564,142 @@ test('the Word code is a file of its own, off the start-up path, without a secon
   assert.doesNotMatch(word, /linkify|markdown-it-footnote|renderToString/, 'no markdown-it or KaTeX in word.js');
   assert.ok(word.length < 80 * 1024, `word.js is ${word.length} bytes`);
   assert.match(fs.readFileSync(path.join(here, '..', '.vscodeignore'), 'utf8'), /^!dist\/word\.js$/m);
+});
+
+// ---- duplicates, drafts, the file written, and speed on hostile input ----
+
+/** A minimal .docx: `paras` are lists of text runs and [id] / [id, 'end'] comment marks. */
+function miniDocx(paras, comments) {
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const run = (x) =>
+    typeof x === 'string'
+      ? `<w:r><w:t xml:space="preserve">${x}</w:t></w:r>`
+      : x[1] === 'end'
+        ? `<w:commentRangeEnd w:id="${x[0]}"/><w:r><w:commentReference w:id="${x[0]}"/></w:r>`
+        : `<w:commentRangeStart w:id="${x[0]}"/>`;
+  const doc = `<w:document ${W}><w:body>${paras.map((p) => `<w:p>${p.map(run).join('')}</w:p>`).join('')}</w:body></w:document>`;
+  const cm = `<w:comments ${W}>${comments.map(([id, text]) => `<w:comment w:id="${id}" w:author="Adv"><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:comment>`).join('')}</w:comments>`;
+  const b = (s) => Buffer.from(s, 'utf8');
+  return lib.writeZip([
+    { name: 'word/document.xml', data: b(doc) },
+    { name: 'word/comments.xml', data: b(cm) },
+  ]);
+}
+
+test('import: the same words on the same text elsewhere, or a longer comment, is new; only a true repeat is skipped', () => {
+  const md = 'We extend prior work on bikes.\n\nUnlike prior work, we measure docks.\n';
+  const docx = miniDocx(
+    [
+      ['We extend ', [1], 'prior work', [1, 'end'], ' on bikes.'],
+      ['Unlike ', [2], 'prior work', [2, 'end'], ', we measure docks.'],
+    ],
+    [
+      [1, 'Cite.'],
+      [2, 'Cite.'],
+    ],
+  );
+  const res = lib.importDocx(md, docx);
+  assert.equal(res.imported, 2);
+  assert.deepEqual(res.comments.map((c) => c.anchor.lineStart), [1, 3]);
+  const again = lib.importDocx(md, docx, { existing: res.comments });
+  assert.equal(again.imported, 0);
+  assert.equal(again.duplicates, 2);
+
+  // A whole-document "See" doesn't swallow a comment that merely starts the same way.
+  const see = { ...res.comments[0], id: 'c_see', body: 'See', scope: 'document', anchor: { quote: '', prefix: '', suffix: '', lineStart: 0, lineEnd: 0 } };
+  const seems = miniDocx([['We extend ', [1], 'prior work', [1, 'end'], ' on bikes.']], [[1, 'Seems wrong: fix the numbers']]);
+  assert.equal(lib.importDocx(md, seems, { existing: [see] }).imported, 1);
+  // Nor does a placed thread match a whole-document one with the same body.
+  assert.equal(lib.importDocx(md, docx, { existing: [{ ...see, body: 'Cite.' }] }).imported, 2);
+
+  // A hundred comments on one quote, c1 … c100: every one is new, and a re-import adds none.
+  const many = Array.from({ length: 100 }, (_, i) => i + 1);
+  const hundred = miniDocx([['We extend ', ...many.map((i) => [i]), 'prior work', ...many.map((i) => [i, 'end']), ' on bikes.']], many.map((i) => [i, `c${i}`]));
+  const r100 = lib.importDocx(md, hundred);
+  assert.equal(r100.imported, 100);
+  assert.equal(r100.duplicates, 0);
+  assert.equal(lib.importDocx(md, hundred, { existing: r100.comments }).imported, 0);
+});
+
+test('export: drafts stay behind, yours and Claude\'s untriaged ones alike', () => {
+  const model = lib.buildDocModel(sample, { docDir: fixtures });
+  const threads = [
+    thread(model, 'Riders use them for commuting', 'Submitted.'),
+    thread(model, 'Median detour length in meters', 'My draft.', { status: 'draft', submittedAt: null }),
+    thread(model, 'Denser station networks would increase weekly trips', 'Claude found this.', { status: 'draft', submittedAt: null, origin: 'agent', author: 'Claude' }),
+  ];
+  assert.deepEqual(lib.threadsToExport(threads, true).map((c) => c.body), ['Submitted.']);
+  const res = lib.exportDocx({ markdown: sample, comments: threads, docDir: fixtures });
+  assert.equal(res.exported, 1);
+  const comments = lib.readZip(res.docx).get('word/comments.xml').toString();
+  assert.doesNotMatch(comments, /My draft|Claude found this/);
+});
+
+test('export: the .docx replaces a file by rename, and never writes through a link or into a pipe', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-docx-'));
+  try {
+    const out = path.join(dir, 'paper.docx');
+    lib.writeDocxFile(out, Buffer.from('one'));
+    lib.writeDocxFile(out, Buffer.from('two'));
+    assert.equal(fs.readFileSync(out, 'utf8'), 'two');
+    assert.deepEqual(fs.readdirSync(dir), ['paper.docx'], 'no temp file left behind');
+
+    const target = path.join(dir, 'elsewhere.txt');
+    fs.writeFileSync(target, 'keep');
+    const link = path.join(dir, 'linked.docx');
+    fs.symlinkSync(target, link);
+    assert.match(lib.exportTargetProblem(link), /linked\.docx is a link/);
+    assert.throws(() => lib.writeDocxFile(link, Buffer.from('x')), /is a link/);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'keep');
+
+    fs.mkdirSync(path.join(dir, 'folder.docx'));
+    assert.throws(() => lib.writeDocxFile(path.join(dir, 'folder.docx'), Buffer.from('x')), /is a folder/);
+    if (process.platform !== 'win32') {
+      const fifo = path.join(dir, 'pipe.docx');
+      execFileSync('mkfifo', [fifo]);
+      assert.throws(() => lib.writeDocxFile(fifo, Buffer.from('x')), /is not a regular file/);
+    }
+    assert.equal(lib.exportTargetProblem(path.join(dir, 'new.docx')), null);
+    assert.ok(!fs.readdirSync(dir).some((f) => f.includes('.tmp-')), 'no temp file left behind');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('import: a megabyte-long tag and a comment full of suggested-edit lines read in linear time', () => {
+  const b64 = crypto.randomBytes(768 * 1024).toString('base64');
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const docx = lib.writeZip([{ name: 'word/document.xml', data: Buffer.from(`<w:document ${W}><w:body><w:p ${b64}/></w:body></w:document>`) }]);
+  let t = performance.now();
+  lib.importDocx(sample, docx);
+  assert.ok(performance.now() - t < 1000, `tag read in ${(performance.now() - t).toFixed(0)} ms`);
+
+  const text = 'Body' + '\nSuggested edit: replace with “a'.repeat(50000);
+  t = performance.now();
+  assert.equal(lib.splitMeta(text).meta.suggestion, undefined);
+  assert.ok(performance.now() - t < 1000, `comment split in ${(performance.now() - t).toFixed(0)} ms`);
+  assert.deepEqual(lib.splitMeta('Tighten.\n[minor]\nSuggested edit: replace with “new “words””'), { body: 'Tighten.', meta: { severity: 'minor', suggestion: { text: 'new “words”' } } });
+  assert.deepEqual(lib.splitMeta('Cut.\nSuggested edit: delete this text').meta, { suggestion: { text: '' } });
+});
+
+test('word.js finds everything it takes from extension.js', () => {
+  const dist = path.join(here, '..', 'dist');
+  const word = fs.readFileSync(path.join(dist, 'word.js'), 'utf8');
+  const used = [...new Set([...word.matchAll(/require\("\.\/extension\.js"\)\.shared\.(\w+)/g)].map((m) => m[1]))];
+  assert.ok(used.length >= 3, `shared modules used: ${used}`);
+  // Load the real bundle with a stand-in for the vscode module.
+  const Module = require('node:module');
+  const stub = new Proxy(function () {}, { get: (_, k) => (k === '__esModule' ? false : stub), apply: () => stub, construct: () => stub });
+  const load = Module._load;
+  Module._load = function (request, ...rest) {
+    return request === 'vscode' ? stub : load.call(this, request, ...rest);
+  };
+  try {
+    const ext = require(path.join(dist, 'extension.js'));
+    for (const k of used) assert.equal(typeof ext.shared[k], 'object', `extension.js shares ${k}`);
+  } finally {
+    Module._load = load;
+  }
 });
 
 // LibreOffice smoke test: only where soffice can convert at all (probed with a tiny text file).

@@ -4,6 +4,7 @@
 // is located in the view's text the same way the webview does, and the
 // matching Word runs are wrapped in commentRangeStart/End.
 import * as fs from 'fs';
+import * as path from 'path';
 import type { Comment, Reply, Suggestion } from './commentStore';
 import { buildDocModel, Block, DocModel, Fmt, Para, Run, isLocalImage, resolveLocal } from './docModel';
 import { isNetworkPath } from './bibliography';
@@ -464,9 +465,40 @@ function numberingXml(model: DocModel): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:numbering xmlns:w="${W}">${abs(0, false)}${abs(1, true)}${nums}</w:numbering>`;
 }
 
-/** Which threads go to Word, per the export options. */
+/** Which threads go to Word, per the export options: submitted ones, never drafts (yours, or Claude's still to triage). */
 export function threadsToExport(comments: Comment[], includeResolved = false): Comment[] {
-  return comments.filter((c) => includeResolved || c.status !== 'resolved');
+  return comments.filter((c) => c.status !== 'draft' && (includeResolved || c.status !== 'resolved'));
+}
+
+/** Why the export can't be written to `out` (something there that isn't a plain file), or null. */
+export function exportTargetProblem(out: string): string | null {
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(out);
+  } catch {
+    return null; // not there yet
+  }
+  if (st.isFile()) return null;
+  const what = st.isSymbolicLink() ? 'a link' : st.isDirectory() ? 'a folder' : 'not a regular file';
+  return `${path.basename(out)} is ${what}; move it away, then export again`;
+}
+
+/**
+ * Writes the .docx: to a temp file beside it, then renamed into place, so it
+ * never writes through a link or into a pipe, and a failed write leaves the
+ * old file as it was.
+ */
+export function writeDocxFile(out: string, data: Buffer): void {
+  const problem = exportTargetProblem(out);
+  if (problem) throw new Error(problem);
+  const tmp = path.join(path.dirname(out), `.${path.basename(out)}.tmp-${process.pid}-${Date.now()}`);
+  try {
+    fs.writeFileSync(tmp, data, { flag: 'wx' });
+    fs.renameSync(tmp, out);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 export function exportDocx(opts: ExportOptions): ExportResult {
