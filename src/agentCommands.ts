@@ -3,21 +3,23 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { readSidecar } from './commentStore';
+import { awaitsAgent, readSidecar } from './commentStore';
 import { buildFolderPrompt } from './agentPrompt';
 import { runAgent } from './editorProvider';
 
 const SIDECAR = '.md.comments.json';
 
-async function pickWorkspaceFolder(placeHolder: string): Promise<vscode.WorkspaceFolder | undefined> {
+async function pickWorkspaceFolder(placeHolder: string): Promise<vscode.WorkspaceFolder | null | undefined> {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  if (folders.length <= 1) return folders[0];
+  if (!folders.length) return undefined;
+  if (folders.length === 1) return folders[0];
   const active = vscode.window.activeTextEditor?.document.uri;
   const current = active && vscode.workspace.getWorkspaceFolder(active);
-  return current ?? vscode.window.showWorkspaceFolderPick({ placeHolder });
+  // null: the picker was cancelled, so say nothing.
+  return current ?? (await vscode.window.showWorkspaceFolderPick({ placeHolder })) ?? null;
 }
 
-/** Files under `folder` with comments waiting on the agent (submitted, and not last answered by Claude). */
+/** Files under `folder` with comments waiting on the agent (see awaitsAgent). */
 export async function openReviews(folder: vscode.Uri): Promise<{ mdPath: string; open: number }[]> {
   const sidecars = await vscode.workspace.findFiles(
     new vscode.RelativePattern(folder, `**/*${SIDECAR}`),
@@ -27,9 +29,7 @@ export async function openReviews(folder: vscode.Uri): Promise<{ mdPath: string;
   for (const uri of sidecars) {
     const mdPath = uri.fsPath.slice(0, -'.comments.json'.length);
     try {
-      const open = readSidecar(mdPath).comments.filter(
-        (c) => c.status === 'submitted' && c.replies.at(-1)?.author !== 'Claude',
-      ).length;
+      const open = readSidecar(mdPath).comments.filter((c) => awaitsAgent(c)).length;
       if (open) out.push({ mdPath, open });
     } catch {
       // A sidecar mid-write or hand-broken JSON: skip it rather than fail the whole send.
@@ -40,6 +40,7 @@ export async function openReviews(folder: vscode.Uri): Promise<{ mdPath: string;
 
 export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?: vscode.Uri): Promise<void> {
   const ws = uri ? vscode.workspace.getWorkspaceFolder(uri) : await pickWorkspaceFolder('Send the open reviews in which folder?');
+  if (ws === null) return;
   const folder = uri ?? ws?.uri;
   if (!folder) {
     void vscode.window.showInformationMessage('Open a folder first, then send its reviews to Claude.');
@@ -63,6 +64,7 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
 
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {
   const ws = await pickWorkspaceFolder('Add the MD Review skill to which folder?');
+  if (ws === null) return;
   if (!ws) {
     void vscode.window.showInformationMessage('Open a folder first; the skill is added to its .claude/skills.');
     return;
@@ -80,8 +82,13 @@ export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<
     );
     if (pick !== replace) return;
   }
-  fs.mkdirSync(dest, { recursive: true });
-  for (const f of ['SKILL.md', 'mdreview.mjs']) fs.copyFileSync(src(f), path.join(dest, f));
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const f of ['SKILL.md', 'mdreview.mjs']) fs.copyFileSync(src(f), path.join(dest, f));
+  } catch (e) {
+    void vscode.window.showErrorMessage(`Couldn't write ${dest}: ${(e as Error).message}`);
+    return;
+  }
   const open = 'Open SKILL.md';
   const pick = await vscode.window.showInformationMessage(
     `Added the MD Review skill to ${ws.name}. Claude Code started in this folder can now work through your review comments when you ask.`,

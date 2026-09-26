@@ -76,8 +76,8 @@ test('summary and list cover a folder, skipping node_modules and dot-folders', (
   setup();
   const out = run(['summary']);
   assert.match(out, /ch1\/paper\.md\s+4 open · 1 draft · 0 resolved/);
-  assert.match(out, /ch2\/notes\.md\s+1 open · 0 draft · 1 resolved/);
-  assert.match(out, /total\s+5 open · 1 draft · 1 resolved/);
+  assert.match(out, /ch2\/notes\.md\s+1 open \(1 waiting on the reviewer\) · 0 draft · 1 resolved/);
+  assert.match(out, /total\s+5 open \(1 waiting on the reviewer\) · 1 draft · 1 resolved/);
   assert.doesNotMatch(out, /node_modules|\.claude/);
 
   const listed = JSON.parse(run(['list', '.', '--status', 'submitted', '--json']));
@@ -191,4 +191,60 @@ test('folder prompt lists files and drives the next loop', () => {
   const one = lib.buildFolderPrompt({ folder: '/w', cwd: '/w', files: [{ mdPath: '/w/a.md', open: 1 }], cliPath: '/c.mjs' });
   assert.match(one, /^Please address the 1 open MD Review comment in 1 file in this folder:/);
   assert.match(one, /next "\."/);
+});
+
+test('locating survives characters that lengthen when lowercased (İ)', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  write('tr.md', 'Kahneman & İnönü (2020).\n\nsecond line target\n\nthird\n', [comment('c_tr', 'second line target', { anchor: { lineStart: 1, lineEnd: 1 } })]);
+  const ctx = JSON.parse(run(['context', 'tr.md', 'c_tr', '--json']));
+  assert.equal(ctx.found, true);
+  assert.deepEqual([ctx.lineStart, ctx.lineEnd], [3, 3]);
+});
+
+test('next orders by located line, and a broken sidecar is skipped with a warning', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  write('a.md', 'Alpha one.\n\nBeta two.\n\nGamma three.\n', [
+    comment('c_late', 'Gamma three', { anchor: { lineStart: 1, lineEnd: 1 } }), // stale hint says line 1
+    comment('c_early', 'Alpha one', { anchor: { lineStart: 3, lineEnd: 3 } }),
+  ]);
+  write('b.md', 'x\n');
+  fs.writeFileSync(path.join(tmp, 'b.md.comments.json'), '{bad');
+  const r = spawnSync(process.execPath, [cli, 'next', '--json'], { cwd: tmp, encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  assert.match(r.stderr, /Skipping b\.md\.comments\.json/);
+  assert.equal(JSON.parse(r.stdout).comment.id, 'c_early');
+  assert.match(spawnSync(process.execPath, [cli, 'summary'], { cwd: tmp, encoding: 'utf8' }).stdout, /a\.md\s+2 open/);
+  const r2 = spawnSync(process.execPath, [cli, 'context', 'nope.md', 'c_1'], { cwd: tmp, encoding: 'utf8' });
+  assert.match(r2.stderr, /Not found: nope\.md/);
+});
+
+test('a thread reopened after the agent resolved it is open again', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  const md = write('p.md', 'Some claim here.\n', [comment('c1', 'Some claim')]);
+  run(['resolve', 'p.md', 'c1', 'Fixed.']);
+  run(['reopen', 'p.md', 'c1']);
+  assert.equal(JSON.parse(run(['next', '--json'])).comment.id, 'c1');
+  run(['reply', 'p.md', 'c1', 'Which part?']);
+  assert.match(run(['next']), /No open comments\. \(1 waiting on the reviewer's answer; --all includes them\)/);
+  assert.match(run(['summary']), /p\.md\s+1 open \(1 waiting on the reviewer\)/);
+
+  // The viewer's Reopen (setStatus) stamps reopenedAt too, and it survives a viewer write.
+  run(['resolve', 'p.md', 'c1', 'Done.']);
+  lib.store.mutate(md, (d) => lib.store.setStatus(d, 'c1', 'submitted'));
+  const c = lib.store.readSidecar(md).comments[0];
+  assert.ok(c.reopenedAt, 'reopenedAt stamped');
+  assert.equal(lib.store.awaitsAgent(c), true);
+  lib.store.mutate(md, (d) => lib.store.addReply(d, 'c1', 'Claude', 'On it.'));
+  assert.equal(lib.store.awaitsAgent(lib.store.readSidecar(md).comments[0]), false);
+});
+
+test('math is not mistaken for HTML tags or pandoc attributes', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  write('m.md', 'Intro.\n\nWe have $x<y$ holds when $y>0$ and $\\sum_{i=1}^n a_i$ converges nicely.\n', [
+    comment('c_lt', 'holds when', { anchor: { lineStart: 1, lineEnd: 1 } }),
+    comment('c_sum', 'i=1', { anchor: { lineStart: 1, lineEnd: 1 } }),
+  ]);
+  const at = (id) => JSON.parse(run(['context', 'm.md', id, '--json']));
+  assert.deepEqual([at('c_lt').found, at('c_lt').lineStart], [true, 3]);
+  assert.deepEqual([at('c_sum').found, at('c_sum').lineStart], [true, 3]);
 });

@@ -31,6 +31,8 @@ export interface Comment {
   status: Status;
   submittedAt: string | null;
   resolvedAt: string | null;
+  /** Set when a resolved thread is reopened; replies older than this are history. */
+  reopenedAt?: string | null;
   replies: Reply[];
 }
 
@@ -84,6 +86,7 @@ export function readSidecar(mdPath: string): Sidecar {
       status: (['draft', 'submitted', 'resolved'].includes(c.status) ? c.status : 'submitted') as Status,
       submittedAt: c.submittedAt ?? null,
       resolvedAt: c.resolvedAt ?? null,
+      ...(c.reopenedAt ? { reopenedAt: c.reopenedAt } : {}),
       replies: (c.replies || []).map((r: any) => ({
         id: r.id || newId('r'),
         author: r.author || 'unknown',
@@ -152,6 +155,7 @@ export function addReply(data: Sidecar, id: string, author: string, body: string
 
 export function setStatus(data: Sidecar, id: string, status: Status): void {
   const c = find(data, id);
+  if (c.status === 'resolved' && status !== 'resolved') c.reopenedAt = now();
   c.status = status;
   if (status === 'resolved') c.resolvedAt = now();
   else c.resolvedAt = null;
@@ -173,6 +177,16 @@ export function submitDrafts(data: Sidecar): number {
 
 export function deleteComment(data: Sidecar, id: string): void {
   data.comments = data.comments.filter((c) => c.id !== id);
+}
+
+/**
+ * Whether a submitted thread is waiting on the agent: its last reply isn't the
+ * agent's, or the reviewer reopened it after that reply.
+ */
+export function awaitsAgent(c: Comment, agent = 'Claude'): boolean {
+  if (c.status !== 'submitted') return false;
+  const last = c.replies[c.replies.length - 1];
+  return !last || last.author !== agent || (!!c.reopenedAt && c.reopenedAt > last.createdAt);
 }
 
 export function editBody(data: Sidecar, id: string, body: string): void {

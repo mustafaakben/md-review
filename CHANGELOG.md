@@ -5,6 +5,8 @@
 - **Send Open Reviews in Folder to Claude** (Explorer right-click on a folder, or the Command Palette): one Claude Code session works through every file with open threads.
 - **Add Claude Code Skill to Workspace** (and `mdreview.mjs init-claude`): installs `.claude/skills/md-review/` so Claude Code knows the review loop in that project.
 - CLI: `summary`, `next`, and `context`; `list`, `summary`, and `next` accept folders. `next`/`context` locate each quote in the source (through markup and stale line hints) and print those lines. `next` skips threads already answered by the agent.
+- Reopening a resolved thread stamps `reopenedAt`, so agents pick it up again even though their reply was the last one.
+- `list` now sorts by line, scans the current folder when given no path, and fails on a path that doesn't exist.
 - The single-file Send to Claude prompt points the agent at `context` for finding the text.
 - Undo and redo (Ctrl+Z / Ctrl+Y) for edits made in the view, byte-exact and refused if the file changed elsewhere in between (the buttons grey out as soon as that happens).
 - Outline pane with the current section tracked and open-thread counts per heading.

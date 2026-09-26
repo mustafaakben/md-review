@@ -138,6 +138,7 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "status": "submitted",                 // "draft" | "submitted" | "resolved"
       "submittedAt": "2026-09-25T20:17:31.002Z",  // batch time of the Submit that sent it, else null
       "resolvedAt": null,                    // set when resolved, else null
+      "reopenedAt": null,                    // optional: set when a resolved thread is reopened
       "replies": [
         { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }
       ]
@@ -180,8 +181,8 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 ```
 
 - `next` and `context` find the quote in the Markdown source even when the source has `**bold**`, links, footnote markers, or HTML inside it, and even when the stored line hint is stale. If a quote appears more than once, the prefix and suffix pick the right one. The quoted lines are marked with `>`.
-- `next` goes file by file in document order and skips threads whose last reply is from `--author` (default `Claude`), since those are waiting on the reviewer. `--all` includes them. So an agent can loop: `next`, edit, `resolve` (or `reply` with a question), `next`, until it prints `No open comments.`
-- `list --json` adds a `file` field to each comment.
+- `next` goes file by file in document order and skips threads whose last reply is from `--author` (default `Claude`), since those are waiting on the reviewer. A thread the reviewer reopens after that reply counts as open again. `--all` includes the skipped ones, and `next` and `summary` say how many are waiting. So an agent can loop: `next`, edit, `resolve` (or `reply` with a question), `next`, until it prints `No open comments.`
+- `list --json` adds a `file` field to each comment, and `list` shows threads in document order. With no path, `list` now scans the current folder, and a path that doesn't exist is an error.
 
 ## Rendering
 

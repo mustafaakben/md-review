@@ -69,6 +69,15 @@ function read(md) {
   const raw = fs.readFileSync(side, 'utf8').replace(/^﻿/, '');
   return raw.trim() ? JSON.parse(raw) : empty;
 }
+/** read() for commands that scan many files: a broken sidecar is reported and skipped. */
+function readOrSkip(md) {
+  try {
+    return read(md);
+  } catch (e) {
+    console.error(`Skipping ${shown(sideOf(md))}: ${e.message}`);
+    return { comments: [] };
+  }
+}
 function mutate(md, fn) {
   const side = sideOf(md);
   const data = read(md);
@@ -141,14 +150,31 @@ function keyed(s) {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (WORD.test(ch)) {
-      key += ch.toLowerCase();
-      at.push(i);
+      // Lowercasing can lengthen a character (İ -> i̇); keep `at` in step with `key`.
+      for (const k of ch.toLowerCase()) {
+        key += k;
+        at.push(i);
+      }
     }
   }
   return { key, at };
 }
 const blank = (m) => m.replace(/[^\n]/g, ' ');
-const lineAt = (src, i) => src.slice(0, i).split('\n').length;
+function lineIndex(src) {
+  const starts = [0];
+  for (let i = src.indexOf('\n'); i >= 0; i = src.indexOf('\n', i + 1)) starts.push(i + 1);
+  // 1-based line number of offset i (binary search over line starts).
+  return (i) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= i) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+}
 
 function locate(src, anchor) {
   const q = keyed(anchor?.quote || '').key;
@@ -156,16 +182,18 @@ function locate(src, anchor) {
   const masked = src
     .replace(/\]\([^)\n]*\)/g, (m) => ']' + blank(m.slice(1)))
     .replace(/\[\^[^\]\n]*\]/g, blank)
-    .replace(/<\/?[a-zA-Z][^>\n]*>/g, blank)
-    .replace(/\{[^}\n]*=[^}\n]*\}/g, blank);
+    // Never across $…$ math, where `<`, `>`, and `{k=v}` are LaTeX, not markup.
+    .replace(/<\/?[a-zA-Z][\w-]*(?:\s[^<>\n]*)?\/?>/g, (m) => (m.includes('$') ? m : blank(m)))
+    .replace(/(?<![\w\\^_])\{(?:[#.][\w-]|[\w-]+=)[^}\n]*\}/g, (m) => (m.includes('$') ? m : blank(m)));
   const { key, at } = keyed(masked);
+  const lineAt = lineIndex(src);
   const pre = keyed(anchor.prefix || '').key.slice(-12);
   const suf = keyed(anchor.suffix || '').key.slice(0, 12);
   let best = null;
   let count = 0;
   for (let i = key.indexOf(q); i >= 0; i = key.indexOf(q, i + 1)) {
     count++;
-    const start = lineAt(src, at[i]);
+    const start = lineAt(at[i]);
     const score =
       (pre && key.slice(Math.max(0, i - pre.length), i) === pre ? 2 : 0) +
       (suf && key.slice(i + q.length, i + q.length + suf.length) === suf ? 2 : 0) -
@@ -173,15 +201,19 @@ function locate(src, anchor) {
     if (!best || score > best.score) best = { score, i, start };
   }
   if (!best) return null;
-  return { lineStart: best.start, lineEnd: lineAt(src, at[best.i + q.length - 1]), matches: count };
+  return { lineStart: best.start, lineEnd: lineAt(at[best.i + q.length - 1]), matches: count };
 }
 
 /** The comment plus where its quote is in the source, and those lines. */
-function contextOf(md, c) {
-  let src = null;
+function readSource(md) {
   try {
-    src = fs.readFileSync(md, 'utf8').replace(/^﻿/, '');
-  } catch {}
+    return fs.readFileSync(md, 'utf8').replace(/^﻿/, '');
+  } catch {
+    return null;
+  }
+}
+function contextOf(md, c) {
+  const src = readSource(md);
   const hit = src != null ? locate(src, c.anchor) : null;
   const ls = hit?.lineStart || c.anchor?.lineStart || 0;
   const le = hit?.lineEnd || c.anchor?.lineEnd || ls;
@@ -212,6 +244,13 @@ function describeWithContext(c, ctx) {
   }
   return s;
 }
+// Waiting on us: submitted, and our reply isn't the last word (or the reviewer
+// reopened the thread after it). Same rule as awaitsAgent() in the extension.
+function awaits(c) {
+  if (c.status !== 'submitted') return false;
+  const last = c.replies?.at(-1);
+  return !last || last.author !== author || (!!c.reopenedAt && c.reopenedAt > last.createdAt);
+}
 const byLine = (a, b) => (a.anchor?.lineStart || 0) - (b.anchor?.lineStart || 0);
 
 function initClaude(dir) {
@@ -235,7 +274,7 @@ switch (cmd) {
   case 'list': {
     const groups = collect(rest).map((md) => ({
       md,
-      cs: (read(md).comments || []).filter((c) => !status || c.status === status).sort(byLine),
+      cs: (readOrSkip(md).comments || []).filter((c) => !status || c.status === status).sort(byLine),
     }));
     if (asJson) {
       console.log(JSON.stringify(groups.flatMap((g) => g.cs.map((c) => ({ ...c, file: shown(g.md) }))), null, 2));
@@ -249,8 +288,11 @@ switch (cmd) {
   }
   case 'summary': {
     const rows = collect(rest).map((md) => {
-      const n = { draft: 0, submitted: 0, resolved: 0 };
-      for (const c of read(md).comments || []) if (c.status in n) n[c.status]++;
+      const n = { draft: 0, submitted: 0, resolved: 0, waiting: 0 };
+      for (const c of readOrSkip(md).comments || []) {
+        if (c.status in n) n[c.status]++;
+        if (c.status === 'submitted' && !awaits(c)) n.waiting++;
+      }
       return { file: shown(md), ...n };
     });
     if (asJson) {
@@ -262,41 +304,58 @@ switch (cmd) {
       break;
     }
     const w = Math.max(...rows.map((r) => r.file.length));
-    const total = { draft: 0, submitted: 0, resolved: 0 };
+    const total = { draft: 0, submitted: 0, resolved: 0, waiting: 0 };
+    const line = (name, r) =>
+      `${name.padEnd(w)}  ${r.submitted} open${r.waiting ? ` (${r.waiting} waiting on the reviewer)` : ''} · ${r.draft} draft · ${r.resolved} resolved`;
     for (const r of rows) {
       for (const k in total) total[k] += r[k];
-      console.log(`${r.file.padEnd(w)}  ${r.submitted} open · ${r.draft} draft · ${r.resolved} resolved`);
+      console.log(line(r.file, r));
     }
-    if (rows.length > 1) console.log(`${'total'.padEnd(w)}  ${total.submitted} open · ${total.draft} draft · ${total.resolved} resolved`);
+    if (rows.length > 1) console.log(line('total', total));
     break;
   }
   case 'next': {
-    const open = collect(rest).flatMap((md) =>
-      (read(md).comments || [])
-        // A thread whose last word is ours is waiting on the reviewer, not us.
-        .filter((c) => c.status === 'submitted' && (includeAll || c.replies?.at(-1)?.author !== author))
-        .sort(byLine)
-        .map((c) => ({ md, c })),
-    );
+    let waiting = 0;
+    const open = collect(rest).flatMap((md) => {
+      const src = readSource(md);
+      return (
+        (readOrSkip(md).comments || [])
+          // A thread whose last word is ours is waiting on the reviewer, not us.
+          .filter((c) => {
+            if (c.status !== 'submitted') return false;
+            if (includeAll || awaits(c)) return true;
+            waiting++;
+            return false;
+          })
+          // Document order by where the quote actually is, not the (possibly stale) hint.
+          .map((c) => ({ md, c, line: (src != null && locate(src, c.anchor)?.lineStart) || c.anchor?.lineStart || 0 }))
+          .sort((a, b) => a.line - b.line)
+      );
+    });
+    const also = waiting ? ` (${waiting} waiting on the reviewer's answer; --all includes them)` : '';
     if (!open.length) {
-      console.log(asJson ? 'null' : 'No open comments.');
+      console.log(asJson ? 'null' : `No open comments.${also}`);
       break;
     }
     const { md, c } = open[0];
     const ctx = contextOf(md, c);
     if (asJson) {
-      console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1 }, null, 2));
+      console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1, waiting }, null, 2));
       break;
     }
     console.log(describeWithContext(c, ctx));
     const more = open.length - 1;
-    console.log(`\n${more ? `${more} more open after this one.` : 'This is the last open comment.'} When done: reply/resolve "${ctx.file}" ${c.id}`);
+    console.log(`\n${more ? `${more} more open after this one.` : 'This is the last open comment.'}${also} When done: reply/resolve "${ctx.file}" ${c.id}`);
     break;
   }
   case 'context': {
     const [mdArg, id] = rest;
     if (!mdArg || !id) usage();
     const md = mdOf(mdArg);
+    if (!fs.existsSync(md) && !fs.existsSync(sideOf(md))) {
+      console.error(`Not found: ${mdArg}`);
+      process.exit(2);
+    }
     const c = find(read(md), id);
     const ctx = contextOf(md, c);
     console.log(asJson ? JSON.stringify({ comment: c, ...ctx }, null, 2) : describeWithContext(c, ctx));
@@ -332,6 +391,7 @@ switch (cmd) {
     if (!mdArg || !id) usage();
     mutate(mdOf(mdArg), (d) => {
       const c = find(d, id);
+      if (c.status === 'resolved') c.reopenedAt = now();
       c.status = 'submitted';
       c.resolvedAt = null;
     });
