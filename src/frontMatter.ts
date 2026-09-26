@@ -58,6 +58,19 @@ function flowList(s: string): string[] | null {
     .filter(Boolean);
 }
 
+/** Drop a YAML `# comment` (a # after a space, outside quotes). */
+function uncomment(s: string): string {
+  let q = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === q) q = '';
+    } else if (c === '"' || c === "'") q = c;
+    else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i).trimEnd();
+  }
+  return s;
+}
+
 /**
  * Reads the handful of keys the title card shows. Not a general YAML parser:
  * anything it doesn't understand is still visible in the raw view.
@@ -69,7 +82,7 @@ export function parseFrontMatter(raw: string): FrontMatter {
     const m = /^([A-Za-z_][\w-]*):\s*(.*)$/.exec(lines[i]);
     if (!m) continue;
     const key = m[1].toLowerCase();
-    let value = m[2];
+    let value = uncomment(m[2]);
     // Block scalar (`abstract: |`) or nested list/map below the key.
     // Only items at the first list indent under the key count, so nested
     // lists (Quarto's author affiliations) aren't read as more authors.
@@ -81,7 +94,7 @@ export function parseFrontMatter(raw: string): FrontMatter {
       if (item && indent < 0) indent = item[1].length;
       if (item && item[1].length === indent) {
         const named = /^name:\s*(.*)$/.exec(item[2].trim());
-        items.push(unquote(named ? named[1] : item[2]));
+        items.push(unquote(uncomment(named ? named[1] : item[2])));
       }
       // A single map (`author:\n  name: Solo`) rather than a list.
       const single = indent < 0 && /^\s+name:\s*(.+)$/.exec(lines[j]);

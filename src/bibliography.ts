@@ -127,6 +127,8 @@ export function parseBibTeX(text: string): Map<string, BibEntry> {
     const at = text.indexOf('@', i);
     if (at < 0) break;
     i = at + 1;
+    // `% @article{…}` is commented out.
+    if (text.slice(text.lastIndexOf('\n', at) + 1, at).includes('%')) continue;
     const tm = /^([A-Za-z]+)\s*([{(])/.exec(text.slice(i, i + 40));
     if (!tm) continue;
     const type = tm[1].toLowerCase();

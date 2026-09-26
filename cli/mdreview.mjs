@@ -206,7 +206,7 @@ function maskCitations(src) {
   if (!src.includes('@')) return src;
   const fm = /^---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(src);
   // Same rule as the viewer: a bibliography that names at least one file.
-  const bib = fm && /^bibliography:[ \t]*(?:[^\s#]|\r?\n[ \t]+-[ \t]*\S)/m.test(fm[1]);
+  const bib = fm && /^bibliography:[ \t]*(?!(?:\[\s*\]|""|''|~|null)[ \t]*(?:#.*)?$)(?:[^\s#]|\r?\n[ \t]+-[ \t]*\S)/m.test(fm[1]);
   const head = fm ? fm[0].length : 0;
   const body = src.slice(head);
   // Code shows as written, so leave `@x` in fences and backticks alone.

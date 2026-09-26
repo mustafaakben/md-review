@@ -218,3 +218,12 @@ test('CRLF front matter, absolute bibliography paths, and the files a render rea
   const eq = renderMarkdown('$$ x $$ {#eq:a$\'}\n\nSee @eq:a$\'.\n', (x) => x);
   assert.match(eq, /<section id="eq:a\$'"/);
 });
+
+test('YAML comments after the bibliography, %-commented entries, and empty bibliographies', () => {
+  const html = setup('---\nbibliography: refs.bib # from Zotero\n---\n\nSee [@rivera2021].\n', BIB + '% @article{rivera2021, author = {Old, Stale}, year = 1999}\n');
+  assert.match(html, />Rivera and Chen 2021</);
+  for (const empty of ['[]', '""', "''", '~']) {
+    setup(`---\nbibliography: ${empty}\n---\n\nPing @bob now.\n`, null);
+    assert.equal(cliFinds('Ping @bob now'), true, empty);
+  }
+});
