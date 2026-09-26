@@ -118,3 +118,136 @@ test('the source editor keeps the blank line after the last list item', () => {
   lib.applyBlockEdit(f, 1, 3, lib.readBlock(fs.readFileSync(f), 1, 3), '- two, edited\n');
   assert.equal(fs.readFileSync(f, 'utf8'), '- one\n- two, edited\n\nAfter.\n');
 });
+
+// ---- checking only the edited block must agree with checking the whole file ----
+// The old way re-parsed the whole file for every candidate. For many edits in
+// many surroundings (including ones that try to change the block's structure),
+// the file written, or the refusal, must be exactly what the old way gives.
+const collapse = (s) => s.replace(/\s+/g, ' ').trim();
+
+/** What the whole-file check writes for this edit, or null if it refuses. */
+function wholeFile(buf, ls, le, kind, oldText, newText) {
+  const src = lib.readBlock(buf, ls, le);
+  const bom = buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf ? 3 : 0;
+  for (const cand of lib.candidates(src, oldText, newText)) {
+    const out = lib.spliceBlock(buf, ls, le, src, cand);
+    const got = lib.plainAt(md, out.subarray(bom).toString('utf8'), ls, kind);
+    if (got !== null && collapse(got) === collapse(newText)) return out;
+  }
+  return null;
+}
+
+/** Apply the edit the fast way (optionally with the render's tokens) and compare. */
+function agrees(text, ls, le, kind, oldText, newText, withParse, where) {
+  const buf = Buffer.from(text);
+  const want = wholeFile(buf, ls, le, kind, oldText, newText);
+  const f = setup('fuzz.md', buf);
+  const plainText = text.replace(/^\uFEFF/, '');
+  const rendered = withParse ? { text: plainText, ...lib.renderParsed(plainText, (x) => x).parse } : undefined;
+  let got = null;
+  try {
+    lib.applyInlineEdit(f, ls, le, kind, oldText, newText, rendered);
+    got = fs.readFileSync(f);
+  } catch (err) {
+    if (!(err instanceof lib.InlineMapError)) throw err;
+  }
+  if (want === null) assert.equal(got, null, where);
+  else assert.equal(got?.toString(), want.toString(), where);
+}
+
+test('block-only verification agrees on cases found in review', () => {
+  const cases = [
+    // A reference definition between a heading and the paragraph.
+    ['# H\n[r]: https://x.example\n"Quoted" first\nsecond line [r]\n', 2, 'paragraph', (t) => t.replace(' first', '')],
+    // A closing \] that pairs with an opener above.
+    ['\\[ a + b\n\nRun `cmd` now.\n', 2, 'paragraph', (t) => t.replace('cmd', 'cmd\\]')],
+    // A footnote definition right below the paragraph.
+    ['Second has a note[^b] here and more.\n\n[^b]: B note.\n', 0, 'paragraph', (t) => t.replace('more', 'much more')],
+    // A paragraph that becomes {attrs} joins the table or list above.
+    ['| a |\n|---|\n| 1 |\n\nHello world {.c}\n', 4, 'paragraph', (t) => '{' + t],
+    ['- a\n\nHello world {.c}\n', 2, 'paragraph', (t) => '{' + t],
+    // A footnote definition inside a quote right below.
+    ['Note[^1] and[^2] then [^1] again.\n> [^1]: in quote\n', 0, 'paragraph', (t) => t.replace('again', 'once more')],
+    // Table captions with the same id.
+    ['Table: first {#tbl:x}\n\nTable: second {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('second', 'second one')],
+    [': cap {#tbl:x}\n\n: caption {#tbl:x}\n', 2, 'paragraph', (t) => t.replace('n ', '')],
+    // A table id written another way still makes a typed `Table:` a caption prefix.
+    ['# Intro {#sec:intro}\n\nResults by group {.wide #tbl:r}\n', 2, 'paragraph', (t) => 'Table: ' + t],
+    ['# Intro {#sec:intro}\n\nResults by group {id=tbl:r}\n', 2, 'paragraph', (t) => 'Table: ' + t],
+    // With a bibliography, a typed @key is a citation, which only the front matter says.
+    ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by @smith2020')],
+    ['---\nbibliography: refs.bib\n---\n\nAs shown before.\n', 4, 'paragraph', (t) => t.replace('before', 'by me@example.com')],
+  ];
+  for (const [text, ls, kind, fn] of cases) {
+    const le = md.parse(text, {}).find((t) => t.type === `${kind}_open` && t.map?.[0] === ls).map[1];
+    const oldText = lib.plainAt(md, text, ls, kind);
+    for (const withParse of [false, true]) agrees(text, ls, le, kind, oldText, fn(oldText), withParse, JSON.stringify(text));
+  }
+});
+
+test('block-only verification writes exactly what whole-file verification would', () => {
+  let seed = 12345;
+  const next = () => {
+    // mulberry32
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const rand = (n) => Math.floor(next() * n);
+  const H = '## A heading with *style* here';
+  const blocks = [
+    'The quick **brown** fox [jumps](https://x.y) over `the` lazy dog.\nA second line with $x^2$ and [a ref][r] and a note[^1] here.',
+    H,
+    'Plain words only here with no markup at all.',
+    '"Quoted" first\nsecond line [r] and `code` and \\\\ slash',
+    'Note[^1] and[^2] then [^1] again.',
+    'Setext heading text\n=====',
+    'x',
+    '*a*',
+  ];
+  const before = [
+    '', 'Intro para.\n\n', '- item one\n- item two\n\n', '> quoted text\n\n', '| a | b |\n|---|---|\n| 1 | 2 |\n\n',
+    '```\ncode\n```\n', '# Title\n', '[^1]: The note.\n\n', '    indented code\n\n', '<div>\nhtml\n</div>\n\n', '---\n\n', '1. first\n\n   more\n\n',
+    '| a | b |\n|---|---|\n| 1 | 2 |\n', '<!-- c -->\n', '$$\nx\n$$\n', '***\n', 'Setext\n===\n', '- a\n\n  b\n\n',
+    '# H\n[r]: https://x.example\n', '---\n[q]: /u\n', '```\nc\n```\n[q]: /u\n', '\\[ a+b\n\n', '[^2]: two\n\n', 'x^[inline]\n\n',
+    '---\ntitle: t\n---\n', '<!--\nmulti\n-->\n', '<!--\nmulti\n-->\n\n', 'Para[^1].\n\n', '| a |\n|---|\n', '* * *\n', ' \n',
+    '> q\n>\n', '[^1]: note\n    cont\n\n', '---\nbibliography: refs.bib\n---\n', '---\nbibliography: refs.bib\n---\n\nSee @fig:a.\n\n', '<pre>\nx\n\ny\n</pre>\n', '# H {#i}\n', '> a\n\n', '#\n', 'text\n \n',
+  ];
+  const after = [
+    '', '\n', '\nNext para.\n', '\n---\n', '\n===\n', '\n|---|---|\n', '\n- list\n', '\n> quote\n', '\n    code\n',
+    '\n[r]: https://ref.example\n', '\n[^1]: A note.\n', '\n$$\nx\n$$\n', '\n[^1]: A note.\n\n[^2]: two\n', '\n\n[^1]: A note.\n',
+    '\n\n[r]: https://ref.example\n', '\n{.cls}\n', '\n\n{.cls}\n', '\n| x |\n|---|\n', '\n<div>\n', '\n\\]\n', '\n$$\n', '\n```\n',
+    '\nfoo\n===\n', '\n  - sub\n', '\n[^3]: three\n', '\n    indented\n', '\n<!-- x -->\n', '\n# H\n',
+  ];
+  const inserts = [
+    '|', ' | ', '- ', '\n', '    ', '# ', '> ', '1. ', '===', '---', '```', '$$', '[^1]', '^[n]', '[r]', '*', '**', '_', '`', '{.c}',
+    '<div>', ' ', 'word', '\\[', ']', '[', '~~', '{++', '++}', '\n\n', '\\]', '"t"', '(t)', '[^2]', '[^3]', '[x]: /u', '\\\\', '<!--',
+    '-->', '{#id}', '{--', '--}', '{>>', '<<}', '$', '\\(', '\\)', '^', '~', '<b>', '&amp;', '  \n', '\t', '---\n', '\n===\n', '\n---\n',
+    '\n|---|\n', '\n\n# ', '\\', '[^1]:', '\n \n', '[r]:', '\n"Quoted"\n', '@smith', ' @fig:a', '[@a; @b]', 'x@y.z',
+  ];
+  let checked = 0;
+  for (let n = 0; n < 2000; n++) {
+    const block = blocks[rand(blocks.length)];
+    const kind = block === H || /\n=+$/.test(block) ? 'heading' : 'paragraph';
+    const pre = before[rand(before.length)];
+    const text0 = pre + block + after[rand(after.length)] + (rand(3) === 0 ? '\n[r]: https://r.example\n\n[^1]: Note.\n' : '') + (rand(4) === 0 ? '\n[^2]: Two.\n' : '');
+    const eol = rand(6);
+    const text = eol === 0 ? text0.replace(/\n/g, '\r\n') : eol === 1 ? '\uFEFF' + text0 : text0;
+    const plainText = text.replace(/^\uFEFF/, '');
+    const ls = pre.split('\n').length - 1;
+    const open = md.parse(plainText, {}).find((t) => t.type === `${kind}_open` && t.map && t.map[0] === ls && t.level === 0);
+    if (!open) continue;
+    const oldText = lib.plainAt(md, plainText, ls, kind);
+    let newText = oldText;
+    for (let e = 1 + rand(3); e > 0; e--) {
+      const at = rand(newText.length + 1);
+      if (rand(3) === 0) newText = newText.slice(0, at) + newText.slice(at + 1 + rand(4));
+      else newText = newText.slice(0, at) + inserts[rand(inserts.length)] + newText.slice(at);
+    }
+    if (!collapse(newText) || collapse(newText) === collapse(oldText)) continue;
+    agrees(text, ls, open.map[1], kind, oldText, newText, rand(2) === 1, `case ${n}: ${JSON.stringify(text)} edited to ${JSON.stringify(newText)}`);
+    checked++;
+  }
+  assert.ok(checked > 1000, `only ${checked} cases ran`);
+});
