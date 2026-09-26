@@ -31,7 +31,8 @@ function flowList(s: string): string[] | null {
     if (quote) {
       if (ch === quote) quote = '';
       cur += ch;
-    } else if (ch === '"' || ch === "'") {
+    } else if ((ch === '"' || ch === "'") && !cur.trim()) {
+      // In YAML a quote only opens at the start of an item (so "Ada's" is plain).
       quote = ch;
       cur += ch;
     } else if (ch === '{' || ch === '[') {
@@ -48,7 +49,7 @@ function flowList(s: string): string[] | null {
   out.push(cur);
   return out
     .map((x) => {
-      const named = /^\{\s*name:\s*(.*?)\s*(,.*)?\}$/.exec(x.trim());
+      const named = /^\{\s*name:\s*("[^"]*"|'[^']*'|[^,}]*)/.exec(x.trim());
       return unquote(named ? named[1] : x);
     })
     .filter(Boolean);
@@ -125,9 +126,9 @@ export function frontMatterPlugin(md: MarkdownIt): void {
         }
       }
       // A lone `---` followed by prose is a thematic break, not front matter:
-      // the block must close, and its first non-blank line must be `key:`.
+      // the block must close, and the line right after `---` must be `key:`.
       if (end < 1) return false;
-      // Like pandoc, the line right after the opening `---` must not be blank.
+      // Like pandoc, that line must not be blank.
       const line1 = state.src.slice(state.bMarks[1] + state.tShift[1], state.eMarks[1]);
       if (end === 1 || !/^[A-Za-z_][\w-]*:(\s|$)/.test(line1)) return false;
       if (silent) return true;

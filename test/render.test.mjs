@@ -71,3 +71,8 @@ test('Quarto author affiliations are not listed as authors; flow lists respect q
   assert.match(html, /<span>a<\/span><span>b, c<\/span><\/div>/);
   assert.match(render('---\nauthor: [{name: A}, B]\n---\n'), /mdr-front-meta">A, B</);
 });
+
+test('flow lists: apostrophes are plain text; quoted names keep their commas', () => {
+  assert.match(render("---\nkeywords: [Ada's work, cities]\n---\n"), /<span>Ada's work<\/span><span>cities<\/span>/);
+  assert.match(render('---\nauthor: [{name: "Rivera, Ada"}, B]\n---\n'), /mdr-front-meta">Rivera, Ada, B</);
+});
