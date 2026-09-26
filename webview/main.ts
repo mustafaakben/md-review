@@ -221,77 +221,100 @@ const moveKey = (b: string) => {
   return b.replace(/data-(l[se]|task-line)="(\d+)"/g, (_, k, v) => `data-${k}="${Number(v) - base}"`);
 };
 
+/** Remove `count` elements of #mdr-doc from `from`, each with the text (newline) after it. */
+function removeEls(from: number, count: number) {
+  for (let k = 0; k < count; k++) {
+    const el = doc.children[from];
+    while (el.nextSibling && el.nextSibling.nodeType !== Node.ELEMENT_NODE) el.nextSibling.remove();
+    el.remove();
+  }
+}
+
 /**
  * Replace only the blocks that changed since the last paint. Blocks after the
  * change that only moved keep their elements, with their line numbers shifted.
- * The result is the DOM a full paint would build, apart from highlights, which
- * the caller wraps again. Returns false when it can't be sure of that.
+ * The footnotes, last, are compared on their own: they hold lines from all over
+ * the file, so they change with almost any edit, but that shouldn't stop the
+ * blocks before them from being kept. The result is the DOM a full paint would
+ * build, apart from highlights, which the caller wraps again, and state the
+ * reader gave kept elements (an open <details>). Returns false when it can't be
+ * sure of that.
  */
 function patchDoc(): boolean {
   const prev = paintedBlocks;
   if (!prev || doc.querySelector('.mdr-block-editor')) return false;
   const next = blocks;
-  const n = prev.length;
-  const m = next.length;
-  if (doc.children.length !== elementCount(prev, 0, n)) return false;
+  if (doc.children.length !== elementCount(prev, 0, prev.length)) return false;
+  const notesPrev = !!prev.length && isFootnotes(prev[prev.length - 1]);
+  const notesNext = !!next.length && isFootnotes(next[next.length - 1]);
+  // The body: every block but the footnotes, one element each.
+  const n = prev.length - (notesPrev ? 1 : 0);
+  const m = next.length - (notesNext ? 1 : 0);
   // Blocks an in-view edit touched no longer show `prev`: they must be replaced.
   let lo = n;
   let hi = -1;
+  let notesTouched = false;
   for (const el of touched) {
-    const e = Array.prototype.indexOf.call(doc.children, el);
-    if (e < 0) continue;
-    const i = Math.min(e, n - 1); // the footnotes, last, are two elements
-    lo = Math.min(lo, i);
-    hi = Math.max(hi, i);
+    const i = Array.prototype.indexOf.call(doc.children, el);
+    if (i < 0) continue;
+    if (i >= n) notesTouched = true;
+    else {
+      lo = Math.min(lo, i);
+      hi = Math.max(hi, i);
+    }
   }
   let p = 0;
   while (p < n && p < m && p < lo && prev[p] === next[p]) p++;
   const keyOf = (i: number) => (paintedKeys[i] ??= moveKey(prev[i]));
   let s = 0;
   while (s < n - p && s < m - p && n - 1 - s > hi) {
-    const a = prev[n - 1 - s];
-    const b = next[m - 1 - s];
-    // The footnotes hold lines from all over the file, so they must match exactly.
-    if (a === b || (!isFootnotes(a) && keyOf(n - 1 - s) === moveKey(b))) s++;
+    const was = prev[n - 1 - s];
+    const now = next[m - 1 - s];
+    if (was === now || keyOf(n - 1 - s) === moveKey(now)) s++;
     else break;
   }
-  const oldCount = elementCount(prev, p, n - s);
+  const keepNotes = notesPrev && notesNext && !notesTouched && prev[n] === next[m];
   const tpl = document.createElement('template');
   tpl.innerHTML = next.slice(p, m - s).join('');
-  if (tpl.content.children.length !== elementCount(next, p, m - s)) return false;
+  if (tpl.content.children.length !== m - s - p) return false;
+  const notes = document.createElement('template');
+  if (notesNext && !keepNotes) {
+    notes.innerHTML = next[m];
+    if (notes.content.children.length !== 2) return false;
+  }
   // Unwrap highlights first: a highlight can span blocks, and a full paint
   // starts from bare HTML too.
   unwrap(Array.from(doc.querySelectorAll('mark.mdr-hl')));
   doc.querySelectorAll('.mdr-pending').forEach((x) => x.classList.remove('mdr-pending'));
   const kids = doc.children;
-  const after = kids[p + oldCount] ?? null;
-  // Each block is its element(s) plus the newline after them.
-  for (let k = 0; k < oldCount; k++) {
-    const el = kids[p];
-    while (el.nextSibling && el.nextSibling !== after && el.nextSibling.nodeType !== Node.ELEMENT_NODE) el.nextSibling.remove();
-    el.remove();
+  // Footnotes first, while the body's element positions still hold.
+  if (!keepNotes) {
+    if (notesPrev) removeEls(n, 2);
+    if (notesNext) doc.append(notes.content);
   }
-  doc.insertBefore(tpl.content, after);
+  const oldCount = n - s - p;
+  removeEls(p, oldCount);
+  doc.insertBefore(tpl.content, kids[p] ?? null);
   // Moved blocks: shift their line numbers.
-  const firstKept = p + elementCount(next, p, m - s);
+  const firstKept = m - s;
   for (let k = 0; k < s; k++) {
-    const a = prev[n - s + k];
-    const b = next[m - s + k];
-    if (a === b) continue;
-    const d = firstLine(b) - firstLine(a);
+    const was = prev[n - s + k];
+    const now = next[m - s + k];
+    if (was === now) continue;
+    const d = firstLine(now) - firstLine(was);
     if (!d) continue;
     const el = kids[firstKept + k];
     for (const x of [el, ...Array.from(el.querySelectorAll('[data-ls], [data-task-line]'))]) {
-      for (const a of ['data-ls', 'data-le', 'data-task-line']) {
-        const v = x.getAttribute(a);
-        if (v !== null) x.setAttribute(a, String(Number(v) + d));
+      for (const attr of ['data-ls', 'data-le', 'data-task-line']) {
+        const v = x.getAttribute(attr);
+        if (v !== null) x.setAttribute(attr, String(Number(v) + d));
       }
     }
   }
   // Moved blocks keep their keys: those don't depend on where the block is.
   const keys = Array.from({ length: n }, (_, i) => paintedKeys[i]);
   keys.splice(p, n - s - p, ...new Array<undefined>(m - s - p));
-  paintedKeys = keys;
+  paintedKeys = keys; // the footnotes, if any, have none
   paintedBlocks = next;
   return true;
 }
@@ -934,6 +957,7 @@ doc.addEventListener('click', (e) => {
     if (editing || inline) return e.preventDefault();
     // Repaint whatever comes back, so a refused write unticks the box again.
     docStale = true;
+    touched.add(topBlock(t));
     focusTask = t.dataset.taskLine ?? null;
     post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked, key: t.dataset.taskKey });
     return;
