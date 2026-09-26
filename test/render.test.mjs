@@ -76,3 +76,8 @@ test('flow lists: apostrophes are plain text; quoted names keep their commas', (
   assert.match(render("---\nkeywords: [Ada's work, cities]\n---\n"), /<span>Ada's work<\/span><span>cities<\/span>/);
   assert.match(render('---\nauthor: [{name: "Rivera, Ada"}, B]\n---\n'), /mdr-front-meta">Rivera, Ada, B</);
 });
+
+test('front matter: single-map author; an indented --- is not front matter', () => {
+  assert.match(render('---\nauthor:\n  name: Solo\n  email: s@x\n---\n'), /mdr-front-meta">Solo</);
+  assert.doesNotMatch(render(' ---\ntitle: x\n---\n'), /mdr-front/);
+});

@@ -80,6 +80,9 @@ export function parseFrontMatter(raw: string): FrontMatter {
         const named = /^name:\s*(.*)$/.exec(item[2].trim());
         items.push(unquote(named ? named[1] : item[2]));
       }
+      // A single map (`author:\n  name: Solo`) rather than a list.
+      const single = indent < 0 && /^\s+name:\s*(.+)$/.exec(lines[j]);
+      if (single) items.push(unquote(single[1]));
       j++;
     }
     if (/^[|>][+-]?$/.test(value.trim())) value = '';
@@ -114,7 +117,7 @@ export function frontMatterPlugin(md: MarkdownIt): void {
     'hr',
     'mdr_front_matter',
     (state, startLine, endLine, silent) => {
-      if (startLine !== 0 || state.blkIndent !== 0 || state.parentType !== 'root') return false;
+      if (startLine !== 0 || state.blkIndent !== 0 || state.parentType !== 'root' || state.tShift[0] !== 0) return false;
       const first = state.src.slice(state.bMarks[0] + state.tShift[0], state.eMarks[0]);
       if (first.trim() !== '---') return false;
       let end = -1;
