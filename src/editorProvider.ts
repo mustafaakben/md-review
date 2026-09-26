@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 import { runAgent } from './agentRun';
+import { sameName, shouldPoll, folderKey, StampTracker, POLL_MS } from './fileWatch';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 
@@ -118,28 +119,45 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidGrantWorkspaceTrust(() => rerender(true)),
       vscode.workspace.onDidChangeWorkspaceFolders(() => vscode.workspace.isTrusted || rerender(true)),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('mdReview')) session.sendComments();
+        if (!e.affectsConfiguration('mdReview')) return;
+        session.sendComments();
+        updatePolling();
       }),
     );
 
-    // Sidecar watcher (works for files outside the workspace too).
-    const sideWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(dir), path.basename(mdPath) + '.comments.json'),
-    );
-    const onSide = () => session.onSidecarChanged();
-    subs.push(sideWatcher, sideWatcher.onDidChange(onSide), sideWatcher.onDidCreate(onSide), sideWatcher.onDidDelete(onSide));
+    // Watch the folder rather than the two files: editors, sync tools and agents
+    // often save by replacing the file (delete + create), and a glob would miss a
+    // sidecar whose name differs only in case. This works outside the workspace too.
+    const mdName = path.basename(mdPath);
+    const sideName = mdName + '.comments.json';
+    const onFile = (name: string) => {
+      // render() skips text it already showed, so this costs nothing when the
+      // buffer listener above got there first.
+      if (sameName(name, mdName, process.platform)) rerender();
+      else if (sameName(name, sideName, process.platform)) session.onSidecarChanged();
+    };
+    subs.push(watchFolder(dir, (uri) => onFile(path.basename(uri.fsPath))));
 
-    // Markdown watcher: if VS Code hasn't reloaded the buffer (e.g. the file
-    // lives outside the workspace), make sure we still show the disk content.
-    const mdWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(vscode.Uri.file(dir), path.basename(mdPath)),
-    );
-    // render() skips text it already showed, so this costs nothing when the
-    // buffer listener above got there first.
-    subs.push(mdWatcher, mdWatcher.onDidChange(() => rerender()), mdWatcher.onDidCreate(() => rerender()));
+    // Network shares and \\wsl$ send no file events: look every 2 s while the panel shows.
+    let tracker: StampTracker | undefined;
+    let poll: NodeJS.Timeout | undefined;
+    const check = () => tracker?.check().forEach((f) => onFile(path.basename(f)));
+    const updatePolling = () => {
+      if (!(panel.visible && shouldPoll(mdPath, process.platform, cfg().get<boolean>('pollFiles', false)))) {
+        clearInterval(poll);
+        poll = undefined;
+      } else if (!poll) {
+        tracker ??= new StampTracker([mdPath, path.join(dir, sideName)]);
+        check(); // catch up on changes made while hidden
+        poll = setInterval(check, POLL_MS);
+      }
+    };
+    updatePolling();
+    subs.push({ dispose: () => clearInterval(poll) });
 
     subs.push(
       panel.onDidChangeViewState((e) => {
+        updatePolling();
         if (!e.webviewPanel.active) void vscode.commands.executeCommand('setContext', 'mdReview.composing', false);
       }),
     );
@@ -174,6 +192,36 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <title>MD Review</title></head>
 <body data-reading-theme="${prefs.theme}" data-reading-font="${prefs.font}" data-prefs="${attr(JSON.stringify(prefs))}"><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
+}
+
+type FileEvent = (uri: vscode.Uri) => void;
+
+/** One watcher per folder, shared by every panel showing a file in it. */
+const folderWatchers = new Map<string, { watcher: vscode.FileSystemWatcher; listeners: Set<FileEvent> }>();
+
+/** Call `listener` on every change, creation or deletion of a file directly in `dir`. */
+function watchFolder(dir: string, listener: FileEvent): vscode.Disposable {
+  const key = folderKey(dir, process.platform);
+  let entry = folderWatchers.get(key);
+  if (!entry) {
+    // '*' without '**' watches only the folder's own files, not its subfolders.
+    const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dir), '*'));
+    const listeners = new Set<FileEvent>();
+    const fire = (uri: vscode.Uri) => listeners.forEach((l) => l(uri));
+    watcher.onDidChange(fire);
+    watcher.onDidCreate(fire);
+    watcher.onDidDelete(fire);
+    entry = { watcher, listeners };
+    folderWatchers.set(key, entry);
+  }
+  const e = entry;
+  e.listeners.add(listener);
+  return new vscode.Disposable(() => {
+    e.listeners.delete(listener);
+    if (e.listeners.size) return;
+    e.watcher.dispose();
+    folderWatchers.delete(key);
+  });
 }
 
 /**

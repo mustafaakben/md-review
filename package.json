@@ -296,6 +296,11 @@
           "default": true,
           "description": "Show resolved threads in the sidebar."
         },
+        "mdReview.pollFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Check the open file and its comments for changes every 2 seconds while the view is showing, for folders that don't report file changes (network shares, some remote or FUSE mounts). Network paths on Windows, including \\\\wsl$, are always checked this way."
+        },
         "mdReview.agent.command": {
           "type": "string",
           "scope": "machine",
