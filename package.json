@@ -112,6 +112,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "mdReview.reviewWithClaude",
+        "title": "Review with Claude",
+        "category": "MD Review",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "mdReview.sendFolderToClaude",
         "title": "Send Open Reviews in Folder to Claude",
         "category": "MD Review",
@@ -203,6 +209,10 @@
           "when": "activeCustomEditorId == 'mdReview.editor'"
         },
         {
+          "command": "mdReview.reviewWithClaude",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
           "command": "mdReview.zoomIn",
           "when": "activeCustomEditorId == 'mdReview.editor'"
         },
@@ -287,6 +297,13 @@
             "Claude proposes a replacement on each thread; you apply it with one click."
           ],
           "markdownDescription": "Whether **Send to Claude** asks Claude to edit the file or to suggest edits for you to apply."
+        },
+        "mdReview.agent.reviewComments": {
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 50,
+          "markdownDescription": "The most comments **Review with Claude** asks Claude to leave in one review."
         },
         "mdReview.agent.mode": {
           "type": "string",

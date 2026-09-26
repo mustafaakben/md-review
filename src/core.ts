@@ -8,6 +8,7 @@ import { renderParsed, RenderEnv, ResolveImage } from './render';
 import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
 import { buildAgentPrompt } from './agentPrompt';
+import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 
 export type ToWebview =
   | { type: 'render'; html: string; fileName: string }
@@ -17,9 +18,11 @@ export type ToWebview =
   | { type: 'inlineFailed'; ls: number; le: number; text: string; message: string }
   | { type: 'history'; canUndo: boolean; canRedo: boolean }
   | { type: 'toast'; message: string }
-  | { type: 'agentPrompt'; prompt: string; count: number }
+  | { type: 'agentPrompt'; prompt: string; count: number; review?: string }
+  | { type: 'reviewers'; presets: { id: string; label: string; path?: string }[] }
   | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'round'; round: Round | null }
+  | { type: 'review'; review: ReviewRun | null }
   | { type: 'error'; message: string };
 
 /**
@@ -36,6 +39,22 @@ export interface Round {
   suggestions: number;
   /** The sent threads now waiting on the reviewer (questions and suggested edits). */
   questionIds: string[];
+  finished: boolean;
+}
+
+/**
+ * A Review with Claude run. It has no list of threads to finish: it ends when
+ * Claude runs `review-done` (the sidecar's reviewDoneAt) or reaches the cap,
+ * and the view also calls it over once Claude has been quiet for a while.
+ */
+export interface ReviewRun {
+  startedAt: string;
+  /** Drafts Claude has left since the start, up to the cap, including ones since kept or dismissed. */
+  total: number;
+  /** Their ids, for Show them. */
+  ids: string[];
+  /** Of those, the ones still waiting to be triaged. */
+  untriaged: number;
   finished: boolean;
 }
 
@@ -61,7 +80,13 @@ export type FromWebview =
   | { type: 'sendToAgent'; id?: string }
   | { type: 'setPrefs'; prefs: Record<string, unknown> }
   | { type: 'composing'; on: boolean }
-  | { type: 'dismissRound' };
+  /** Hide the Send to Claude progress ('round') or the Review with Claude one ('review'). */
+  | { type: 'dismissRound'; which: 'round' | 'review' }
+  | { type: 'listReviewers' }
+  /** preset: a reviewer id from listReviewers, or 'custom' with the instruction typed in. */
+  | { type: 'startReview'; preset: string; instruction?: string }
+  /** An agent's draft: keep it as yours, or keep it and queue it for the agent's next Send. */
+  | { type: 'triage'; id: string; action: 'keep' | 'do' };
 
 export interface HostContext {
   mdPath: string;
@@ -93,6 +118,8 @@ export interface HostContext {
   cliPath?: string;
   /** Tell the user something happened while they may be looking elsewhere (the view isn't focused). */
   notify?(message: string): void;
+  /** The most comments Review with Claude asks for (default 12). */
+  reviewComments?(): number;
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -103,8 +130,11 @@ export function roundSummary(r: Round): string {
   return `${r.resolved} resolved${yours.length ? `, ${yours.join(' and ')} for you` : ''}`;
 }
 
-/** A suggestion an edit applied, and the thread's status before it. */
-interface Applied { id: string; from?: string; status: store.Status }
+/**
+ * A suggestion an edit applied, and the thread's state before it: its status,
+ * and who it belonged to when it was an agent's untriaged draft (applying keeps it).
+ */
+interface Applied { id: string; from?: string; status: store.Status; agent?: { author: string; suggestedBy?: string } }
 
 export class ReviewSession {
   private lastSidecarWrite: string | undefined;
@@ -114,6 +144,8 @@ export class ReviewSession {
   private history = new EditHistory();
   /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
   private round: { ids: string[]; summary?: Round } | null = null;
+  /** A Review with Claude run: when it started, its cap, and the drafts seen so far. Independent of the round. */
+  private review: { since: string; max: number; ids: Set<string>; finished: boolean } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -167,6 +199,7 @@ export class ReviewSession {
     }
     this.ctx.post({ type: 'comments', data, author: this.ctx.author(), showResolved: this.ctx.showResolved() });
     this.updateRound(data);
+    this.updateReview(data);
   }
 
   private updateRound(data: store.Sidecar): void {
@@ -193,6 +226,31 @@ export class ReviewSession {
       this.round.summary = round;
     }
     this.ctx.post({ type: 'round', round: round.total ? round : null });
+  }
+
+  /**
+   * Count the drafts Claude has left since the review started. It's finished
+   * once Claude stamps reviewDoneAt (review-done) or reaches the cap.
+   */
+  private updateReview(data: store.Sidecar): void {
+    const r = this.review;
+    if (!r) return;
+    const by = new Map(data.comments.map((c) => [c.id, c]));
+    // Drafts past the cap, or after the run finished, aren't this run's.
+    for (const c of data.comments) {
+      if (r.finished || r.ids.size >= r.max) break;
+      if (c.origin === 'agent' && c.createdAt >= r.since) r.ids.add(c.id);
+    }
+    const n = r.ids.size;
+    let untriaged = 0;
+    for (const id of r.ids) if (by.get(id) && store.isAgentDraft(by.get(id)!)) untriaged++;
+    const finished = r.finished || n >= r.max || (typeof data.reviewDoneAt === 'string' && data.reviewDoneAt >= r.since);
+    if (finished && !r.finished) {
+      const file = path.basename(this.ctx.mdPath);
+      this.ctx.notify?.(n ? `Claude left ${count(n, 'comment', 'comments')} on ${file}.` : `Claude finished reviewing ${file} with no comments.`);
+    }
+    r.finished = finished;
+    this.ctx.post({ type: 'review', review: { startedAt: r.since, total: n, ids: [...r.ids], untriaged, finished } });
   }
 
   /** Called by a file watcher when the sidecar changes on disk. */
@@ -252,6 +310,8 @@ export class ReviewSession {
         // Applied is done: the thread resolves, like accepting a suggestion in Docs.
         this.mutate((d) => {
           const c = store.find(d, msg.id);
+          if (store.isAgentDraft(c)) applied.agent = { author: c.author, suggestedBy: c.suggestedBy };
+          store.keepAgentDraft(d, msg.id, author);
           const s = store.suggestionOf(c, msg.from);
           applied.status = c.status;
           if (s) s.appliedAt = store.now();
@@ -321,12 +381,29 @@ export class ReviewSession {
       case 'sendToAgent':
         return this.sendToAgent(msg.id);
       case 'dismissRound':
+        if (msg.which === 'review') {
+          this.review = null;
+          return this.ctx.post({ type: 'review', review: null });
+        }
         this.round = null;
         return this.ctx.post({ type: 'round', round: null });
       case 'setPrefs':
         this.ctx.setPrefs?.(msg.prefs);
         return;
       case 'composing': // a VS Code context key for Alt+1/2/3; set by the extension
+        return;
+      case 'listReviewers':
+        // Read on demand: the menu is the only thing that needs the workspace reviewers.
+        return this.ctx.post({ type: 'reviewers', presets: listReviewers(this.agentCwd()) });
+      case 'startReview':
+        return this.startReview(msg.preset, msg.instruction);
+      case 'triage':
+        // Do it queues the thread for Claude rather than starting it: a dozen drafts shouldn't mean a dozen terminals.
+        this.mutate((d) => {
+          store.keepAgentDraft(d, msg.id, author);
+          if (msg.action === 'do' && store.find(d, msg.id).status === 'draft') store.setStatus(d, msg.id, 'submitted');
+        });
+        if (msg.action === 'do') this.ctx.post({ type: 'toast', message: "Queued for Claude. Send to Claude when you've triaged the rest." });
         return;
     }
   }
@@ -371,7 +448,15 @@ export class ReviewSession {
           if (which === 'undo') {
             if (s) delete s.appliedAt;
             if (c.status !== applied.status) store.setStatus(d, applied.id, applied.status);
+            // It was Claude's untriaged draft: it goes back to waiting for triage.
+            if (applied.agent) {
+              c.origin = 'agent';
+              c.author = applied.agent.author;
+              if (applied.agent.suggestedBy === undefined) delete c.suggestedBy;
+              else c.suggestedBy = applied.agent.suggestedBy;
+            }
           } else {
+            if (applied.agent) store.keepAgentDraft(d, applied.id, this.ctx.author());
             if (s) s.appliedAt = store.now();
             if (c.status !== 'resolved') store.setStatus(d, applied.id, 'resolved');
           }
@@ -392,6 +477,7 @@ export class ReviewSession {
     const { data, written } = store.mutate(this.ctx.mdPath, (d) => {
       if (id) {
         const c = store.find(d, id);
+        store.keepAgentDraft(d, id, this.ctx.author()); // acting on Claude's draft makes it yours
         if (c.status === 'draft') store.setStatus(d, id, 'submitted');
       } else store.submitDrafts(d);
     });
@@ -418,6 +504,32 @@ export class ReviewSession {
     });
     if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
     else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+  }
+
+  private agentCwd(): string {
+    return this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath);
+  }
+
+  /** Start Claude as first reviewer: it reads the file and leaves drafts for you to triage. */
+  private startReview(id: string, instruction?: string): void {
+    const cwd = this.agentCwd();
+    // A workspace brief is read here, only for the reviewer picked.
+    const preset = id === 'custom' ? { label: 'Custom', instructions: (instruction || '').trim().slice(0, 2000) } : findPreset(cwd, id);
+    if (!preset || !preset.instructions) {
+      this.ctx.post({ type: 'toast', message: id === 'custom' ? 'Type what Claude should look for first.' : "That reviewer's file is empty or no longer there." });
+      return;
+    }
+    let existing = 0;
+    try {
+      existing = store.readSidecar(this.ctx.mdPath).comments.filter((c) => c.status !== 'resolved').length;
+    } catch {} // a broken sidecar is reported by sendComments
+    const max = Math.max(1, Math.min(50, Math.round(this.ctx.reviewComments?.() ?? 12)));
+    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing });
+    // A Send to Claude round still running keeps its own banner.
+    this.review = { since: store.now(), max, ids: new Set(), finished: false };
+    this.sendComments();
+    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
+    else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
   }
 
   /** Block editing works on disk bytes, so the view must reflect the disk. */

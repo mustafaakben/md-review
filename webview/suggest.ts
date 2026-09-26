@@ -33,7 +33,7 @@ export function suggestionBlock(quote: string, s: Suggestion, from: string, who:
   const owner = you ? 'your' : `${who}'s`;
   const state = s.appliedAt ? '<span class="mdr-sugg-state">Applied</span>' : s.dismissedAt ? '<span class="mdr-sugg-state">Dismissed</span>' : '';
   const acts = open
-    ? `<div class="mdr-row"><button class="mdr-primary" data-act="apply-sugg" data-from="${esc(from)}" title="Make this change in the file and resolve the thread" aria-label="Apply ${esc(owner)} suggestion">Apply</button><button data-act="dismiss-sugg" data-from="${esc(from)}" aria-label="Dismiss ${esc(owner)} suggestion">Dismiss</button></div>`
+    ? `<div class="mdr-row"><button class="mdr-primary" data-act="apply-sugg" data-from="${esc(from)}" title="Make this change in the file and resolve the thread" aria-label="Apply ${esc(owner)} suggestion">Apply</button><button data-act="dismiss-sugg" data-from="${esc(from)}" title="Leave the text as it is; the thread stays open" aria-label="Dismiss ${esc(owner)} suggestion">Dismiss</button></div>`
     : '';
   const diff = s.text ? suggestionDiff(quote, s.text) : `<del><span class="mdr-sr">deleted: </span>${esc(quote)}</del>`;
   return `<div class="mdr-sugg${open ? '' : ' done'}"><div class="mdr-sugg-head">${esc(who)} ${you ? 'suggest' : 'suggests'}${s.text ? '' : ' deleting'}${state}</div><div class="mdr-sugg-diff">${diff}</div>${acts}</div>`;

@@ -3,8 +3,9 @@ import { createSearch } from './search';
 import { createOutline } from './outline';
 import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
-import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
-import { Round, roundBanner, isWorking, nextExpiry } from './round';
+import { passes, authorsOf, filterBar, FilterState, StatusFilter, isAgentDraft } from './filters';
+import { Round, ReviewRun, roundBanner, reviewBanner, isWorking, nextExpiry, reviewLeft } from './round';
+import { createReviewMenu } from './review';
 import { Suggestion, suggestionBlock, suggestionEdit } from './suggest';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
 import { blockAtY, reveal, settle, viewTop } from './reveal';
@@ -21,6 +22,8 @@ interface Comment extends Meta {
   suggestion?: Suggestion;
   /** Set by the CLI while an agent is on this thread. */
   workingAt?: string; workingBy?: string;
+  /** "agent": Claude's draft from Review with Claude, not yet triaged. */
+  origin?: 'agent'; suggestedBy?: string;
   anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
 }
 
@@ -38,12 +41,16 @@ let deferredPaint = false;
 // instead of re-rendering: the text of the painted HTML, and the highlighted
 // comments in wrap order with their status. `docStale` means the DOM may no
 // longer match `html` (an in-view edit touched it); the next paint is full.
-let painted: Map<string, { status: Status; start: number; end: number }> | null = null;
+let painted: Map<string, { cls: string; start: number; end: number }> | null = null;
 let paintedText = '';
 let docStale = false;
 /** The task checkbox to refocus after the repaint its click causes. */
 let focusTask: string | null = null;
 let round: Round | null = null;
+/** A Review with Claude run; shown beside the Send round, not instead of it. */
+let review: ReviewRun | null = null;
+/** After Keep, Do it or Discard on Claude's draft `from`: the card to focus next (null: none left). */
+let triageFocus: { from: string; to: string | null } | null = null;
 let workingTimer: ReturnType<typeof setTimeout> | undefined;
 let lastBanner = '';
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
@@ -53,6 +60,8 @@ const openReplies = new Set<string>();
 const editingBodies = new Set<string>();
 const saved = vscode.getState() || {};
 const filter: FilterState = { status: saved.filterStatus || 'all', author: saved.filterAuthor || '', severity: saved.filterSeverity || '' };
+/** False until the first comments arrive (a remembered filter is checked against them once). */
+let commentsSeen = false;
 let navOrder: string[] = []; // visible, anchored thread ids in document order
 // The browser harness has no VS Code keybindings, so the view handles those keys itself.
 const standalone = !!(window as any).__mdrStandalone;
@@ -68,6 +77,7 @@ app.innerHTML = `
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
       <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
+      <button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button>
       <button id="mdr-edit-mode" class="mdr-mode" title="${tip('Edit mode: click any paragraph, heading, list item, or table row and type', 'E')}">Edit</button>
       <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
       <button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button>
@@ -76,6 +86,7 @@ app.innerHTML = `
   </header>
   <div id="mdr-find" class="mdr-find mdr-ui" hidden></div>
   <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
+  <div id="mdr-review" class="mdr-review-panel mdr-ui" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
     <main id="mdr-doc" class="mdr-doc"></main>
@@ -121,6 +132,7 @@ const reading = createReading(
   },
   (msg) => toast(msg),
 );
+const reviewMenu = createReviewMenu(document.getElementById('mdr-review-btn')!, document.getElementById('mdr-review')!, (m) => post(m), () => setSidebarOpen(true));
 const outlineBtn = document.getElementById('mdr-outline-toggle')!;
 const outline = createOutline(
   doc,
@@ -165,7 +177,7 @@ function paint() {
   painted = new Map();
   const specs = [];
   for (const [c, s, e] of located) {
-    painted.set(c.id, { status: c.status, start: s, end: e });
+    painted.set(c.id, { cls: markClass(c), start: s, end: e });
     specs.push({ start: s, end: e, make: () => mark(c) });
   }
   wrapRanges(doc, specs);
@@ -266,11 +278,11 @@ function paintComments() {
   unwrap(gone);
   const next: typeof painted = new Map();
   for (const [c, start, end] of want.slice(0, kept.length)) {
-    if (painted.get(c.id)!.status !== c.status) for (const m of marks.get(c.id) || []) m.className = markClass(c);
-    next.set(c.id, { status: c.status, start, end });
+    if (painted.get(c.id)!.cls !== markClass(c)) for (const m of marks.get(c.id) || []) m.className = markClass(c);
+    next.set(c.id, { cls: markClass(c), start, end });
   }
   const added = want.slice(kept.length);
-  for (const [c, start, end] of added) next.set(c.id, { status: c.status, start, end });
+  for (const [c, start, end] of added) next.set(c.id, { cls: markClass(c), start, end });
   wrapRanges(doc, added.map(([c, s, e]) => ({ start: s, end: e, make: () => mark(c) })));
   painted = next;
   renderSidebar();
@@ -308,7 +320,7 @@ function layout(): [Comment, number, number][] {
   return out;
 }
 
-const markClass = (c: Comment) => `mdr-hl mdr-${c.status}` + (c.id === activeId ? ' active' : '');
+const markClass = (c: Comment) => `mdr-hl mdr-${c.status}` + (isAgentDraft(c) ? ' mdr-agent' : '') + (c.id === activeId ? ' active' : '');
 function mark(c: Comment): HTMLElement {
   const m = document.createElement('mark');
   m.className = markClass(c);
@@ -316,9 +328,10 @@ function mark(c: Comment): HTMLElement {
   return m;
 }
 
+/** Claude's untriaged drafts count on their own, not as your drafts. */
 function counts() {
-  const n = { draft: 0, submitted: 0, resolved: 0 };
-  for (const c of comments) n[c.status]++;
+  const n = { draft: 0, submitted: 0, resolved: 0, agent: 0 };
+  for (const c of comments) n[isAgentDraft(c) ? 'agent' : c.status]++;
   return n;
 }
 
@@ -326,14 +339,15 @@ function renderSidebar() {
   const n = counts();
   (document.querySelector('.mdr-file') as HTMLElement).textContent = fileName;
   (document.querySelector('.mdr-counts') as HTMLElement).innerHTML =
-    `<span class="mdr-pill draft">${n.draft} draft</span><span class="mdr-pill submitted">${n.submitted} open</span><span class="mdr-pill resolved">${n.resolved} resolved</span>`;
+    `<span class="mdr-pill draft">${n.draft} draft</span><span class="mdr-pill submitted">${n.submitted} open</span><span class="mdr-pill resolved">${n.resolved} resolved</span>` +
+    (n.agent ? `<span class="mdr-pill agent">${n.agent} from Claude</span>` : '');
   submitBtn.disabled = n.draft === 0;
   submitBtn.textContent = n.draft ? `Submit review (${n.draft})` : 'Submit review';
   showResolvedBox.checked = showResolved;
 
-  const byAuthor = comments.filter((c) => passes(c, { status: 'all', author: filter.author, severity: filter.severity }, true));
-  const fc = { all: 0, draft: 0, submitted: 0, resolved: 0 } as Record<StatusFilter, number>;
-  for (const c of byAuthor) fc[c.status]++;
+  const byAuthor = comments.filter((c) => passes(c, { status: 'all', author: filter.author, severity: filter.severity, ids: filter.ids }, true));
+  const fc = { all: 0, draft: 0, submitted: 0, resolved: 0, agent: 0 } as Record<StatusFilter, number>;
+  for (const c of byAuthor) fc[isAgentDraft(c) ? 'agent' : c.status]++;
   fc.all = byAuthor.filter((c) => showResolved || c.status !== 'resolved').length;
   const sevCount: Record<string, number> = {};
   for (const c of comments) if (c.severity && passes(c, { ...filter, severity: '' }, showResolved)) sevCount[c.severity] = (sevCount[c.severity] || 0) + 1;
@@ -343,10 +357,14 @@ function renderSidebar() {
   sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
 
   const visible = comments.filter((c) => passes(c, filter, showResolved));
-  const whole = visible.filter((c) => c.scope === 'document').sort((a, b) => severityRank(a) - severityRank(b));
-  const anchored = visible.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+  const byPos = (a: Comment, b: Comment) => positions.get(a.id)! - positions.get(b.id)!;
+  navOrder = visible.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort(byPos).map((c) => c.id);
+  // Claude's drafts wait at the top until they're triaged: document notes, then in text order.
+  const fromClaude = visible.filter((c) => isAgentDraft(c) && !orphans.has(c.id)).sort((a, b) => byPos(a, b) || severityRank(a) - severityRank(b));
+  const rest = visible.filter((c) => !isAgentDraft(c));
+  const whole = rest.filter((c) => c.scope === 'document').sort((a, b) => severityRank(a) - severityRank(b));
+  const anchored = rest.filter((c) => c.scope !== 'document' && !orphans.has(c.id)).sort(byPos);
   const orphaned = visible.filter((c) => orphans.has(c.id));
-  navOrder = anchored.map((c) => c.id);
   let out = '';
   if (!visible.length && comments.length) {
     out = `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`;
@@ -354,7 +372,9 @@ function renderSidebar() {
     out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
   const now = Date.now(); // one clock for every card's working state
-  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c, now)).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
+  if (fromClaude.length) out += `<div class="mdr-section mdr-section-agent">From Claude · keep, do, or discard</div>` + fromClaude.map((c) => card(c, now)).join('');
+  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c, now)).join('');
+  if ((whole.length || fromClaude.length) && anchored.length) out += `<div class="mdr-section">In the text</div>`;
   out += anchored.map((c) => card(c, now)).join('');
   if (orphaned.length) {
     out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map((c) => card(c, now)).join('');
@@ -377,15 +397,20 @@ function renderSidebar() {
     }
   }
   showWorking();
+  applyTriageFocus();
 }
 
-/** The round banner, and a pulse on the threads Claude is on right now. */
+/** The review and round banners, and a pulse on the threads Claude is on right now. */
 function showWorking() {
   const now = Date.now();
   const on = new Set(comments.filter((c) => isWorking(c, now)).map((c) => c.id));
-  const banner = roundBanner(round, on.size > 0);
+  const reviewing = review ? reviewLeft(review, comments, now) : null;
+  const banner = [reviewBanner(review, reviewing !== null), roundBanner(round, on.size > 0)]
+    .filter(Boolean)
+    .map((b) => `<div class="mdr-round-part">${b}</div>`)
+    .join('');
   if (banner !== lastBanner) roundEl.innerHTML = lastBanner = banner; // unchanged text isn't re-announced
-  roundEl.hidden = !round;
+  roundEl.hidden = !banner;
   doc.querySelectorAll<HTMLElement>('mark.mdr-hl').forEach((m) => m.classList.toggle('mdr-working', on.has(m.dataset.cid!)));
   // Cards change in place, so a reply being typed survives a claim expiring.
   sidebar.querySelectorAll<HTMLElement>('.mdr-card').forEach((el) => {
@@ -394,8 +419,8 @@ function showWorking() {
     if (!w) el.querySelector('.mdr-working-line')?.remove();
   });
   clearTimeout(workingTimer);
-  const left = nextExpiry(comments, now);
-  if (left !== null) workingTimer = setTimeout(showWorking, Math.max(0, left) + 50);
+  const left = [nextExpiry(comments, now), reviewing].filter((x): x is number => x !== null);
+  if (left.length) workingTimer = setTimeout(showWorking, Math.max(0, Math.min(...left)) + 50);
 }
 
 /** The suggestion still waiting on the reviewer: '' for the comment's own, else the reply id. */
@@ -414,7 +439,14 @@ function card(c: Comment, now = Date.now()): string {
     .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div>${r.suggestion ? suggestionBlock(c.anchor.quote, r.suggestion, r.id, r.author, open === r.id) : ''}</div>`)
     .join('');
   const mine = c.author === author;
-  const actions = [
+  const agent = isAgentDraft(c);
+  const actions = agent
+    ? [
+        `<button data-act="keep" title="Make this your draft; it goes out with your review">Keep</button>`,
+        `<button data-act="do-it" title="Keep it and queue it for Claude; Send to Claude hands over everything queued" aria-label="Do it: keep and queue for Claude">Do it</button>`,
+        `<button data-act="dismiss-agent" class="danger" title="Delete this comment from ${esc(c.author)}" aria-label="Discard ${esc(c.author)}'s comment">Discard</button>`,
+      ].join('')
+    : [
     `<button data-act="reply">Reply</button>`,
     mine && c.status !== 'resolved' ? `<button data-act="edit-body">Edit</button>` : '',
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
@@ -426,14 +458,15 @@ function card(c: Comment, now = Date.now()): string {
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
   const working = isWorking(c, now);
-  return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}${working ? ' mdr-working' : ''}" data-id="${c.id}">
-    <div class="mdr-meta"><span class="mdr-badge ${c.status}">${c.status}</span><b>${esc(c.author)}</b> · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
+  const by = c.suggestedBy ? ` <span class="mdr-by">· raised by ${esc(c.suggestedBy)}</span>` : '';
+  return `<div class="mdr-card ${c.status}${agent ? ' mdr-agent' : ''}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}${working ? ' mdr-working' : ''}" data-id="${c.id}">
+    <div class="mdr-meta"><span class="mdr-badge ${agent ? 'agent' : c.status}">${agent ? 'suggested' : c.status}</span><b>${esc(c.author)}</b>${by} · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
     ${metaBadges(c) ? `<div class="mdr-tags">${metaBadges(c)}</div>` : ''}
     ${c.scope === 'document' ? '' : `<blockquote class="mdr-quote" data-act="goto" title="Go to text">${esc(c.anchor.quote.length > 180 ? c.anchor.quote.slice(0, 180) + '…' : c.anchor.quote)}</blockquote>`}
     ${editingBodies.has(c.id)
       ? `<div class="mdr-replybox">${metaPicker(c, altDigit)}<textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
       : `<div class="mdr-body">${esc(c.body)}</div>`}
-    ${c.suggestion ? suggestionBlock(c.anchor.quote, c.suggestion, '', c.author === author ? 'You' : c.author, open === '') : ''}
+    ${c.suggestion ? suggestionBlock(c.anchor.quote, c.suggestion, '', c.suggestedBy || (c.author === author ? 'You' : c.author), open === '') : ''}
     ${replies ? `<div class="mdr-replies">${replies}</div>` : ''}
     ${working ? `<div class="mdr-working-line"><span class="mdr-round-dot live" aria-hidden="true"></span>${esc(c.workingBy || 'Claude')} is working on this…</div>` : ''}
     <div class="mdr-actions">${actions}</div>
@@ -655,9 +688,11 @@ function saveComment() {
 roundEl.addEventListener('click', (e) => {
   const act = (e.target as Element).closest('[data-round]')?.getAttribute('data-round');
   if (act === 'questions' && round) setFilter({ status: 'all', author: '', severity: '', ids: round.questionIds });
-  else if (act === 'dismiss') {
-    post({ type: 'dismissRound' });
-    // The banner is about to hide; keep focus somewhere useful.
+  // This run's drafts only; it also replaces an earlier "Waiting on you".
+  else if (act === 'from-claude') setFilter({ status: 'agent', author: '', severity: '', ids: review ? review.ids : undefined });
+  else if (act === 'dismiss-round' || act === 'dismiss-review') {
+    post({ type: 'dismissRound', which: act === 'dismiss-round' ? 'round' : 'review' });
+    // The row is about to go; keep focus somewhere useful.
     if (roundEl.contains(document.activeElement)) (sendBtn.disabled ? docCommentBtn : sendBtn).focus();
   }
 });
@@ -733,10 +768,40 @@ sidebar.addEventListener('click', (e) => {
       return post({ type: 'dismissSuggestion', id, from: (t.closest('[data-from]') as HTMLElement).dataset.from || undefined });
     case 'ask-claude':
       return post({ type: 'sendToAgent', id });
+    case 'keep':
+      nextTriageFocus(cardEl);
+      return post({ type: 'triage', id, action: 'keep' });
+    case 'do-it':
+      nextTriageFocus(cardEl);
+      return post({ type: 'triage', id, action: 'do' });
+    case 'dismiss-agent':
+      nextTriageFocus(cardEl);
+      return post({ type: 'deleteComment', id });
     default:
       if (!t.closest('textarea')) activate(id, true, false);
   }
 });
+
+/** Triage takes a card out of Claude's list: focus moves to the next one (or the one before the last). */
+function nextTriageFocus(cardEl: HTMLElement) {
+  if (!cardEl.contains(document.activeElement)) return;
+  const cards = Array.from(sidebar.querySelectorAll<HTMLElement>('.mdr-card.mdr-agent'));
+  const i = cards.indexOf(cardEl);
+  const to = cards[i + 1] ?? cards[i - 1];
+  triageFocus = { from: cardEl.dataset.id!, to: to ? to.dataset.id! : null };
+}
+
+/** Once the triaged card has left Claude's list, put focus where nextTriageFocus said. */
+function applyTriageFocus() {
+  if (!triageFocus || comments.some((c) => c.id === triageFocus!.from && isAgentDraft(c))) return;
+  const { to } = triageFocus;
+  triageFocus = null;
+  const next = to && sidebar.querySelector<HTMLElement>(`.mdr-card.mdr-agent[data-id="${CSS.escape(to)}"] [data-act="keep"]`);
+  if (next) return next.focus();
+  // None left: Send to Claude hands over what was kept and queued; else the filter's All chip.
+  const all = filtersEl.querySelector<HTMLElement>('[data-filter-status="all"]');
+  (sendBtn.disabled ? all || docCommentBtn : sendBtn).focus();
+}
 
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
@@ -796,10 +861,10 @@ outlineBtn.addEventListener('click', (e) => outline.setOpen(!outline.isOpen(), e
 outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
 
 // ---------------------------------------------------------------- filters & navigation
-function setFilter(f: Partial<FilterState>) {
+function setFilter(f: Partial<FilterState>, repaint = true) {
   Object.assign(filter, f);
   vscode.setState({ ...(vscode.getState() || {}), filterStatus: filter.status, filterAuthor: filter.author, filterSeverity: filter.severity });
-  renderSidebar();
+  if (repaint) renderSidebar();
 }
 filtersEl.addEventListener('click', (e) => {
   const st = (e.target as Element).closest('[data-filter-status]')?.getAttribute('data-filter-status') as StatusFilter | undefined;
@@ -895,6 +960,8 @@ function runCommand(cmd: string) {
     }
     case 'comments':
       return setSidebarOpen(document.body.classList.contains('mdr-side-collapsed'));
+    case 'review':
+      return reviewMenu.open();
     case 'shortcuts':
       return keySheet.toggle();
     case 'severity1':
@@ -957,6 +1024,8 @@ document.addEventListener('keydown', (e) => {
     search.open();
   } else if (k === 'r' && activeId) {
     e.preventDefault();
+    // Claude's untriaged drafts have no thread yet: Keep, Do it or Discard comes first.
+    if (comments.some((c) => c.id === activeId && isAgentDraft(c))) return toast('Keep this comment first, then reply to it.');
     setSidebarOpen(true);
     openReplies.add(activeId);
     renderSidebar();
@@ -1259,6 +1328,9 @@ window.addEventListener('message', (ev) => {
     case 'comments':
       comments = m.data.comments || [];
       author = m.author;
+      // A remembered From Claude filter with nothing left to triage opens on All instead.
+      if (!commentsSeen && filter.status === 'agent' && !comments.some(isAgentDraft)) setFilter({ status: 'all' }, false);
+      commentsSeen = true;
       showResolved = (vscode.getState() || {}).showResolved ?? m.showResolved;
       paintComments();
       break;
@@ -1287,10 +1359,22 @@ window.addEventListener('message', (ev) => {
       round = m.round;
       showWorking();
       break;
+    case 'review':
+      review = m.review;
+      showWorking();
+      break;
     case 'agentPrompt':
-      copyText(m.prompt).then(
-        (ok) => toast(ok ? `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into Claude Code.` : 'Could not copy the prompt.', !ok),
+      copyText(m.prompt).then((ok) =>
+        toast(
+          !ok ? 'Could not copy the prompt.'
+          : m.review ? `Review prompt (${m.review}) copied. Paste it into Claude Code.`
+          : `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into Claude Code.`,
+          !ok,
+        ),
       );
+      break;
+    case 'reviewers':
+      reviewMenu.setReviewers(m.presets || []);
       break;
     case 'prefs':
       reading.apply(m.prefs || {});

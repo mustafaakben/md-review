@@ -266,6 +266,8 @@ button.mdr-doc-comment::before { width: 14px; height: 14px; --ico: var(--i-discu
 .mdr-round { margin: 0 12px 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--hover); font-size: 12px; }
 .mdr-round[hidden] { display: none; }
 .mdr-round-row { display: flex; align-items: center; gap: 8px; }
+/* A Review with Claude run and a Send round can both be live: one row each. */
+.mdr-round-part + .mdr-round-part { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .mdr-round-text { flex: 1; min-width: 0; }
 .mdr-round-actions { justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .mdr-round-actions button { font-size: 12px; }
@@ -319,3 +321,59 @@ mark.mdr-hl.mdr-working { animation: mdr-glow 1.4s ease-in-out infinite; }
 
 /* Read by screen readers only. */
 .mdr-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Review with Claude: the toolbar menu, Claude's drafts, and their triage buttons. */
+button.mdr-review-btn { display: inline-flex; align-items: center; gap: 6px; }
+#mdr-review-btn::before, .mdr-chip-agent::before, button[data-act="keep"]::before, button[data-act="do-it"]::before, button[data-act="dismiss-agent"]::before {
+  content: ''; flex: none; width: 16px; height: 16px; background: currentColor;
+  -webkit-mask: var(--ico) center / 16px no-repeat; mask: var(--ico) center / 16px no-repeat;
+}
+#mdr-review-btn::before, .mdr-chip-agent::before, button[data-act="do-it"]::before { --ico: var(--i-sparkle); }
+button[data-act="keep"]::before { --ico: var(--i-check); }
+button[data-act="dismiss-agent"]::before { --ico: var(--i-close); }
+button.mdr-chip-agent { display: inline-flex; align-items: center; gap: 4px; }
+.mdr-chip-agent::before { width: 12px; height: 12px; -webkit-mask-size: 12px; mask-size: 12px; }
+@media (max-width: 900px) {
+  /* Narrow toolbars keep the icon; the name stays for assistive tech. */
+  button.mdr-review-btn { padding: 5px; }
+  button.mdr-review-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@media (max-width: 760px) {
+  /* Tighter spacing pays for the review button, so a narrow toolbar is no wider than before it. */
+  .mdr-toolbar { padding-left: 12px; }
+  .mdr-tools { gap: 0; }
+}
+.mdr-review-panel {
+  position: fixed; z-index: 35; width: 264px; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--vscode-editorWidget-background, var(--bg));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2); font-size: 12.5px;
+}
+.mdr-review-panel[hidden] { display: none; }
+.mdr-rv-note { margin: 0 2px 8px; color: var(--muted); line-height: 1.4; }
+.mdr-rv-list { display: flex; flex-direction: column; gap: 1px; }
+.mdr-rv-list button { justify-content: flex-start; text-align: left; padding: 5px 8px; background: transparent; border-color: transparent; }
+.mdr-rv-list button:hover, .mdr-rv-list button:focus-visible { background: var(--hover, var(--soft)); color: var(--fg); }
+.mdr-rv-label { margin: 8px 8px 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.mdr-rv-custom { display: flex; gap: 6px; margin-top: 6px; }
+.mdr-rv-custom[hidden] { display: none; }
+.mdr-rv-custom input {
+  flex: 1; min-width: 0; font: inherit; padding: 3px 6px; border-radius: 4px; color: var(--vscode-input-foreground, var(--fg));
+  background: var(--vscode-input-background, var(--bg)); border: 1px solid var(--vscode-input-border, var(--border)); outline: none;
+}
+.mdr-rv-custom input:focus { border-color: var(--vscode-focusBorder, var(--accent)); }
+.mdr-pill.agent::before { background: var(--accent); }
+.mdr-badge.agent { color: var(--accent); }
+.mdr-section-agent { color: var(--accent); }
+.mdr-card.mdr-agent { --c: var(--accent); }
+.mdr-card.mdr-agent::before { background: repeating-linear-gradient(var(--c) 0 5px, transparent 5px 8px); }
+.mdr-by { color: var(--muted); font-weight: 400; }
+mark.mdr-hl.mdr-agent { --c: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); text-decoration: underline dashed color-mix(in srgb, var(--accent) 70%, transparent); text-underline-offset: 3px; }
+.mdr-round-icon:not(.done) { -webkit-mask-image: var(--i-info); mask-image: var(--i-info); background: var(--muted); }
+@media (forced-colors: active) {
+  .mdr-review-panel { border-color: CanvasText; }
+  .mdr-rv-list button:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
+  .mdr-card.mdr-agent::before { forced-color-adjust: none; background: repeating-linear-gradient(Highlight 0 5px, transparent 5px 8px); }
+  mark.mdr-hl.mdr-agent { outline: 1px dashed Highlight; text-decoration-color: Highlight; }
+  .mdr-pill.agent::before { background: Highlight; }
+  .mdr-round-icon:not(.done) { forced-color-adjust: none; background: CanvasText; }
+  .mdr-round-part + .mdr-round-part { border-top-color: CanvasText; }
+}
