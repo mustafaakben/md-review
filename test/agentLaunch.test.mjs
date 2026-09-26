@@ -69,7 +69,30 @@ test('a command line typed into bash, zsh, fish, PowerShell or cmd keeps each ar
   assert.equal(lib.shellKind('C:\\Program Files\\PowerShell\\7\\pwsh.exe'), 'pwsh');
   assert.equal(lib.shellKind('C:\\Windows\\System32\\cmd.exe'), 'cmd');
   assert.equal(lib.shellKind('/bin/zsh'), 'posix');
-  assert.equal(lib.shellKind('/opt/homebrew/bin/fish'), 'posix');
+  assert.equal(lib.shellKind('/opt/homebrew/bin/fish'), 'fish');
+});
+
+test('quoting: backslashes, fish, and curly quotes in PowerShell', () => {
+  // A POSIX shell would eat the backslash; Windows paths keep theirs.
+  assert.equal(lib.quoteFor('posix', 'a\\b'), `'a\\b'`);
+  assert.equal(lib.quoteFor('cmd', 'C:\\x\\y.md'), 'C:\\x\\y.md');
+  assert.equal(lib.quoteFor('pwsh', 'C:\\x\\y.md'), 'C:\\x\\y.md');
+  // fish single quotes take \\ and \' as escapes.
+  assert.equal(lib.quoteFor('fish', "it's a\\b"), `'it\\'s a\\\\b'`);
+  // PowerShell treats \u2018 and \u2019 like ' and needs each doubled.
+  assert.equal(lib.quoteFor('pwsh', 'x\u2019; calc; \u2018y'), `'x\u2019\u2019; calc; \u2018\u2018y'`);
+});
+
+test('a ~ in the agent command means the home folder', () => {
+  const look = { platform: 'darwin', home: '/Users/jo', env: { PATH: '' }, isProgram: fake(['/Users/jo/tools/claude']) };
+  assert.equal(lib.findProgram('~/tools/claude', look), '/Users/jo/tools/claude');
+  const win = { platform: 'win32', home: 'C:\\Users\\Jo', env: { Path: '' }, isProgram: fake(['C:\\Users\\Jo\\bin\\claude.exe']) };
+  assert.equal(lib.findProgram('~\\bin\\claude', win), 'C:\\Users\\Jo\\bin\\claude.exe');
+});
+
+test('Windows: PATHEXT script types that a terminal would hand to another program are skipped', () => {
+  const look = { platform: 'win32', home: 'C:\\Users\\Jo', env: { Path: 'C:\\bin', PATHEXT: '.COM;.EXE;.BAT;.CMD;.VBS;.JS' }, isProgram: fake(['C:\\bin\\claude.js']) };
+  assert.equal(lib.findProgram('claude', look), null);
 });
 
 test('old prompt files are cleaned up, recent ones and other files are kept', () => {

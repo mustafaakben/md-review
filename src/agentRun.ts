@@ -4,10 +4,11 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { cleanOldPrompts, commandLine, findProgram, parseCommand, shellKind } from './agentLaunch';
+import { cleanOldPrompts, commandLine, findProgram, parseCommand, shellKind, ShellKind } from './agentLaunch';
 
 const DAY = 24 * 60 * 60 * 1000;
-let promptDir = path.join(os.tmpdir(), 'mdreview-prompts');
+/** Set on activation; until then, a private folder made on first use. */
+let promptDir: string | undefined;
 
 /** Keep prompt files in the extension's storage, and drop ones from past days. */
 export function initAgentPrompts(context: vscode.ExtensionContext): void {
@@ -19,9 +20,10 @@ export function initAgentPrompts(context: vscode.ExtensionContext): void {
  * Start the configured agent in a terminal. The review prompt is written to a
  * file and the agent gets one short argument that points at it: comment text
  * is untrusted, and on Windows a .cmd shim would run it through cmd.exe.
- * Returns a status line, or '' when the user was already told what happened.
+ * Returns a status line, '' when the user was already told what happened, or
+ * null when no agent was started.
  */
-export function runAgent(prompt: string, fileName: string, cwd: string): string {
+export function runAgent(prompt: string, fileName: string, cwd: string): string | null {
   const cfg = vscode.workspace.getConfiguration('mdReview');
   const mode = cfg.get<string>('agent.mode', 'terminal');
   const command = (cfg.get<string>('agent.command') || 'claude').trim();
@@ -29,7 +31,13 @@ export function runAgent(prompt: string, fileName: string, cwd: string): string 
   if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
 
   const [program = 'claude', ...extra] = parseCommand(command, process.platform === 'win32');
-  const exe = findProgram(program, { platform: process.platform, env: process.env, home: os.homedir() });
+  let home = '';
+  try {
+    home = os.homedir();
+  } catch {
+    // no home folder: skip the per-user install locations
+  }
+  const exe = findProgram(program, { platform: process.platform, env: process.env, home });
   if (!exe) {
     void vscode.window
       .showWarningMessage(
@@ -37,12 +45,22 @@ export function runAgent(prompt: string, fileName: string, cwd: string): string 
         'Open Setting',
       )
       .then((pick) => pick && vscode.commands.executeCommand('workbench.action.openSettings', 'mdReview.agent.command'));
-    return '';
+    return null;
   }
 
-  fs.mkdirSync(promptDir, { recursive: true });
-  const promptFile = path.join(promptDir, `review-prompt-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.md`);
-  fs.writeFileSync(promptFile, prompt, 'utf8');
+  let promptFile: string;
+  try {
+    promptDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-prompts-'));
+    // Comments can be private: only this user may read the prompt.
+    fs.mkdirSync(promptDir, { recursive: true, mode: 0o700 });
+    promptFile = path.join(promptDir, `review-prompt-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.md`);
+    fs.writeFileSync(promptFile, prompt, { encoding: 'utf8', mode: 0o600 });
+  } catch (e) {
+    void vscode.window.showWarningMessage(
+      `The review prompt couldn't be saved for ${path.basename(exe)} (${(e as Error).message}), so it was copied to the clipboard instead.`,
+    );
+    return null;
+  }
   const args = [...extra, `Read and follow the review instructions in ${promptFile}`];
   const name = `Claude · ${fileName}`;
   const iconPath = new vscode.ThemeIcon('sparkle');
@@ -57,10 +75,21 @@ export function runAgent(prompt: string, fileName: string, cwd: string): string 
   return `Sent to ${path.basename(exe)} in a new terminal. The prompt is on your clipboard too.`;
 }
 
+/** The kind of shell a terminal runs, as shell integration reports it. */
+function termShell(term: vscode.Terminal): ShellKind {
+  // `state.shell` is newer than our minimum VS Code; fall back to the default shell.
+  const known = (term.state as { shell?: string }).shell;
+  if (known === 'pwsh' || known === 'cmd' || known === 'fish') return known;
+  if (known) return 'posix';
+  return shellKind(vscode.env.shell);
+}
+
 /**
  * Run the agent inside the user's own shell, which stays open when it exits.
- * Shell integration quotes for whatever shell it is; without it (it can take
- * a moment to start, or be off), type a line quoted for the default shell.
+ * The line is quoted here for the terminal's shell: shell integration's
+ * argument form leaves quoting to heuristics that don't cover every character.
+ * Without shell integration (it can take a moment to start, or be off), the
+ * same line is typed in.
  */
 function runInShell(term: vscode.Terminal, exe: string, args: string[]): void {
   let done = false;
@@ -69,8 +98,13 @@ function runInShell(term: vscode.Terminal, exe: string, args: string[]): void {
     done = true;
     sub.dispose();
     clearTimeout(timer);
-    if (term.shellIntegration) term.shellIntegration.executeCommand(exe, args);
-    else term.sendText(commandLine(shellKind(vscode.env.shell), [exe, ...args]));
+    const line = commandLine(termShell(term), [exe, ...args]);
+    try {
+      if (term.shellIntegration) return void term.shellIntegration.executeCommand(line);
+    } catch {
+      // fall through to typing it
+    }
+    term.sendText(line);
   };
   const sub = vscode.window.onDidChangeTerminalShellIntegration((e) => e.terminal === term && run());
   const timer = setTimeout(run, 3000);

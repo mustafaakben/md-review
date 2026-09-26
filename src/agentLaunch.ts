@@ -84,10 +84,13 @@ export function findProgram(program: string, look: LookupEnv): string | null {
   const p = windows ? path.win32 : path.posix;
   const isProgram = look.isProgram ?? ((f: string) => defaultIsProgram(f, windows));
   const pathVar = windows ? look.env.Path ?? look.env.PATH ?? '' : look.env.PATH ?? '';
+  // Only what a terminal can start as a program (not .js or .vbs from PATHEXT).
   const exts = windows
-    ? ['.exe', ...(look.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map((e) => e.toLowerCase()).filter((e) => e && e !== '.exe')]
+    ? ['.exe', ...(look.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map((e) => e.toLowerCase()).filter((e) => ['.com', '.bat', '.cmd'].includes(e))]
     : [''];
-  const hasExt = windows && /\.[a-z0-9]+$/i.test(program);
+  // People type ~ in settings, and nothing expands it before us.
+  if (/^~([\\/]|$)/.test(program)) program = p.join(look.home, program.slice(1));
+  const hasExt = windows && /\.(com|exe|bat|cmd)$/i.test(program);
   const names = hasExt ? [program] : exts.map((e) => program + e);
   if (program.includes('/') || (windows && program.includes('\\'))) {
     return names.find(isProgram) ?? null;
@@ -103,23 +106,30 @@ export function findProgram(program: string, look: LookupEnv): string | null {
 }
 
 /** Quote one argument for the shell a terminal runs, for typing it in there. */
-export function quoteFor(shell: 'posix' | 'pwsh' | 'cmd', arg: string): string {
-  if (/^[\w./\\:-]+$/.test(arg)) return arg;
-  if (shell === 'pwsh') return `'${arg.replace(/'/g, "''")}'`;
+export type ShellKind = 'posix' | 'fish' | 'pwsh' | 'cmd';
+
+export function quoteFor(shell: ShellKind, arg: string): string {
+  // A backslash escapes the next character in POSIX shells and fish.
+  if (/^[\w./:-]+$/.test(arg) || (/^[\w./\\:-]+$/.test(arg) && (shell === 'pwsh' || shell === 'cmd'))) return arg;
+  // PowerShell also takes curly single quotes as quotes; doubling escapes each.
+  if (shell === 'pwsh') return `'${arg.replace(/['\u2018\u2019\u201a\u201b]/g, '$&$&')}'`;
   if (shell === 'cmd') return `"${arg.replace(/"/g, '""')}"`;
+  // Inside fish's single quotes, \\ and \' are escapes.
+  if (shell === 'fish') return `'${arg.replace(/[\\']/g, '\\$&')}'`;
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
 /** The shell kind of a terminal shell's path (VS Code's `env.shell`). */
-export function shellKind(shellPath: string): 'posix' | 'pwsh' | 'cmd' {
+export function shellKind(shellPath: string): ShellKind {
   const base = shellPath.split(/[\\/]/).pop()!.toLowerCase();
   if (/^(pwsh|powershell)(\.exe)?$/.test(base)) return 'pwsh';
   if (/^cmd(\.exe)?$/.test(base)) return 'cmd';
+  if (/^fish(\.exe)?$/.test(base)) return 'fish';
   return 'posix';
 }
 
 /** A command line to type into a terminal running `shell`. */
-export function commandLine(shell: 'posix' | 'pwsh' | 'cmd', argv: string[]): string {
+export function commandLine(shell: ShellKind, argv: string[]): string {
   const line = argv.map((a) => quoteFor(shell, a)).join(' ');
   // PowerShell treats a quoted first word as a string, not a command.
   return shell === 'pwsh' && argv.length && line.startsWith("'") ? `& ${line}` : line;
