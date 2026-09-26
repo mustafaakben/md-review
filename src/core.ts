@@ -91,7 +91,8 @@ export class ReviewSession {
   private lastRendered = '';
   private watched = '';
   private history = new EditHistory();
-  private round: { ids: string[]; finished: boolean } | null = null;
+  /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
+  private round: { ids: string[]; summary?: Round } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -140,6 +141,7 @@ export class ReviewSession {
 
   private updateRound(data: store.Sidecar): void {
     if (!this.round) return;
+    if (this.round.summary) return this.ctx.post({ type: 'round', round: this.round.summary });
     const by = new Map(data.comments.map((c) => [c.id, c]));
     const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, finished: false };
     for (const id of this.round.ids) {
@@ -152,11 +154,11 @@ export class ReviewSession {
       round.done++; // a draft again (reviewer took it back) counts as done
     }
     round.finished = round.done === round.total;
-    if (round.finished && !this.round.finished && round.total) {
+    if (round.finished && round.total) {
       const q = round.questions ? `, ${round.questions} question${round.questions === 1 ? '' : 's'} for you` : '';
       this.ctx.notify?.(`Claude finished ${path.basename(this.ctx.mdPath)}: ${round.resolved} resolved${q}.`);
+      this.round.summary = round;
     }
-    this.round.finished = round.finished;
     this.ctx.post({ type: 'round', round: round.total ? round : null });
   }
 
@@ -317,8 +319,11 @@ export class ReviewSession {
     }
     // Only threads that are actually waiting on the agent count toward the round.
     const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
-    this.round = ids.length ? { ids, finished: false } : null;
-    this.updateRound(data);
+    // Ask Claude on one thread while a round is still running adds to that round.
+    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
+    else this.round = ids.length ? { ids } : null;
+    if (this.round) this.updateRound(data);
+    else this.ctx.post({ type: 'round', round: null });
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),

@@ -7,7 +7,10 @@ export interface Round { total: number; done: number; resolved: number; question
 const FRESH_MS = 5 * 60 * 1000;
 
 export function isWorking(c: { status: string; workingAt?: string }, now = Date.now()): boolean {
-  return !!c.workingAt && c.status !== 'resolved' && now - Date.parse(c.workingAt) < FRESH_MS;
+  if (!c.workingAt || c.status === 'resolved') return false;
+  // A claim from the future (a synced machine with a fast clock) counts, but only for as long as a fresh one.
+  const age = now - Date.parse(c.workingAt);
+  return age < FRESH_MS && age > -FRESH_MS;
 }
 
 /** When the next claim goes stale, so the view can drop its "working" state on time. */
@@ -15,7 +18,7 @@ export function nextExpiry(list: { status: string; workingAt?: string }[], now =
   let min: number | null = null;
   for (const c of list) {
     if (!isWorking(c, now)) continue;
-    const left = Date.parse(c.workingAt!) + FRESH_MS - now;
+    const left = Math.min(Date.parse(c.workingAt!) + FRESH_MS - now, FRESH_MS);
     if (min === null || left < min) min = left;
   }
   return min;

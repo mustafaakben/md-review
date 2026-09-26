@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import * as esbuild from 'esbuild';
 
 const require = createRequire(import.meta.url);
 const lib = require('../dist/lib.cjs');
@@ -77,6 +78,70 @@ test('a round reports progress and one summary when the agent is done', () => {
   s.onSidecarChanged();
   s.sendComments();
   assert.equal(notes.length, 1);
+  // The reviewer answers the question and Claude replies again: the summary stays, with no second notice.
+  store.mutate(md, (d) => void store.addReply(d, ids[1], 'R', 'The first.'));
+  s.onSidecarChanged();
+  run('reply', md, ids[1], 'Done.');
+  s.onSidecarChanged();
+  assert.deepEqual(rounds().at(-1), { total: 3, done: 3, resolved: 2, questions: 1, finished: true });
+  assert.equal(notes.length, 1);
   s.handle({ type: 'dismissRound' });
   assert.equal(rounds().at(-1), null);
+});
+
+function session(md, posted) {
+  return new lib.ReviewSession({
+    mdPath: md, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage: (x) => x,
+    getText: () => fs.readFileSync(md, 'utf8'), isDirty: () => false, openLink: () => {}, runAgent: () => 'sent',
+  });
+}
+
+test('Ask Claude on one thread mid-round joins the round; a send with nothing waiting clears the banner', () => {
+  const { md, ids } = setup('join.md');
+  const posted = [];
+  const s = session(md, posted);
+  const rounds = () => posted.filter((m) => m.type === 'round').map((m) => m.round);
+  s.handle({ type: 'ready' });
+  s.handle({ type: 'sendToAgent', id: ids[0] });
+  assert.equal(rounds().at(-1).total, 1);
+  s.handle({ type: 'sendToAgent', id: ids[1] });
+  assert.equal(rounds().at(-1).total, 2);
+  // Every thread now has Claude's reply last: a new send has nothing waiting.
+  for (const id of ids) run('reply', md, id, 'Which one?');
+  s.onSidecarChanged();
+  s.handle({ type: 'dismissRound' });
+  s.handle({ type: 'sendToAgent', id: ids[0] });
+  assert.equal(rounds().at(-1), null);
+});
+
+test('a status change clears the working mark', () => {
+  const { md, ids } = setup('status.md');
+  run('next', md);
+  assert.ok(get(md, ids[0]).workingAt);
+  store.mutate(md, (d) => store.setStatus(d, ids[0], 'resolved'));
+  assert.equal(get(md, ids[0]).workingAt, undefined);
+});
+
+test('context on a thread waiting for the reviewer does not mark it', () => {
+  const { md, ids } = setup('waiting.md');
+  run('reply', md, ids[0], 'Which one?');
+  run('context', md, ids[0]);
+  assert.equal(get(md, ids[0]).workingAt, undefined);
+});
+
+test('the working state: fresh claims only, a future clock capped, and the expiry never beyond five minutes', () => {
+  const out = path.join(tmp, 'round.cjs');
+  fs.mkdirSync(tmp, { recursive: true });
+  esbuild.buildSync({ entryPoints: [path.join(here, '..', 'webview', 'round.ts')], outfile: out, bundle: true, format: 'cjs', platform: 'node', logLevel: 'silent' });
+  const { isWorking, nextExpiry } = createRequire(import.meta.url)(out);
+  const now = Date.parse('2026-09-26T12:00:00Z');
+  const at = (min) => ({ status: 'submitted', workingAt: new Date(now + min * 60_000).toISOString() });
+  assert.equal(isWorking(at(-1), now), true);
+  assert.equal(isWorking(at(-6), now), false);
+  assert.equal(isWorking({ ...at(-1), status: 'resolved' }, now), false);
+  assert.equal(isWorking(at(3), now), true, 'a slightly fast clock still counts');
+  assert.equal(isWorking(at(60 * 24 * 365 * 70), now), false, 'a claim decades ahead does not');
+  assert.equal(nextExpiry([at(-1)], now), 4 * 60_000);
+  assert.equal(nextExpiry([at(3)], now), 5 * 60_000, 'capped, so a timer never overflows');
+  assert.equal(nextExpiry([at(-6)], now), null);
 });

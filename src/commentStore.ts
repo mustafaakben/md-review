@@ -208,6 +208,8 @@ export function setStatus(data: Sidecar, id: string, status: Status): void {
   const c = find(data, id);
   if (c.status === 'resolved' && status !== 'resolved') c.reopenedAt = now();
   c.status = status;
+  delete c.workingAt; // a status change ends any claim on the thread
+  delete c.workingBy;
   if (status === 'resolved') c.resolvedAt = now();
   else c.resolvedAt = null;
   if (status === 'submitted' && !c.submittedAt) c.submittedAt = now();

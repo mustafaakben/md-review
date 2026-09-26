@@ -460,7 +460,7 @@ switch (cmd) {
       break;
     }
     const { md, c } = open[0];
-    claim(md, c.id);
+    if (awaits(c)) claim(md, c.id); // not a thread that's waiting on the reviewer (--all)
     const ctx = contextOf(md, c);
     if (asJson) {
       console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1, waiting }, null, 2));
@@ -480,7 +480,7 @@ switch (cmd) {
       process.exit(2);
     }
     const c = find(read(md), id);
-    if (c.status === 'submitted') claim(md, id);
+    if (c.status === 'submitted' && awaits(c)) claim(md, id);
     const ctx = contextOf(md, c);
     console.log(asJson ? JSON.stringify({ comment: c, ...ctx }, null, 2) : describeWithContext(c, ctx));
     break;

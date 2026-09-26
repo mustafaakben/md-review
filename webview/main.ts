@@ -301,12 +301,28 @@ function renderSidebar() {
   } else if (!visible.length) {
     out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
-  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map(card).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
-  out += anchored.map(card).join('');
+  if (whole.length) out += `<div class="mdr-section">Whole document</div>` + whole.map((c) => card(c)).join('') + (anchored.length ? `<div class="mdr-section">In the text</div>` : '');
+  out += anchored.map((c) => card(c)).join('');
   if (orphaned.length) {
-    out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map(card).join('');
+    out += `<div class="mdr-section">Orphaned (quoted text no longer found)</div>` + orphaned.map((c) => card(c)).join('');
   }
+  // Keep what's being typed in a card (a reply, an edit) when the list repaints under it.
+  const typed = Array.from(sidebar.querySelectorAll<HTMLTextAreaElement>('.mdr-card textarea')).map((t) => ({
+    id: t.closest<HTMLElement>('.mdr-card')!.dataset.id!,
+    cls: t.className,
+    value: t.value,
+    focus: t === document.activeElement ? [t.selectionStart, t.selectionEnd] : null,
+  }));
   sidebar.innerHTML = out;
+  for (const d of typed) {
+    const t = sidebar.querySelector<HTMLTextAreaElement>(`.mdr-card[data-id="${CSS.escape(d.id)}"] textarea${d.cls ? '.' + d.cls.split(' ')[0] : ':not([class])'}`);
+    if (!t) continue;
+    t.value = d.value;
+    if (d.focus) {
+      t.focus({ preventScroll: true });
+      t.setSelectionRange(d.focus[0], d.focus[1]);
+    }
+  }
   showWorking();
 }
 
@@ -318,12 +334,18 @@ function showWorking() {
   if (banner !== lastBanner) roundEl.innerHTML = lastBanner = banner; // unchanged text isn't re-announced
   roundEl.hidden = !round;
   doc.querySelectorAll<HTMLElement>('mark.mdr-hl').forEach((m) => m.classList.toggle('mdr-working', on.has(m.dataset.cid!)));
+  // Cards change in place, so a reply being typed survives a claim expiring.
+  sidebar.querySelectorAll<HTMLElement>('.mdr-card').forEach((el) => {
+    const w = on.has(el.dataset.id!);
+    el.classList.toggle('mdr-working', w);
+    if (!w) el.querySelector('.mdr-working-line')?.remove();
+  });
   clearTimeout(workingTimer);
   const left = nextExpiry(comments, now);
-  if (left !== null) workingTimer = setTimeout(renderSidebar, left + 50);
+  if (left !== null) workingTimer = setTimeout(showWorking, Math.max(0, left) + 50);
 }
 
-function card(c: Comment): string {
+function card(c: Comment, now = Date.now()): string {
   const replies = c.replies
     .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div></div>`)
     .join('');
@@ -339,7 +361,7 @@ function card(c: Comment): string {
     ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
     : '';
   const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
-  const working = isWorking(c);
+  const working = isWorking(c, now);
   return `<div class="mdr-card ${c.status}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}${working ? ' mdr-working' : ''}" data-id="${c.id}">
     <div class="mdr-meta"><span class="mdr-badge ${c.status}">${c.status}</span><b>${esc(c.author)}</b> · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
     ${metaBadges(c) ? `<div class="mdr-tags">${metaBadges(c)}</div>` : ''}
@@ -527,7 +549,11 @@ function saveComment() {
 roundEl.addEventListener('click', (e) => {
   const act = (e.target as Element).closest('[data-round]')?.getAttribute('data-round');
   if (act === 'questions') setFilter({ status: 'submitted', author: '', severity: '' });
-  else if (act === 'dismiss') post({ type: 'dismissRound' });
+  else if (act === 'dismiss') {
+    post({ type: 'dismissRound' });
+    // The banner is about to hide; keep focus somewhere useful.
+    if (roundEl.contains(document.activeElement)) (sendBtn.disabled ? docCommentBtn : sendBtn).focus();
+  }
 });
 
 sidebar.addEventListener('click', (e) => {

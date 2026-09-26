@@ -288,6 +288,9 @@ mark.mdr-hl.mdr-working { animation: mdr-glow 1.4s ease-in-out infinite; }
 }
 @media (forced-colors: active) {
   .mdr-round { border-color: CanvasText; }
-  .mdr-round-dot, .mdr-round-icon, .mdr-round-x::before, .mdr-round-bar > span { forced-color-adjust: none; background: Highlight; }
+  .mdr-round-dot, .mdr-round-dot.live, .mdr-round-icon, .mdr-round-x::before, .mdr-round-bar > span { forced-color-adjust: none; background: Highlight; }
   .mdr-round-bar { border: 1px solid CanvasText; }
+  /* Box shadows are dropped in forced colors: mark working threads with an outline instead. */
+  .mdr-card.mdr-working { border: 2px solid Highlight; }
+  mark.mdr-hl.mdr-working { animation: none; outline: 2px solid Highlight; }
 }

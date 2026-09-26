@@ -79,7 +79,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
       // The panel shows the summary itself; only reach out when it's out of sight.
       notify: (message) => {
-        if (panel.active && panel.visible) return;
+        if (panel.visible) return; // the banner already says it
         void vscode.window.showInformationMessage(message, 'Open').then((pick) => {
           if (pick === 'Open') panel.reveal();
         });
