@@ -2,8 +2,9 @@
 // whose turn it is. Nothing is scanned until the view is first shown.
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { Comment, Sidecar } from './commentStore';
+import { Comment, openSuggestion, Sidecar } from './commentStore';
 import { buildInbox, GROUPS, Inbox, InboxFile, InboxGroup, parseInboxSidecar, threadDescription, threadLabel } from './inbox';
+import { isWorking } from '../webview/round';
 
 const SIDECAR = '.comments.json';
 const INCLUDE = '**/*.md.comments.json';
@@ -11,7 +12,8 @@ const INCLUDE = '**/*.md.comments.json';
 const EXCLUDE = '{**/node_modules/**,**/.*/**}';
 const CAP = 2000;
 
-const ICONS: Record<InboxGroup, string> = { needsYou: 'comment-unresolved', waiting: 'watch', drafts: 'edit', resolved: 'check' };
+const ICONS: Record<InboxGroup, string> = { needsYou: 'comment-unresolved', triage: 'sparkle', waiting: 'watch', drafts: 'edit', resolved: 'check' };
+const KIND_ICONS: Record<string, string> = { question: 'question', praise: 'thumbsup' };
 
 type Node =
   | { kind: 'group'; group: InboxGroup; files: InboxFile[]; count: number }
@@ -32,6 +34,8 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
   private started = false;
   private capped = false;
   private timer: NodeJS.Timeout | undefined;
+  /** Fires when the next working claim goes stale, to move its thread back. */
+  private expiry: NodeJS.Timeout | undefined;
   private dirty = new Set<string>();
   private full = false;
   private status: vscode.StatusBarItem | undefined;
@@ -76,8 +80,10 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
     const item = new vscode.TreeItem(threadLabel(c), E.None);
     item.id = `${node.group}/${node.mdPath}/${c.id}`;
     item.description = threadDescription(c);
-    item.tooltip = c.body;
-    item.iconPath = new vscode.ThemeIcon(c.kind === 'question' ? 'question' : 'comment');
+    const working = node.group === 'waiting' && isWorking(c);
+    const sugg = node.group === 'needsYou' && openSuggestion(c);
+    item.tooltip = working ? `${c.body}\n\n${c.workingBy || 'Claude'} is working on this.` : sugg ? `${c.body}\n\nA suggested edit is waiting for you.` : c.body;
+    item.iconPath = new vscode.ThemeIcon(working ? 'sync~spin' : sugg ? 'diff' : KIND_ICONS[c.kind ?? ''] ?? 'comment');
     item.command = { command: 'mdReview.openThread', title: 'Open Thread', arguments: [node.mdPath, c.id] };
     return item;
   }
@@ -91,6 +97,7 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
 
   dispose(): void {
     clearTimeout(this.timer);
+    clearTimeout(this.expiry);
     this.subs.forEach((d) => d.dispose());
     this.status?.dispose();
   }
@@ -98,28 +105,26 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
   /** First look at the view: scan, then keep up with changes. */
   private start(): void {
     this.started = true;
+    // Uses VS Code's workspace watcher (no watcher of our own). An event reads
+    // that one sidecar; only Refresh and a change of folders search again.
     const watcher = vscode.workspace.createFileSystemWatcher(INCLUDE);
-    const onChange = (uri: vscode.Uri) => {
-      if (!this.cache.has(uri.fsPath)) return; // not one we list
+    const onEvent = (uri: vscode.Uri) => {
+      if (!this.cache.has(uri.fsPath) && (this.cache.size >= CAP || hidden(uri))) return;
       this.dirty.add(uri.fsPath);
-      this.schedule();
-    };
-    const onCreateOrDelete = (uri: vscode.Uri) => {
-      if (hidden(uri)) return;
-      this.full = true;
-      this.schedule();
+      // A burst of writes (Claude replying in turn) settles into one update; less often while out of sight.
+      this.schedule(this.view.visible ? 300 : 2000);
     };
     this.subs.push(
       watcher,
-      watcher.onDidChange(onChange),
-      watcher.onDidCreate(onCreateOrDelete),
-      watcher.onDidDelete(onCreateOrDelete),
+      watcher.onDidChange(onEvent),
+      watcher.onDidCreate(onEvent),
+      watcher.onDidDelete(onEvent),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.refresh()),
     );
     this.scanning = this.scan(true);
   }
 
-  private schedule(ms = 300): void {
+  private schedule(ms: number): void {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       const full = this.full;
@@ -139,15 +144,27 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
         paths = found.slice(0, CAP).map((u) => u.fsPath);
         const keep = new Set(paths);
         for (const p of this.cache.keys()) if (!keep.has(p)) this.cache.delete(p);
-      } else paths = [...this.cache.keys()];
+      } else paths = [...new Set([...this.cache.keys(), ...this.dirty])];
       const dirty = this.dirty;
       this.dirty = new Set();
       await Promise.all(paths.map((p) => this.load(p, dirty.has(p))));
     } catch {
       // Search unavailable (no folder open, cancelled): show what we have.
     }
+    this.regroup();
+  }
+
+  /** Group what the cache holds, and come back when a working claim goes stale. */
+  private regroup(): void {
     this.inbox = buildInbox([...this.cache].map(([sidecar, e]) => ({ mdPath: sidecar.slice(0, -SIDECAR.length), data: e.data })));
     this.update();
+    clearTimeout(this.expiry);
+    if (this.inbox.expires !== null) {
+      this.expiry = setTimeout(() => {
+        this.regroup();
+        this.changed.fire();
+      }, this.inbox.expires + 50);
+    }
   }
 
   /** Read a sidecar unless the cached copy has the same mtime and size. */
@@ -160,12 +177,14 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
       const raw = new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
       this.cache.set(sidecar, { mtime: st.mtime, size: st.size, data: parseInboxSidecar(raw, sidecar.slice(0, -SIDECAR.length)) });
     } catch {
-      this.cache.delete(sidecar); // gone since the search
+      this.cache.delete(sidecar); // deleted, or gone since the search
     }
   }
 
   private update(): void {
-    const n = this.inbox!.counts.needsYou;
+    const { needsYou, triage } = this.inbox!.counts;
+    // Claude's drafts to triage are the reviewer's turn too.
+    const n = needsYou + triage;
     const total = GROUPS.reduce((s, g) => s + this.inbox!.counts[g.id], 0);
     this.view.message = this.capped
       ? `Showing threads from the first ${CAP} reviewed files only.`
@@ -179,7 +198,7 @@ export class InboxView implements vscode.TreeDataProvider<Node>, vscode.Disposab
       this.status.command = `${InboxView.viewId}.focus`;
     }
     this.status.text = `$(comment-discussion) ${n} need${n === 1 ? 's' : ''} you`;
-    this.status.tooltip = 'MD Review: threads where Claude replied and it is your turn';
+    this.status.tooltip = `MD Review: ${[needsYou && `${needsYou} answered by Claude`, triage && `${triage} from Claude to triage`].filter(Boolean).join(', ')}`;
     if (n) this.status.show();
     else this.status.hide();
   }

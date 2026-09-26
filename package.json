@@ -19,7 +19,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), and Add Claude Code Skill is off.",
+      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), Add Claude Code Skill is off, and the review inbox lists threads without Send All.",
       "restrictedConfigurations": [
         "mdReview.agent.command",
         "mdReview.agent.launch"
@@ -50,7 +50,8 @@
           "name": "MD Review",
           "icon": "$(comment-discussion)",
           "contextualTitle": "MD Review",
-          "visibility": "collapsed"
+          "visibility": "collapsed",
+          "when": "workspaceFolderCount > 0"
         }
       ]
     },
@@ -325,7 +326,7 @@
       "view/title": [
         {
           "command": "mdReview.inbox.sendAll",
-          "when": "view == mdReview.inbox",
+          "when": "view == mdReview.inbox && isWorkspaceTrusted",
           "group": "navigation@1"
         },
         {
