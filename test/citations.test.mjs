@@ -255,4 +255,13 @@ test('Windows network paths are never opened for a bibliography', () => {
   const { loadBibliography } = require('../dist/lib.cjs');
   assert.equal(loadBibliography('\\\\server\\share\\refs.bib', 'win32').error, 'network paths are not read');
   assert.equal(loadBibliography('//server/share/refs.bib', 'win32').error, 'network paths are not read');
+  assert.equal(loadBibliography('\\\\.\\pipe\\x', 'win32').error, 'network paths are not read');
+});
+
+test('refused bibliographies (devices, folders) are not watched; missing ones are', () => {
+  fs.rmSync(tmp, { recursive: true, force: true });
+  fs.mkdirSync(path.join(tmp, 'sub'), { recursive: true });
+  const env = { docDir: tmp };
+  renderMarkdown('---\nbibliography: [sub, missing.bib]\n---\n\n[@a]\n', (x) => x, env);
+  assert.deepEqual(env.bibFiles, [path.join(tmp, 'missing.bib')]);
 });

@@ -13,7 +13,7 @@ import * as path from 'path';
 import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 import { parseFrontMatter } from './frontMatter';
-import { BibEntry, citeNames, citeYear, insideRoots, loadBibliography, referenceParts, referenceText } from './bibliography';
+import { BibEntry, citeNames, citeYear, insideRoots, isNetworkPath, loadBibliography, referenceParts, referenceText } from './bibliography';
 
 // Pandoc's key punctuation, minus < and > so `@key</span>` stops at the tag.
 const KEY = /^[\p{L}\p{N}_]+(?:[:.#$%&\-+?~/]+[\p{L}\p{N}_]+)*/u;
@@ -80,12 +80,17 @@ function setup(state: StateCore) {
     cite.files.push(path.basename(f));
     if (!env.docDir && !path.isAbsolute(f)) continue;
     const file = path.resolve(env.docDir || '', f);
+    // Network paths first: even resolving links in one reaches the server.
+    if (isNetworkPath(file) || isNetworkPath(f)) {
+      cite.problems.push(`${f}: network paths are not read`);
+      continue;
+    }
     if (env.bibRoots && !insideRoots(file, env.bibRoots)) {
       cite.problems.push(`${f}: outside this folder, not read in Restricted Mode`);
       continue;
     }
-    (env.bibFiles ||= []).push(file);
     const bib = loadBibliography(file);
+    if (!bib.skip) (env.bibFiles ||= []).push(file); // a missing file is watched, to appear later
     if (bib.error) cite.problems.push(`${f}: ${bib.error}`);
     for (const [k, e] of bib.entries) if (!cite.entries.has(k)) cite.entries.set(k, e);
   }
