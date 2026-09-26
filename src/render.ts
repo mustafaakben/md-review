@@ -23,17 +23,25 @@ import { linearFootnoteTail } from './footnoteTail';
  * engine from its first use, so every renderer has to share this one.
  */
 const MATH_CACHE_LIMIT = 5000;
-const mathCache = new Map<string, string>();
+// Two generations: a full one is kept as the older one while a new one fills,
+// and a hit in the older one moves up. A render walks its formulas in the same
+// order each time, so a plain oldest-first cache would evict each formula just
+// before it is needed again once a file has more formulas than the limit.
+let mathCache = new Map<string, string>();
+let olderMath = new Map<string, string>();
 const mathEngine = {
   renderToString(tex: string, options: { displayMode?: boolean }): string {
     const key = (options.displayMode ? 'D' : 'I') + tex;
-    let html = mathCache.get(key);
-    if (html === undefined) {
-      html = katex.renderToString(tex, options) as string; // throws are handled by texmath; nothing is cached
-      if (mathCache.size >= MATH_CACHE_LIMIT) mathCache.delete(mathCache.keys().next().value!);
-      mathCache.set(key, html);
+    let html = mathCache.get(key) ?? olderMath.get(key);
+    if (html === undefined) html = katex.renderToString(tex, options) as string; // throws are handled by texmath; nothing is cached
+    if (!mathCache.has(key)) {
+      if (mathCache.size >= MATH_CACHE_LIMIT) {
+        olderMath = mathCache;
+        mathCache = new Map();
+      }
+      mathCache.set(key, html!);
     }
-    return html;
+    return html!;
   },
 };
 
