@@ -47,10 +47,10 @@ const standalone = !!(window as any).__mdrStandalone;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
       <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled></button></span>
-      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false"></button>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
@@ -94,9 +94,13 @@ const reading = createReading(
   (prefs: ReadingPrefs) => post({ type: 'setPrefs', prefs }),
   (msg) => toast(msg),
 );
-const outline = createOutline(doc, document.getElementById('mdr-outline')!, (open) => {
-  vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open });
-});
+const outlineBtn = document.getElementById('mdr-outline-toggle')!;
+const outline = createOutline(
+  doc,
+  document.getElementById('mdr-outline')!,
+  (open) => vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open }),
+  outlineBtn,
+);
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const fmt = (iso: string | null) => {
@@ -475,7 +479,8 @@ sendBtn.addEventListener('click', () => post({ type: 'sendToAgent' }));
 undoBtn.addEventListener('click', () => post({ type: 'undo' }));
 redoBtn.addEventListener('click', () => post({ type: 'redo' }));
 document.getElementById('mdr-find-btn')!.addEventListener('click', () => search.open());
-document.getElementById('mdr-outline-toggle')!.addEventListener('click', () => outline.setOpen(!outline.isOpen()));
+// A keyboard press (detail 0) moves focus into the outline; a mouse click leaves it alone.
+outlineBtn.addEventListener('click', (e) => outline.setOpen(!outline.isOpen(), e.detail === 0));
 outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
 
 // ---------------------------------------------------------------- filters & navigation
@@ -530,7 +535,8 @@ function runCommand(cmd: string) {
       if (isTyping(document.activeElement)) return;
       return navigate(cmd === 'next' ? 1 : -1);
     case 'outline':
-      return outline.setOpen(!outline.isOpen());
+      // Never pull focus out of a text box or editor: that would commit a half-typed edit.
+      return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
     case 'send':
       return post({ type: 'sendToAgent' });
     case 'zoomIn':
@@ -540,7 +546,7 @@ function runCommand(cmd: string) {
     case 'zoomReset':
       return reading.resetZoom();
     case 'reading':
-      return reading.togglePanel();
+      return reading.togglePanel(!isTyping(document.activeElement) && !editing && !inline);
   }
 }
 
@@ -565,7 +571,8 @@ document.addEventListener('keydown', (e) => {
       return runCommand(cmd);
     }
   }
-  if (e.key === 'Escape' && search.isOpen()) return search.close();
+  // Escape inside an editor or a comment box belongs to that box, not the find bar.
+  if (e.key === 'Escape' && search.isOpen() && !editing && !inline && !isTyping(e.target)) return search.close();
   if (mod || e.altKey || isTyping(e.target) || editing || inline) return;
   if (k === 'j' || k === 'n') navigate(1);
   else if (k === 'k' || k === 'p') navigate(-1);

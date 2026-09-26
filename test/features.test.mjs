@@ -95,6 +95,30 @@ test('undo is refused after an outside edit', () => {
   assert.equal(last('history').canUndo, false);
 });
 
+test('an outside edit disables undo as soon as the view re-renders', () => {
+  const md = fresh('outside-render.md', 'Hello world.\n');
+  const { s, last } = session(md);
+  s.handle({ type: 'saveBlock', ls: 0, le: 1, original: 'Hello world.', newText: 'Hello there.' });
+  assert.equal(last('history').canUndo, true);
+  s.render(); // our own write: history still applies
+  assert.equal(last('history').canUndo, true);
+  fs.writeFileSync(md, 'Hello there, says the agent.\n');
+  s.render(); // what the file watcher does after an outside change
+  assert.deepEqual(last('history'), { type: 'history', canUndo: false, canRedo: false });
+});
+
+test('EditHistory.sync keeps history that still matches the file', () => {
+  const h = new lib.EditHistory();
+  const a = Buffer.from('x'), b = Buffer.from('y');
+  h.record(a, b);
+  assert.equal(h.sync(b), false);
+  h.undo(b);
+  assert.equal(h.sync(a), false, 'after undo the file is the before-state');
+  assert.ok(h.canRedo);
+  assert.equal(h.sync(Buffer.from('z')), true);
+  assert.ok(!h.canUndo && !h.canRedo);
+});
+
 test('Send to Claude submits drafts and builds a prompt', () => {
   const md = fresh('send.md', '# T\n\nSome paragraph with a claim.\n');
   const { s, last } = session(md);

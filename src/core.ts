@@ -81,6 +81,19 @@ export class ReviewSession {
       html = `<pre class="mdr-error">Render failed: ${String(e?.message || e)}</pre>`;
     }
     this.ctx.post({ type: 'render', html, fileName: path.basename(this.ctx.mdPath) });
+    this.syncHistory();
+  }
+
+  /** Every render follows a file change, so check undo history still applies. */
+  private syncHistory(): void {
+    if (!this.history.canUndo && !this.history.canRedo) return;
+    let disk: Buffer;
+    try {
+      disk = fs.readFileSync(this.ctx.mdPath);
+    } catch {
+      return;
+    }
+    if (this.history.sync(disk)) this.postHistory();
   }
 
   sendComments(): void {
