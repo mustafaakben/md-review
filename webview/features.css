@@ -1,0 +1,150 @@
+/* MD Review — outline, find, filters, navigation, Send to Claude, reading view. */
+
+/* Codicons (https://github.com/microsoft/vscode-codicons), CC BY 4.0, used as CSS masks like style.css. */
+:root {
+  --i-outline: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2 3.5C2 3.22386 2.22386 3 2.5 3H13.5C13.7761 3 14 3.22386 14 3.5C14 3.77614 13.7761 4 13.5 4H6V6H13.5C13.7761 6 14 6.22386 14 6.5C14 6.77614 13.7761 7 13.5 7H6V9H13.5C13.7761 9 14 9.22386 14 9.5C14 9.77614 13.7761 10 13.5 10H6V12H13.5C13.7761 12 14 12.2239 14 12.5C14 12.7761 13.7761 13 13.5 13H5.5C5.22386 13 5 12.7761 5 12.5V4H2.5C2.22386 4 2 3.77614 2 3.5Z'/%3E%3C/svg%3E");
+  --i-undo: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3.00098 2.5C3.00098 2.22386 3.22483 2 3.50098 2C3.77712 2 4.00098 2.22386 4.00098 2.5V6.34262L7.17202 3.17157C8.73412 1.60948 11.2668 1.60948 12.8289 3.17157C14.391 4.73367 14.391 7.26633 12.8289 8.82843L7.80375 13.8536C7.60849 14.0488 7.2919 14.0488 7.09664 13.8536C6.90138 13.6583 6.90138 13.3417 7.09664 13.1464L12.1218 8.12132C13.2933 6.94975 13.2933 5.05025 12.1218 3.87868C10.9502 2.70711 9.0507 2.70711 7.87913 3.87868L4.75781 7H8.50098C8.77712 7 9.00098 7.22386 9.00098 7.5C9.00098 7.77614 8.77712 8 8.50098 8H3.60098C3.26961 8 3.00098 7.73137 3.00098 7.4V2.5Z'/%3E%3C/svg%3E");
+  --i-redo: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M13.0004 2.5C13.0004 2.22386 12.7766 2 12.5004 2C12.2243 2 12.0004 2.22386 12.0004 2.5V6.34262L8.8294 3.17157C7.26731 1.60948 4.73465 1.60948 3.17255 3.17157C1.61045 4.73367 1.61045 7.26633 3.17255 8.82843L8.19768 13.8536C8.39294 14.0488 8.70952 14.0488 8.90478 13.8536C9.10004 13.6583 9.10004 13.3417 8.90478 13.1464L3.87966 8.12132C2.70808 6.94975 2.70808 5.05025 3.87966 3.87868C5.05123 2.70711 6.95072 2.70711 8.1223 3.87868L11.2436 7H7.50045C7.22431 7 7.00045 7.22386 7.00045 7.5C7.00045 7.77614 7.22431 8 7.50045 8H12.4004C12.7318 8 13.0004 7.73137 13.0004 7.4V2.5Z'/%3E%3C/svg%3E");
+  --i-find: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10.0195 10.7266C9.06578 11.5217 7.83875 12 6.5 12C3.46243 12 1 9.53757 1 6.5C1 3.46243 3.46243 1 6.5 1C9.53757 1 12 3.46243 12 6.5C12 7.83875 11.5217 9.06578 10.7266 10.0195L13.8535 13.1464C14.0488 13.3417 14.0488 13.6583 13.8535 13.8536C13.6583 14.0488 13.3417 14.0488 13.1464 13.8536L10.0195 10.7266ZM11 6.5C11 4.01472 8.98528 2 6.5 2C4.01472 2 2 4.01472 2 6.5C2 8.98528 4.01472 11 6.5 11C8.98528 11 11 8.98528 11 6.5Z'/%3E%3C/svg%3E");
+  --i-reading: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10.9699 2.32913C10.8981 2.13153 10.7103 2 10.5 2C10.2898 2 10.102 2.13153 10.0301 2.32913L6.46834 12.124L6.13267 11.3184C6.12991 11.3113 6.12699 11.3043 6.12391 11.2974L4.46155 7.30769C4.38391 7.12137 4.20186 7 4.00001 7C3.79816 7 3.6161 7.12137 3.53847 7.30769L1.8761 11.2974C1.87303 11.3043 1.87011 11.3113 1.86735 11.3184L1.03847 13.3077C0.932261 13.5626 1.0528 13.8553 1.3077 13.9615C1.5626 14.0677 1.85534 13.9472 1.96155 13.6923L2.66667 12H5.33334L6.03776 13.6906C6.03897 13.6935 6.04021 13.6965 6.04148 13.6994C6.06887 13.7624 6.10777 13.817 6.15467 13.8618C6.20148 13.9065 6.25776 13.9428 6.32193 13.9672C6.33406 13.9718 6.34638 13.976 6.35885 13.9797C6.46237 14.0102 6.56886 14.0056 6.66467 13.9721C6.67641 13.968 6.688 13.9635 6.69939 13.9585C6.76233 13.9312 6.81686 13.8924 6.86155 13.8456C6.90638 13.7987 6.94275 13.7423 6.96722 13.6781C6.96834 13.6751 6.96944 13.6722 6.9705 13.6692L8.30477 10H12.6952L14.0301 13.6709C14.1245 13.9304 14.4114 14.0643 14.6709 13.9699C14.9304 13.8755 15.0643 13.5886 14.9699 13.3291L10.9699 2.32913ZM10.5 3.96309L12.3316 9H8.6684L10.5 3.96309ZM4.00001 8.8L4.91668 11H3.08334L4.00001 8.8Z'/%3E%3C/svg%3E");
+  --i-sparkle: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.46524 9.82962C5.62134 9.94037 5.80806 9.99974 5.99946 9.99948C6.19151 10.0003 6.37897 9.94082 6.53546 9.82948C6.69223 9.71378 6.81095 9.55398 6.87646 9.37048L7.22346 8.30348C7.3077 8.05191 7.44906 7.82327 7.63646 7.63548C7.82305 7.44851 8.05078 7.30776 8.30146 7.22448L9.38746 6.87148C9.56665 6.80759 9.72173 6.68989 9.83146 6.53448C9.94145 6.37908 10.0005 6.19337 10.0005 6.00298C10.0005 5.81259 9.94145 5.62689 9.83146 5.47148C9.71293 5.30613 9.54426 5.18339 9.35046 5.12148L8.28146 4.77548C8.02989 4.69238 7.80123 4.55163 7.61371 4.36447C7.4262 4.1773 7.28503 3.9489 7.20146 3.69748L6.84846 2.61348C6.78519 2.43423 6.66777 2.27908 6.51246 2.16948C6.35557 2.06133 6.16951 2.00342 5.97896 2.00342C5.78841 2.00342 5.60235 2.06133 5.44546 2.16948C5.28572 2.28196 5.16594 2.44237 5.10346 2.62748L4.74846 3.71748C4.66476 3.96155 4.52691 4.18351 4.34524 4.36673C4.16358 4.54996 3.9428 4.6897 3.69946 4.77548L2.61546 5.12648C2.43437 5.19048 2.27775 5.30937 2.16743 5.4666C2.05712 5.62383 1.99859 5.81155 2.00003 6.00361C2.00146 6.19568 2.06277 6.38251 2.17541 6.53808C2.28806 6.69364 2.44643 6.81019 2.62846 6.87148L3.69546 7.21848C3.94767 7.30297 4.17673 7.44506 4.36446 7.63348C4.41519 7.6837 4.46262 7.73715 4.50646 7.79348C4.62481 7.94615 4.71614 8.11797 4.77646 8.30148L5.12846 9.38148C5.19143 9.56222 5.30914 9.71886 5.46524 9.82962ZM4.00746 6.26448L3.15246 5.99948L4.01646 5.71848C4.41071 5.58184 4.76826 5.35637 5.06146 5.05948C5.35281 4.76039 5.57294 4.39943 5.70546 4.00348L5.97046 3.14448L6.25046 4.00648C6.38349 4.40638 6.60809 4.76969 6.90636 5.06744C7.20463 5.36519 7.56833 5.58915 7.96846 5.72148L8.84846 5.99048L7.98746 6.27048C7.58707 6.40272 7.22321 6.62691 6.92505 6.92507C6.62689 7.22324 6.4027 7.58709 6.27046 7.98748L6.00546 8.84448L5.72646 7.98548C5.63026 7.69329 5.48483 7.41968 5.29646 7.17648C5.22699 7.08766 5.15254 7.00286 5.07346 6.92248C4.7738 6.62366 4.4089 6.39842 4.00746 6.26448ZM10.5344 13.8515C10.6703 13.9477 10.8328 13.9994 10.9994 13.9995C11.1642 13.998 11.3245 13.9456 11.4584 13.8495C11.5979 13.751 11.7029 13.611 11.7584 13.4495L12.0064 12.6875C12.0595 12.529 12.1485 12.385 12.2664 12.2665C12.3837 12.148 12.5277 12.0592 12.6864 12.0075L13.4584 11.7555C13.6161 11.701 13.7528 11.5985 13.8494 11.4625C13.9227 11.3595 13.9706 11.2405 13.9891 11.1154C14.0076 10.9903 13.9962 10.8626 13.9558 10.7428C13.9154 10.623 13.8472 10.5144 13.7567 10.4261C13.6662 10.3377 13.5561 10.272 13.4354 10.2345L12.6714 9.98548C12.5132 9.93291 12.3695 9.8443 12.2514 9.72663C12.1334 9.60896 12.0444 9.46547 11.9914 9.30748L11.7394 8.53348C11.685 8.37623 11.5825 8.24011 11.4464 8.14448C11.3443 8.07153 11.2266 8.02359 11.1026 8.00453C10.9787 7.98547 10.8519 7.99582 10.7327 8.03475C10.6135 8.07369 10.5051 8.1401 10.4163 8.22865C10.3274 8.31719 10.2607 8.42538 10.2214 8.54448L9.97435 9.30648C9.92207 9.46413 9.83452 9.60777 9.71835 9.72648C9.60382 9.84272 9.46428 9.9313 9.31035 9.98548L8.53435 10.2385C8.41689 10.2793 8.31057 10.347 8.22382 10.4361C8.13708 10.5252 8.0723 10.6333 8.03464 10.7518C7.99698 10.8704 7.98746 10.996 8.00686 11.1189C8.02625 11.2417 8.07401 11.3583 8.14635 11.4595C8.24456 11.5993 8.38462 11.7044 8.54635 11.7595L9.30935 12.0065C9.46821 12.0599 9.61262 12.1492 9.73135 12.2675C9.84958 12.3857 9.93801 12.5304 9.98935 12.6895L10.2424 13.4635C10.2971 13.6199 10.3992 13.7555 10.5344 13.8515ZM9.62035 11.0585L9.44235 10.9995L9.62635 10.9355C9.92811 10.8305 10.2018 10.6578 10.4264 10.4305C10.6528 10.2015 10.8238 9.92374 10.9264 9.61848L10.9844 9.44048L11.0434 9.62148C11.1453 9.92819 11.3175 10.2069 11.5461 10.4353C11.7748 10.6638 12.0536 10.8357 12.3604 10.9375L12.5554 11.0005L12.3754 11.0595C12.068 11.1617 11.7888 11.3344 11.5601 11.5637C11.3314 11.7931 11.1596 12.0728 11.0584 12.3805L10.9994 12.5615L10.9414 12.3805C10.84 12.0721 10.6676 11.7919 10.4382 11.5623C10.2088 11.3326 9.92863 11.1601 9.62035 11.0585Z'/%3E%3C/svg%3E");
+}
+#mdr-outline-toggle::before, #mdr-undo::before, #mdr-redo::before, #mdr-find-btn::before, #mdr-reading-btn::before,
+#mdr-send::before, button[data-act="ask-claude"]::before {
+  content: ''; flex: none; width: 16px; height: 16px; background: currentColor;
+  -webkit-mask: var(--ico) center / 16px no-repeat; mask: var(--ico) center / 16px no-repeat;
+}
+#mdr-outline-toggle::before { --ico: var(--i-outline); }
+#mdr-undo::before { --ico: var(--i-undo); }
+#mdr-redo::before { --ico: var(--i-redo); }
+#mdr-find-btn::before { --ico: var(--i-find); }
+#mdr-reading-btn::before { --ico: var(--i-reading); }
+#mdr-send::before, button[data-act="ask-claude"]::before { --ico: var(--i-sparkle); }
+
+/* ---------- toolbar additions ---------- */
+button.mdr-icon-btn { padding: 5px; }
+.mdr-history { display: inline-flex; gap: 2px; }
+
+/* ---------- outline pane ---------- */
+.mdr-outline {
+  position: sticky; top: var(--bar-h); height: calc(100vh - var(--bar-h)); overflow-y: auto; padding: 12px 8px 60px;
+  border-right: 1px solid var(--hairline, var(--border)); color: var(--fg); background: var(--softer); font-size: 12.5px; line-height: 1.4;
+}
+.mdr-outline-closed .mdr-outline { display: none; }
+body:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: clamp(180px, 18vw, 240px) minmax(0, 1fr) clamp(230px, 30vw, var(--sidebar-w)); }
+body.mdr-side-collapsed:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: clamp(180px, 18vw, 240px) minmax(0, 1fr); }
+.mdr-pane-head {
+  display: flex; align-items: center; justify-content: space-between; margin: 0 4px 8px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);
+}
+.mdr-pane-head button { padding: 0 6px; font-size: 11px; background: transparent; border-color: transparent; color: var(--muted); }
+.mdr-toc-item {
+  display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+  color: var(--muted); border-left: 2px solid transparent;
+}
+.mdr-toc-item:hover { background: var(--soft); color: var(--fg); }
+.mdr-toc-item.current { color: var(--fg); border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.mdr-toc-item.lvl0 { font-weight: 600; color: var(--fg); }
+.mdr-toc-item.lvl1 { padding-left: 18px; }
+.mdr-toc-item.lvl2 { padding-left: 28px; font-size: 12px; }
+.mdr-toc-item.lvl3 { padding-left: 38px; font-size: 12px; }
+.mdr-toc-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mdr-toc-count {
+  flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; text-align: center; font-size: 10.5px;
+  color: var(--submitted); background: var(--hl-submitted);
+}
+.mdr-doc h1, .mdr-doc h2, .mdr-doc h3, .mdr-doc h4 { scroll-margin-top: calc(var(--bar-h) + 20px); }
+@media (max-width: 1000px) {
+  /* Narrow windows: the outline floats over the document instead of taking a column. */
+  body:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: minmax(0, 1fr) clamp(230px, 30vw, var(--sidebar-w)); }
+  body.mdr-side-collapsed:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: minmax(0, 1fr); }
+  .mdr-outline { position: fixed; left: 0; z-index: 25; width: 240px; box-shadow: 6px 0 24px rgba(0, 0, 0, 0.18); background: var(--bg); }
+}
+
+/* ---------- find bar ---------- */
+.mdr-find {
+  position: fixed; top: calc(var(--bar-h) + 8px); right: 20px; z-index: 35; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 8px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--vscode-editorWidget-background, var(--bg));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); font-size: 12.5px;
+}
+.mdr-find[hidden] { display: none; }
+.mdr-find input {
+  width: 200px; font: inherit; padding: 3px 6px; border-radius: 4px; color: var(--vscode-input-foreground, var(--fg));
+  background: var(--vscode-input-background, var(--bg)); border: 1px solid var(--vscode-input-border, var(--border)); outline: none;
+}
+.mdr-find input:focus { border-color: var(--vscode-focusBorder, var(--accent)); }
+.mdr-find.none input { border-color: var(--vscode-inputValidation-errorBorder, #dc2626); }
+.mdr-find-count { min-width: 64px; color: var(--muted); font-size: 11.5px; text-align: center; }
+.mdr-find button { padding: 1px 7px; background: transparent; border-color: transparent; color: var(--muted); }
+.mdr-find button:hover { background: var(--soft); color: var(--fg); }
+::highlight(mdr-find) { background-color: var(--vscode-editor-findMatchHighlightBackground, rgba(234, 179, 8, 0.3)); }
+::highlight(mdr-find-current) { background-color: var(--vscode-editor-findMatchBackground, rgba(249, 115, 22, 0.55)); }
+
+/* ---------- sidebar head: filters + send ---------- */
+.mdr-sidebar { padding-top: 0; }
+.mdr-side-head {
+  position: sticky; top: 0; z-index: 2; display: flex; flex-direction: column; gap: 8px; margin: 0 -8px 10px; padding: 10px 8px;
+  background: var(--softer); border-bottom: 1px solid var(--hairline, var(--border));
+}
+.mdr-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mdr-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+button.mdr-chip { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: transparent; color: var(--muted); }
+button.mdr-chip span { margin-left: 5px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+button.mdr-chip.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mdr-author-filter {
+  font: inherit; font-size: 11.5px; padding: 1px 4px; border-radius: 6px; max-width: 140px;
+  color: var(--vscode-dropdown-foreground, var(--fg)); background: var(--vscode-dropdown-background, var(--bg)); border: 1px solid var(--vscode-dropdown-border, var(--border));
+}
+button.mdr-send {
+  align-self: stretch; padding: 5px 10px; font-weight: 600; color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+button.mdr-send:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); filter: none; }
+.mdr-empty button { font-size: 11.5px; padding: 1px 8px; margin-left: 4px; }
+.mdr-actions { flex-wrap: wrap; }
+.mdr-actions button { white-space: nowrap; }
+
+/* ---------- reading view: zoom, theme, font ---------- */
+body[data-reading-font='serif'] .mdr-layout {
+  --doc-font: 'Iowan Old Style', 'Palatino Linotype', Charter, 'Book Antiqua', Georgia, serif; --doc-leading: 1.72;
+}
+.mdr-reading-panel {
+  position: fixed; top: calc(var(--bar-h) + 8px); right: 20px; z-index: 35; width: 272px; padding: 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--vscode-editorWidget-background, var(--bg));
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2); font-size: 12.5px;
+}
+.mdr-reading-panel[hidden] { display: none; }
+.mdr-rp-label { margin: 10px 2px 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.mdr-rp-label:first-child { margin-top: 0; }
+.mdr-rp-hint { text-transform: none; letter-spacing: 0; margin-left: 4px; opacity: 0.8; }
+.mdr-rp-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+button.mdr-swatch { display: flex; align-items: center; gap: 8px; padding: 5px 8px; text-align: left; background: transparent; }
+button.mdr-swatch span {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  background: linear-gradient(135deg, var(--sw-bg) 50%, var(--sw-fg) 50%);
+}
+button.mdr-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.t-auto { --sw-bg: var(--vscode-editor-background, #fff); --sw-fg: var(--vscode-editor-foreground, #222); }
+.t-paper { --sw-bg: #fdfcf9; --sw-fg: #1f2328; }
+.t-sepia { --sw-bg: #f4ecd8; --sw-fg: #5b4636; }
+.t-dusk { --sw-bg: #2a2c38; --sw-fg: #d9dae4; }
+.t-night { --sw-bg: #0f1013; --sw-fg: #c4c7cc; }
+.mdr-rp-seg { display: flex; gap: 0; }
+.mdr-rp-seg button { flex: 1; border-radius: 0; margin-left: -1px; background: transparent; }
+.mdr-rp-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+.mdr-rp-seg button:last-child { border-radius: 0 6px 6px 0; }
+.mdr-rp-seg button.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); position: relative; }
+.mdr-rp-seg button.serif { font-family: Georgia, serif; }
+.mdr-rp-pct { font-variant-numeric: tabular-nums; }
+
+/* Themes recolour only the reading column (style.css draws it from --doc-*); panels keep following VS Code. */
+body[data-reading-theme='paper'] .mdr-layout { --doc-bg: #fdfcf9; --doc-fg: #1f2328; --doc-muted: #646b75; --doc-accent: #1d4ed8; }
+body[data-reading-theme='sepia'] .mdr-layout { --doc-bg: #f4ecd8; --doc-fg: #433422; --doc-muted: #7a6752; --doc-accent: #9a4f14; }
+body[data-reading-theme='dusk'] .mdr-layout { --doc-bg: #2a2c38; --doc-fg: #d9dae4; --doc-muted: #9a9cb0; --doc-accent: #9db4ff; }
+body[data-reading-theme='night'] .mdr-layout { --doc-bg: #0f1013; --doc-fg: #c4c7cc; --doc-muted: #858a93; --doc-accent: #7fb0ff; }
+body:not([data-reading-theme='auto']) .mdr-layout { --doc-code-bg: var(--doc-softer); transition: background-color 0.2s; }
+body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .mdr-layout {
+  --hl-draft: rgba(245, 158, 11, 0.3); --hl-submitted: rgba(96, 150, 255, 0.28); --hl-resolved: rgba(74, 222, 128, 0.16);
+}
+.mdr-reading-panel button.mdr-swatch { justify-content: flex-start; border: 1px solid var(--hairline, var(--border)); }
+.mdr-reading-panel .mdr-rp-seg button { border: 1px solid var(--hairline, var(--border)); }

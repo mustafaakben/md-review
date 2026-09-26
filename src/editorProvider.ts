@@ -5,6 +5,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
 
+const PREFS_KEY = 'mdReview.readingPrefs';
+
 function readDisk(p: string): string | undefined {
   try {
     return fs.readFileSync(p, 'utf8').replace(/^﻿/, '');
@@ -15,6 +17,19 @@ function readDisk(p: string): string | undefined {
 
 export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
   static readonly viewType = 'mdReview.editor';
+  /** Every open MD Review panel, so commands can reach the focused one. */
+  private static panels = new Set<vscode.WebviewPanel>();
+
+  /** Forward a command (undo, find, …) to the focused MD Review webview. */
+  static postToActive(msg: unknown): boolean {
+    for (const p of this.panels) {
+      if (p.active) {
+        void p.webview.postMessage(msg);
+        return true;
+      }
+    }
+    return false;
+  }
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -39,7 +54,17 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       getText: () => (document.isDirty ? document.getText() : readDisk(mdPath) ?? document.getText()),
       isDirty: () => document.isDirty,
       openLink: (href) => openLink(href, dir),
+      agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
+      cliPath: vscode.Uri.joinPath(this.context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
+      getPrefs: () => this.context.globalState.get<Record<string, unknown>>(PREFS_KEY) ?? {},
+      setPrefs: (prefs) => {
+        void this.context.globalState.update(PREFS_KEY, prefs);
+        // Keep other open MD Review panels in step.
+        for (const p of MdReviewEditorProvider.panels) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
+      },
+      runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
     });
+    MdReviewEditorProvider.panels.add(panel);
 
     const subs: vscode.Disposable[] = [];
     let timer: NodeJS.Timeout | undefined;
@@ -50,7 +75,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     subs.push(
       webview.onDidReceiveMessage((m: FromWebview) => {
         session.handle(m);
-        if (m.type === 'saveBlock') setTimeout(() => void refreshFromDisk(document, session), 400);
+        if (m.type === 'saveBlock' || m.type === 'undo' || m.type === 'redo') setTimeout(() => void refreshFromDisk(document, session), 400);
       }),
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
@@ -74,7 +99,10 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     );
     subs.push(mdWatcher, mdWatcher.onDidChange(() => setTimeout(() => void refreshFromDisk(document, session), 300)));
 
-    panel.onDidDispose(() => subs.forEach((d) => d.dispose()));
+    panel.onDidDispose(() => {
+      MdReviewEditorProvider.panels.delete(panel);
+      subs.forEach((d) => d.dispose());
+    });
   }
 
   private shell(webview: vscode.Webview): string {
@@ -92,6 +120,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${media('katex/katex.min.css')}">
 <link rel="stylesheet" href="${media('style.css')}">
+<link rel="stylesheet" href="${media('features.css')}">
 <title>MD Review</title></head>
 <body><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
@@ -110,4 +139,30 @@ function openLink(href: string, dir: string) {
   const [p] = href.split('#');
   if (!p) return;
   void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.resolve(dir, decodeURIComponent(p))));
+}
+
+/**
+ * Start the configured agent in a terminal. The review prompt is written to a
+ * temp file and the agent gets one short argument that points at it.
+ */
+function runAgent(prompt: string, fileName: string, cwd: string): string {
+  const cfg = vscode.workspace.getConfiguration('mdReview');
+  const mode = cfg.get<string>('agent.mode', 'terminal');
+  const command = (cfg.get<string>('agent.command') || 'claude').trim();
+  void vscode.env.clipboard.writeText(prompt);
+  if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
+  const [shellPath, ...extra] = command.split(/\s+/);
+  // Pass a short fixed argument pointing at a file instead of the prompt itself:
+  // comment text is untrusted, and on Windows a .cmd shim would run it through cmd.exe.
+  const promptFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-')), 'review-prompt.md');
+  fs.writeFileSync(promptFile, prompt, 'utf8');
+  const term = vscode.window.createTerminal({
+    name: `Claude · ${fileName}`,
+    cwd,
+    shellPath,
+    shellArgs: [...extra, `Read and follow the review instructions in ${promptFile}`],
+    iconPath: new vscode.ThemeIcon('sparkle'),
+  });
+  term.show();
+  return `Sent to ${shellPath} in a new terminal. The prompt is on your clipboard too.`;
 }

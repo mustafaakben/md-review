@@ -73,11 +73,28 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - If the file changed on disk since it was rendered (say, Claude edited it), the edit is refused and the view refreshes.
 - Ctrl+B/I/U are disabled while editing, since formatting isn't a text change. Use Alt+double-click to add markup.
 
+**Undo.** Ctrl+Z undoes your last edit in the view and Ctrl+Y (or Ctrl+Shift+Z) redoes it; the ↶ ↷ buttons in the toolbar do the same. Undo restores the exact bytes that were there before. If something else changed the file since (say, Claude), undo is refused rather than overwriting that change.
+
+**Getting around.**
+- **Outline** (☰ in the toolbar, or Ctrl+Shift+O) lists the headings, follows your reading position, and shows how many open threads each section has.
+- **Find** (Ctrl+F, or `/`) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
+- **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
+- **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
+
+**Reading view.** **Aa** in the toolbar picks a theme for the document column (Match VS Code, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0. Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
+
+**Send to Claude.**
+- **✦ Send to Claude** submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **✦ Ask Claude** on a card sends just that thread.
+- The prompt is always copied to the clipboard too, so you can paste it into any other agent.
+- `mdReview.agent.command` sets the program (default `claude`; extra arguments allowed, e.g. `claude --permission-mode acceptEdits`). Set `mdReview.agent.mode` to `clipboard` to only copy the prompt.
+- In browser mode the button copies the prompt.
+
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 
 **Settings.**
 - `mdReview.author`: the name on your comments. If empty (the default), your system user name is used.
 - `mdReview.showResolved`: whether resolved threads show in the sidebar.
+- `mdReview.agent.command`, `mdReview.agent.mode`: what **Send to Claude** runs (see above).
 
 ## Browser mode (no VS Code)
 
@@ -167,8 +184,10 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/blockEdit.ts` | byte-exact line splice + stale-edit guard |
 | `src/inlineEdit.ts` | seamless edit: rendered-text diff → verified Markdown splice |
 | `src/commentStore.ts` | sidecar read-merge-write |
+| `src/editHistory.ts` | byte-exact undo/redo of in-view edits |
+| `src/agentPrompt.ts` | the prompt Send to Claude hands to the agent |
 | `src/render.ts` | Markdown → HTML with source-line tags |
-| `webview/` | UI: selection → comment, highlights, threads, block editor |
+| `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts` |
 | `cli/mdreview.mjs` | agent CLI |
 | `test/` | `node --test` suites, browser harness (`npm run harness -- <file.md>`), fixtures (`test/make-fixtures.mjs`) |
 
@@ -176,7 +195,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 
 - Block editing works on disk bytes. If the same file has unsaved edits in a text editor, save or revert them first.
 - The quote is anchored on rendered text. A selection that crosses math or UI elements anchors on the visible text only.
-- Edits are written straight to disk, so Ctrl+Z inside MD Review doesn't undo them. To recover, use git, your editor's local history, or Ctrl+Z in a text editor that had the file open.
+- Undo history lives in the open view and covers edits made there. It's cleared if another program changes the file in between, so an agent's edits are never overwritten by an undo.
 - Inline `<!-- COMMENT -->` storage is not implemented. By design the `.md` stays clean.
 
 ## Development

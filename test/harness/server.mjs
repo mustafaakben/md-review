@@ -22,6 +22,7 @@ const port = Number(process.argv[3] || 4417);
 const dir = path.dirname(md);
 const clients = new Set();
 
+let prefs = {}; // reading prefs, kept for the life of the server
 const session = new lib.ReviewSession({
   mdPath: md,
   author: () => os.userInfo().username,
@@ -34,6 +35,8 @@ const session = new lib.ReviewSession({
   getText: () => fs.readFileSync(md, 'utf8').replace(/^﻿/, ''),
   isDirty: () => false,
   openLink: (href) => console.log('openLink', href),
+  getPrefs: () => prefs,
+  setPrefs: (p) => (prefs = p),
 });
 
 let t1, t2;
@@ -48,9 +51,10 @@ fs.watch(dir, (_ev, name) => {
 });
 
 const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MD Review harness</title>
-<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"></head>
+<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"><link rel="stylesheet" href="/media/features.css"></head>
 <body><div id="app"></div>
 <script>
+  window.__mdrStandalone = true;
   let state = {};
   window.acquireVsCodeApi = () => ({
     postMessage: (m) => fetch('/msg', { method: 'POST', body: JSON.stringify(m) }),

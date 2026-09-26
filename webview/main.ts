@@ -1,4 +1,8 @@
 import { buildTextMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
+import { createSearch } from './search';
+import { createOutline } from './outline';
+import { createReading, ReadingPrefs } from './reading';
+import { passes, authorsOf, filterBar, FilterState, StatusFilter } from './filters';
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
@@ -34,13 +38,20 @@ const orphans = new Set<string>();
 const openReplies = new Set<string>();
 const editingBodies = new Set<string>();
 const saved = vscode.getState() || {};
+const filter: FilterState = { status: saved.filterStatus || 'all', author: saved.filterAuthor || '' };
+let navOrder: string[] = []; // visible, anchored thread ids in document order
+// The browser harness has no VS Code keybindings, so the view handles those keys itself.
+const standalone = !!(window as any).__mdrStandalone;
 
 // ---------------------------------------------------------------- DOM
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><span class="mdr-file"></span><span class="mdr-counts"></span></div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="Outline (Ctrl+Shift+O)" aria-label="Toggle outline"></button><span class="mdr-file"></span><span class="mdr-counts"></span></div>
     <div class="mdr-tools">
+      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="Undo edit (Ctrl+Z)" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="Redo edit (Ctrl+Y)" aria-label="Redo edit" disabled></button></span>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" aria-label="Reading view: theme, font, and zoom" aria-haspopup="true" aria-expanded="false"></button>
+      <button id="mdr-find-btn" class="mdr-icon-btn" title="Find in document (Ctrl+F)" aria-label="Find in document"></button>
       <span class="mdr-hint">Select text to comment · double-click text to edit</span>
       <button id="mdr-edit-mode" class="mdr-mode" title="Edit mode: click any paragraph, heading, list item, or table row and type">Edit</button>
       <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
@@ -48,9 +59,18 @@ app.innerHTML = `
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
     </div>
   </header>
+  <div id="mdr-find" class="mdr-find mdr-ui" hidden></div>
+  <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
   <div class="mdr-layout">
+    <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
     <main id="mdr-doc" class="mdr-doc"></main>
-    <aside id="mdr-threads" class="mdr-sidebar mdr-ui"></aside>
+    <aside class="mdr-sidebar mdr-ui">
+      <div class="mdr-side-head">
+        <div class="mdr-filters"></div>
+        <button id="mdr-send" class="mdr-send" title="Submit drafts and hand the open threads to Claude Code">Send to Claude</button>
+      </div>
+      <div id="mdr-threads"></div>
+    </aside>
   </div>
   <div id="mdr-pop" class="mdr-pop mdr-ui" hidden></div>
   <div id="mdr-toast" class="mdr-toast mdr-ui" hidden></div>
@@ -62,6 +82,21 @@ const toastEl = document.getElementById('mdr-toast')!;
 const submitBtn = document.getElementById('mdr-submit') as HTMLButtonElement;
 const showResolvedBox = document.getElementById('mdr-show-resolved') as HTMLInputElement;
 const sideToggle = document.getElementById('mdr-side-toggle') as HTMLButtonElement;
+const filtersEl = document.querySelector('.mdr-filters') as HTMLElement;
+const sendBtn = document.getElementById('mdr-send') as HTMLButtonElement;
+const undoBtn = document.getElementById('mdr-undo') as HTMLButtonElement;
+const redoBtn = document.getElementById('mdr-redo') as HTMLButtonElement;
+const search = createSearch(doc, document.getElementById('mdr-find')!);
+const reading = createReading(
+  doc,
+  document.getElementById('mdr-reading-btn')!,
+  document.getElementById('mdr-reading')!,
+  (prefs: ReadingPrefs) => post({ type: 'setPrefs', prefs }),
+  (msg) => toast(msg),
+);
+const outline = createOutline(doc, document.getElementById('mdr-outline')!, (open) => {
+  vscode.setState({ ...(vscode.getState() || {}), outlineOpen: open });
+});
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const fmt = (iso: string | null) => {
@@ -103,6 +138,7 @@ function paint() {
   }
   wrapRanges(doc, specs);
   renderSidebar();
+  afterPaint();
   window.scrollTo(0, y);
 }
 
@@ -153,6 +189,13 @@ function paintComments() {
   wrapRanges(doc, added.map(([c, s, e]) => ({ start: s, end: e, make: () => mark(c) })));
   painted = next;
   renderSidebar();
+  afterPaint();
+}
+
+/** Outline counts and find matches depend on the painted marks and text nodes. */
+function afterPaint() {
+  outline.rebuild();
+  search.refresh();
 }
 
 /** Locate every comment in the painted text; returns the visible highlights in wrap order. */
@@ -198,11 +241,23 @@ function renderSidebar() {
   submitBtn.textContent = n.draft ? `Submit review (${n.draft})` : 'Submit review';
   showResolvedBox.checked = showResolved;
 
-  const visible = comments.filter((c) => showResolved || c.status !== 'resolved');
+  const byAuthor = comments.filter((c) => passes(c, { status: 'all', author: filter.author }, true));
+  const fc = { all: 0, draft: 0, submitted: 0, resolved: 0 } as Record<StatusFilter, number>;
+  for (const c of byAuthor) fc[c.status]++;
+  fc.all = byAuthor.filter((c) => showResolved || c.status !== 'resolved').length;
+  filtersEl.innerHTML = filterBar(filter, authorsOf(comments), fc);
+  const sendable = n.draft + n.submitted;
+  sendBtn.disabled = sendable === 0;
+  sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
+
+  const visible = comments.filter((c) => passes(c, filter, showResolved));
   const anchored = visible.filter((c) => !orphans.has(c.id)).sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
   const orphaned = visible.filter((c) => orphans.has(c.id));
+  navOrder = anchored.map((c) => c.id);
   let out = '';
-  if (!visible.length) {
+  if (!visible.length && comments.length) {
+    out = `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`;
+  } else if (!visible.length) {
     out = `<div class="mdr-empty">Select text in the document to add a comment.<br><br>To edit, double-click any text, or turn on <b>Edit</b> in the toolbar and click where you want to type. Enter or clicking away saves; Esc cancels.</div>`;
   }
   out += anchored.map(card).join('');
@@ -221,6 +276,7 @@ function card(c: Comment): string {
     `<button data-act="reply">Reply</button>`,
     mine && c.status !== 'resolved' ? `<button data-act="edit-body">Edit</button>` : '',
     c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
+    c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
     c.status === 'draft' ? `<button data-act="delete" class="danger">Delete</button>` : '',
   ].join('');
   const replyBox = openReplies.has(c.id)
@@ -336,6 +392,7 @@ function saveComment() {
 // ---------------------------------------------------------------- sidebar actions
 sidebar.addEventListener('click', (e) => {
   const t = e.target as Element;
+  if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '' });
   const cardEl = t.closest('.mdr-card') as HTMLElement | null;
   if (!cardEl) return;
   const id = cardEl.dataset.id!;
@@ -374,6 +431,8 @@ sidebar.addEventListener('click', (e) => {
     }
     case 'delete':
       return post({ type: 'deleteComment', id });
+    case 'ask-claude':
+      return post({ type: 'sendToAgent', id });
     default:
       if (!t.closest('textarea')) activate(id, true, false);
   }
@@ -412,6 +471,115 @@ doc.addEventListener('click', (e) => {
 });
 
 submitBtn.addEventListener('click', () => post({ type: 'submitReview' }));
+sendBtn.addEventListener('click', () => post({ type: 'sendToAgent' }));
+undoBtn.addEventListener('click', () => post({ type: 'undo' }));
+redoBtn.addEventListener('click', () => post({ type: 'redo' }));
+document.getElementById('mdr-find-btn')!.addEventListener('click', () => search.open());
+document.getElementById('mdr-outline-toggle')!.addEventListener('click', () => outline.setOpen(!outline.isOpen()));
+outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
+
+// ---------------------------------------------------------------- filters & navigation
+function setFilter(f: Partial<FilterState>) {
+  Object.assign(filter, f);
+  vscode.setState({ ...(vscode.getState() || {}), filterStatus: filter.status, filterAuthor: filter.author });
+  renderSidebar();
+}
+filtersEl.addEventListener('click', (e) => {
+  const st = (e.target as Element).closest('[data-filter-status]')?.getAttribute('data-filter-status') as StatusFilter | undefined;
+  if (st) setFilter({ status: st });
+});
+filtersEl.addEventListener('change', (e) => {
+  const t = e.target as HTMLSelectElement;
+  if (t.classList.contains('mdr-author-filter')) setFilter({ author: t.value });
+});
+
+/** Jump to the next (d = 1) or previous (d = -1) visible thread in document order. */
+function navigate(d: 1 | -1) {
+  if (!navOrder.length) return toast('No comments to jump to.');
+  let i = activeId ? navOrder.indexOf(activeId) : -1;
+  if (i < 0) {
+    // Start from the reading position rather than the top of the document.
+    const marks = navOrder.map((id) => doc.querySelector(`.mdr-hl[data-cid="${id}"]`)?.getBoundingClientRect().top ?? 0);
+    i = d > 0 ? marks.findIndex((top) => top > 80) : marks.map((top) => top < 60).lastIndexOf(true);
+    if (i < 0) i = d > 0 ? 0 : navOrder.length - 1;
+  } else i = (i + d + navOrder.length) % navOrder.length;
+  activate(navOrder[i], true, true);
+}
+
+function isTyping(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+}
+
+/** Undo/redo: native inside a text field, otherwise the last file edit. */
+function undoRedo(which: 'undo' | 'redo') {
+  if (isTyping(document.activeElement)) document.execCommand(which);
+  else post({ type: which });
+}
+
+function runCommand(cmd: string) {
+  switch (cmd) {
+    case 'undo':
+    case 'redo':
+      return undoRedo(cmd);
+    case 'find':
+      return search.open();
+    case 'next':
+    case 'prev':
+      // Alt+Up/Down reach here even while typing a comment or editing text.
+      if (isTyping(document.activeElement)) return;
+      return navigate(cmd === 'next' ? 1 : -1);
+    case 'outline':
+      return outline.setOpen(!outline.isOpen());
+    case 'send':
+      return post({ type: 'sendToAgent' });
+    case 'zoomIn':
+      return reading.zoomBy(1);
+    case 'zoomOut':
+      return reading.zoomBy(-1);
+    case 'zoomReset':
+      return reading.resetZoom();
+    case 'reading':
+      return reading.togglePanel();
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  const k = e.key.toLowerCase();
+  if (standalone) {
+    // In VS Code these arrive as commands via package.json keybindings.
+    const cmd =
+      mod && !e.shiftKey && k === 'z' ? 'undo'
+      : mod && (k === 'y' || (e.shiftKey && k === 'z')) ? 'redo'
+      : mod && k === 'f' ? 'find'
+      : mod && e.shiftKey && k === 'o' ? 'outline'
+      : mod && (e.key === '=' || e.key === '+') ? 'zoomIn'
+      : mod && (e.key === '-' || e.key === '_') ? 'zoomOut'
+      : mod && e.key === '0' ? 'zoomReset'
+      : e.altKey && e.key === 'ArrowDown' ? 'next'
+      : e.altKey && e.key === 'ArrowUp' ? 'prev'
+      : '';
+    if (cmd) {
+      e.preventDefault();
+      return runCommand(cmd);
+    }
+  }
+  if (e.key === 'Escape' && search.isOpen()) return search.close();
+  if (mod || e.altKey || isTyping(e.target) || editing || inline) return;
+  if (k === 'j' || k === 'n') navigate(1);
+  else if (k === 'k' || k === 'p') navigate(-1);
+  else if (e.key === '/') {
+    e.preventDefault();
+    search.open();
+  } else if (k === 'r' && activeId) {
+    e.preventDefault();
+    setSidebarOpen(true);
+    openReplies.add(activeId);
+    renderSidebar();
+    (sidebar.querySelector(`.mdr-card[data-id="${activeId}"] textarea`) as HTMLTextAreaElement)?.focus();
+  }
+});
 showResolvedBox.addEventListener('change', () => {
   showResolved = showResolvedBox.checked;
   vscode.setState({ ...(vscode.getState() || {}), showResolved });
@@ -672,6 +840,24 @@ window.addEventListener('message', (ev) => {
       endInline(true);
       if (/changed on disk/.test(m.message)) closeEditor();
       break;
+    case 'history':
+      undoBtn.disabled = !m.canUndo;
+      redoBtn.disabled = !m.canRedo;
+      break;
+    case 'toast':
+      toast(m.message);
+      break;
+    case 'agentPrompt':
+      copyText(m.prompt).then(
+        (ok) => toast(ok ? `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into Claude Code.` : 'Could not copy the prompt.', !ok),
+      );
+      break;
+    case 'prefs':
+      reading.apply(m.prefs || {});
+      break;
+    case 'command':
+      runCommand(m.command);
+      break;
     case 'inlineFailed': {
       endInline(true);
       doc.querySelector(`[data-ls="${m.ls}"][data-le="${m.le}"]`)?.classList.add('mdr-pending');
@@ -681,6 +867,23 @@ window.addEventListener('message', (ev) => {
     }
   }
 });
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.className = 'mdr-ui';
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
 
 let scrollT: any;
 window.addEventListener('scroll', () => {

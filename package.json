@@ -38,6 +38,63 @@
         "title": "Open Markdown Source",
         "category": "MD Review",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "mdReview.undo",
+        "title": "Undo Edit",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.redo",
+        "title": "Redo Edit",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.find",
+        "title": "Find in Document",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.nextComment",
+        "title": "Next Comment",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.previousComment",
+        "title": "Previous Comment",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.toggleOutline",
+        "title": "Toggle Outline",
+        "category": "MD Review",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "mdReview.sendToClaude",
+        "title": "Send Review to Claude",
+        "category": "MD Review",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "title": "Zoom In (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "title": "Zoom Out (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "title": "Reset Zoom (Document)",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.readingView",
+        "title": "Reading Theme, Font, and Zoom…",
+        "category": "MD Review"
       }
     ],
     "menus": {
@@ -51,6 +108,11 @@
           "command": "mdReview.openSource",
           "when": "activeCustomEditorId == 'mdReview.editor'",
           "group": "navigation"
+        },
+        {
+          "command": "mdReview.sendToClaude",
+          "when": "activeCustomEditorId == 'mdReview.editor'",
+          "group": "navigation@1"
         }
       ],
       "explorer/context": [
@@ -58,6 +120,52 @@
           "command": "mdReview.open",
           "when": "resourceExtname == .md",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mdReview.undo",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.redo",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.find",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.nextComment",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.previousComment",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.toggleOutline",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.sendToClaude",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomIn",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomOut",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.zoomReset",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.readingView",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
         }
       ]
     },
@@ -73,9 +181,111 @@
           "type": "boolean",
           "default": true,
           "description": "Show resolved threads in the sidebar."
+        },
+        "mdReview.agent.command": {
+          "type": "string",
+          "scope": "machine",
+          "default": "claude",
+          "markdownDescription": "Program started by **Send to Claude**, followed by the review prompt as its last argument. Extra arguments are allowed, e.g. `claude --permission-mode acceptEdits`."
+        },
+        "mdReview.agent.mode": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "clipboard"
+          ],
+          "default": "terminal",
+          "enumDescriptions": [
+            "Start the agent command in a new terminal (the prompt is also copied).",
+            "Only copy the prompt to the clipboard, to paste into any agent."
+          ],
+          "description": "What Send to Claude does with the review prompt."
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "mdReview.undo",
+        "key": "ctrl+z",
+        "mac": "cmd+z",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.redo",
+        "key": "ctrl+y",
+        "mac": "cmd+shift+z",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.redo",
+        "key": "ctrl+shift+z",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.find",
+        "key": "ctrl+f",
+        "mac": "cmd+f",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.nextComment",
+        "key": "alt+down",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.previousComment",
+        "key": "alt+up",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.toggleOutline",
+        "key": "ctrl+shift+o",
+        "mac": "cmd+shift+o",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+=",
+        "mac": "cmd+=",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+numpad_add",
+        "mac": "cmd+numpad_add",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomIn",
+        "key": "ctrl+shift+=",
+        "mac": "cmd+shift+=",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "key": "ctrl+-",
+        "mac": "cmd+-",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomOut",
+        "key": "ctrl+numpad_subtract",
+        "mac": "cmd+numpad_subtract",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "key": "ctrl+0",
+        "mac": "cmd+0",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.zoomReset",
+        "key": "ctrl+numpad0",
+        "mac": "cmd+numpad0",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",
