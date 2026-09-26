@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import { ReviewSession, FromWebview } from './core';
+import { runAgent } from './agentRun';
 
 const PREFS_KEY = 'mdReview.readingPrefs';
 
@@ -186,30 +187,4 @@ function openLink(href: string, dir: string) {
   const [p] = href.split('#');
   if (!p) return;
   void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path.resolve(dir, decodeURIComponent(p))));
-}
-
-/**
- * Start the configured agent in a terminal. The review prompt is written to a
- * temp file and the agent gets one short argument that points at it.
- */
-export function runAgent(prompt: string, fileName: string, cwd: string): string {
-  const cfg = vscode.workspace.getConfiguration('mdReview');
-  const mode = cfg.get<string>('agent.mode', 'terminal');
-  const command = (cfg.get<string>('agent.command') || 'claude').trim();
-  void vscode.env.clipboard.writeText(prompt);
-  if (mode === 'clipboard') return 'Review prompt copied. Paste it into your agent.';
-  const [shellPath, ...extra] = command.split(/\s+/);
-  // Pass a short fixed argument pointing at a file instead of the prompt itself:
-  // comment text is untrusted, and on Windows a .cmd shim would run it through cmd.exe.
-  const promptFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-')), 'review-prompt.md');
-  fs.writeFileSync(promptFile, prompt, 'utf8');
-  const term = vscode.window.createTerminal({
-    name: `Claude · ${fileName}`,
-    cwd,
-    shellPath,
-    shellArgs: [...extra, `Read and follow the review instructions in ${promptFile}`],
-    iconPath: new vscode.ThemeIcon('sparkle'),
-  });
-  term.show();
-  return `Sent to ${shellPath} in a new terminal. The prompt is on your clipboard too.`;
 }

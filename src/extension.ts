@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { MdReviewEditorProvider } from './editorProvider';
 import { addClaudeSkill, sendFolderToClaude } from './agentCommands';
+import { initAgentPrompts } from './agentRun';
 
 export function activate(context: vscode.ExtensionContext) {
+  initAgentPrompts(context);
   context.subscriptions.push(
     vscode.window.registerCustomEditorProvider(MdReviewEditorProvider.viewType, new MdReviewEditorProvider(context), {
       webviewOptions: { retainContextWhenHidden: true },

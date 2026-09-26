@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Send to Claude works the same on Windows, macOS and Linux: the agent command understands quoted paths and arguments, Claude Code is found in its usual install folders even when VS Code's PATH doesn't have it yet (a real claude.exe is preferred over the npm .cmd shim), and when it can't be found you get the prompt on the clipboard and a button to the setting instead of a dead terminal. New `mdReview.agent.launch: shell` runs it in your own shell, which stays open afterwards. Prompt files live in the extension's storage and are cleaned up after a day.
 - Opening a document paints once, already in your reading theme, font and zoom, with its comments highlighted: no flash of the default look. The text itself shows up a little later, but the finished page arrives about a third sooner on long documents. The extension package is a quarter smaller (2.2 MB instead of 2.9 MB; the extension code itself 607 KB instead of 1.3 MB) and starts in half the time; KaTeX loads with the first formula.
 - Suggested edits: **Suggest edit** in the comment box proposes replacement text for the selection, and the card shows it as a redline with **Apply** (a checked, byte-exact rewrite of just that text, with Undo) that resolves the thread. With `mdReview.agent.editMode` set to `suggest`, Claude proposes changes with the CLI's new `suggest` command instead of editing, and you apply or dismiss each one.
 - The last item of a list followed by a blank line can be edited in the view again (it used to fail with "The file changed on disk").

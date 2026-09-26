@@ -80,10 +80,11 @@ export interface HostContext {
   watchFiles?(files: string[]): void;
   /**
    * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
-   * a status line for the user. When absent, the prompt goes back to the
-   * webview, which copies it to the clipboard.
+   * a status line for the user ('' when it already told them), or null when no
+   * agent was started. When absent, the prompt goes back to the webview, which
+   * copies it to the clipboard.
    */
-  runAgent?(prompt: string): string;
+  runAgent?(prompt: string): string | null;
   /** Working directory for the agent; defaults to the Markdown file's folder. */
   agentCwd?(): string;
   /** Per-user view preferences (reading theme, zoom), shared by every file. */
@@ -403,13 +404,6 @@ export class ReviewSession {
       this.ctx.post({ type: 'toast', message: 'No open comments to send. Add a comment first.' });
       return;
     }
-    // Only threads that are actually waiting on the agent count toward the round.
-    const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
-    // Ask Claude on one thread while a round is still running adds to that round.
-    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
-    else this.round = ids.length ? { ids } : null;
-    if (this.round) this.updateRound(data);
-    else this.ctx.post({ type: 'round', round: null });
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
@@ -417,8 +411,19 @@ export class ReviewSession {
       cliPath: this.ctx.cliPath,
       suggest: this.ctx.suggestMode?.(),
     });
-    if (this.ctx.runAgent) this.ctx.post({ type: 'toast', message: this.ctx.runAgent(prompt) });
-    else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+    if (this.ctx.runAgent) {
+      const status = this.ctx.runAgent(prompt);
+      // Nothing started (the host said why): no round to follow.
+      if (status === null) return;
+      if (status) this.ctx.post({ type: 'toast', message: status });
+    } else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+    // Only threads that are actually waiting on the agent count toward the round.
+    const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
+    // Ask Claude on one thread while a round is still running adds to that round.
+    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
+    else this.round = ids.length ? { ids } : null;
+    if (this.round) this.updateRound(data);
+    else this.ctx.post({ type: 'round', round: null });
   }
 
   /** Block editing works on disk bytes, so the view must reflect the disk. */
