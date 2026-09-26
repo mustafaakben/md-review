@@ -169,3 +169,27 @@ test('reading prefs are sent on ready and saved on change', () => {
   s.handle({ type: 'setPrefs', prefs: { theme: 'night', zoom: 1.5, font: 'serif' } });
   assert.deepEqual(stored, { theme: 'night', zoom: 1.5, font: 'serif' });
 });
+
+test('a file change reaching the host several ways renders once', () => {
+  const md = fresh('once.md', 'First paragraph.\n\nSecond paragraph.\n');
+  const { s, posted } = session(md);
+  const renders = () => posted.filter((m) => m.type === 'render').length;
+  assert.equal(renders(), 1); // ready
+  // The same text again (file watcher, buffer reload): nothing new to paint.
+  s.render();
+  s.render();
+  assert.equal(renders(), 1);
+  // An in-view edit repaints once; the watcher and buffer events that follow don't.
+  s.handle({ type: 'saveBlock', ls: 0, le: 1, original: 'First paragraph.', newText: 'First, edited.' });
+  s.render();
+  s.render();
+  assert.equal(renders(), 2);
+  assert.match(posted.filter((m) => m.type === 'render').at(-1).html, /First, edited\./);
+  // An outside change is still picked up.
+  fs.writeFileSync(md, 'Replaced.\n');
+  s.render();
+  assert.equal(renders(), 3);
+  // A reloaded view asks again and gets a fresh copy.
+  s.handle({ type: 'ready' });
+  assert.equal(renders(), 4);
+});

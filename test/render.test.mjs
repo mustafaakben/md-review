@@ -81,3 +81,23 @@ test('front matter: single-map author; an indented --- is not front matter', () 
   assert.match(render('---\nauthor:\n  name: Solo\n  email: s@x\n---\n'), /mdr-front-meta">Solo</);
   assert.doesNotMatch(render(' ---\ntitle: x\n---\n'), /mdr-front/);
 });
+
+test('many footnotes keep their numbers, order, and back-links', () => {
+  const n = 300;
+  const body = Array.from({ length: n }, (_, i) => `Claim ${i + 1}.[^f${i + 1}]`).join('\n\n');
+  const defs = Array.from({ length: n }, (_, i) => `[^f${i + 1}]: Note ${i + 1}.`).join('\n');
+  const html = render(`${body}\n\nAgain.[^f1]\n\n${defs}\n`);
+  const notes = [...html.matchAll(/<li id="fn(\d+)" class="footnote-item"><p[^>]*>Note (\d+)\./g)];
+  assert.equal(notes.length, n);
+  assert.ok(notes.every(([, id, note]) => id === note));
+  // The note cited twice gets two back-links.
+  assert.match(html, /Note 1\. <a href="#fnref1" class="footnote-backref">↩︎<\/a> <a href="#fnref1:1" class="footnote-backref">↩︎<\/a><\/p>/);
+});
+
+test('repeated formulas render the same, inline and display apart', () => {
+  const once = render('Let $x^2$ be.\n');
+  assert.equal(render('Let $x^2$ be.\n'), once);
+  const both = render('Inline $x^2$.\n\n$$\nx^2\n$$\n');
+  assert.equal((both.match(/katex-display/g) || []).length, 1);
+  assert.equal((both.match(/class="katex"/g) || []).length, 2);
+});
