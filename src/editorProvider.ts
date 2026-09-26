@@ -141,7 +141,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     // Network shares and \\wsl$ send no file events: look every 2 s while the panel shows.
     let tracker: StampTracker | undefined;
     let poll: NodeJS.Timeout | undefined;
-    const check = () => tracker?.check().forEach((f) => onFile(path.basename(f)));
+    const check = () => void tracker?.check().then((changed) => changed.forEach((f) => onFile(path.basename(f))));
     const updatePolling = () => {
       if (!(panel.visible && shouldPoll(mdPath, process.platform, cfg().get<boolean>('pollFiles', false)))) {
         clearInterval(poll);
@@ -163,6 +163,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     );
     panel.onDidDispose(() => {
       MdReviewEditorProvider.panels.delete(panel);
+      clearTimeout(timer);
+      session.dispose();
       subs.forEach((d) => d.dispose());
       bibWatchers.forEach((d) => d.dispose());
     });

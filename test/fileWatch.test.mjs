@@ -30,15 +30,25 @@ test('polls network paths on Windows, or anywhere with the setting', () => {
   assert.deepEqual(lib.SIDECAR_RETRY_MS, [50, 150, 400]);
 });
 
-test('the stamp tracker reports files whose mtime or size changed', () => {
+test('the stamp tracker reports files whose mtime or size changed', async () => {
   const stamps = { a: '1:10', b: '1:20' };
   const t = new lib.StampTracker(['a', 'b'], (f) => stamps[f]);
-  assert.deepEqual(t.check(), []);
+  assert.deepEqual(await t.check(), []);
   stamps.b = '2:20';
-  assert.deepEqual(t.check(), ['b']);
-  assert.deepEqual(t.check(), []);
+  assert.deepEqual(await t.check(), ['b']);
+  assert.deepEqual(await t.check(), []);
   stamps.a = ''; // deleted
-  assert.deepEqual(t.check(), ['a']);
+  assert.deepEqual(await t.check(), ['a']);
+});
+
+test('a check waiting on a slow disk is shared, and real stamps are async', async () => {
+  let calls = 0;
+  const t = new lib.StampTracker(['a'], async () => (calls++, '1'));
+  await t.check();
+  const n = calls;
+  await Promise.all([t.check(), t.check(), t.check()]);
+  assert.equal(calls, n + 1);
+  assert.equal(await lib.fileStamp(path.join(here, 'no-such-file')), '');
 });
 
 function session(md, extra) {
@@ -117,4 +127,34 @@ test('a newer sidecar event replaces pending retries', () => {
   tick();
   assert.equal(timers.length, 0);
   assert.equal(posted.filter((m) => m.type === 'error').length, 1);
+});
+
+test('an empty sidecar (truncated, not yet written) is read again too', () => {
+  const md = setup();
+  fs.writeFileSync(md + '.comments.json', '');
+  const { s, posted, tick } = session(md);
+  s.onSidecarChanged();
+  assert.equal(posted.length, 0);
+  fs.writeFileSync(md + '.comments.json', sidecar(md));
+  tick();
+  assert.equal(posted.filter((m) => m.type === 'comments')[0].data.comments.length, 1);
+});
+
+test('the same change reported twice (event and poll) is shown once', () => {
+  const md = setup();
+  fs.writeFileSync(md + '.comments.json', sidecar(md));
+  const { s, posted } = session(md);
+  s.onSidecarChanged();
+  s.onSidecarChanged();
+  assert.equal(posted.filter((m) => m.type === 'comments').length, 1);
+});
+
+test('re-reads pending when the panel closes do nothing', () => {
+  const md = setup();
+  fs.writeFileSync(md + '.comments.json', '{');
+  const { s, posted, tick } = session(md);
+  s.onSidecarChanged();
+  s.dispose();
+  tick();
+  assert.equal(posted.length, 0);
 });

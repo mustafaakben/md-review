@@ -133,7 +133,7 @@ Single-letter keys work when you're not typing in a box. Tab reaches the toolbar
 **Settings.**
 - `mdReview.author`: the name on your comments. If empty (the default), your system user name is used.
 - `mdReview.showResolved`: whether resolved threads show in the sidebar.
-- `mdReview.pollFiles`: check the file and its comments every 2 seconds while the view shows, for folders that don't report changes (network shares, some remote mounts). Network paths on Windows, including `\\wsl$`, are checked this way already.
+- `mdReview.pollFiles`: check the file and its comments every 2 seconds while the view shows, for folders that don't report changes (network shares, some remote mounts). Network paths on Windows, including `\\wsl$`, are checked this way already; a network share mapped to a drive letter (like `Z:`) needs this setting.
 - `mdReview.agent.command`, `mdReview.agent.mode`: what **Send to Claude** runs (see above).
 - `mdReview.agent.reviewComments`: the most comments **Review with Claude** asks for (default 12).
 

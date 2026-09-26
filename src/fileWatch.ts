@@ -32,28 +32,38 @@ export function shouldPoll(fsPath: string, platform: string, setting: boolean): 
   return setting || (platform === 'win32' && /^[\\/]{2}/.test(fsPath));
 }
 
-/** mtime and size, or '' when the file is missing. */
-export function fileStamp(p: string): string {
+/**
+ * mtime and size, or '' when the file is missing. Asynchronous: the paths
+ * polled are the ones that can hang (a dropped share), and a blocking stat
+ * would freeze every extension, not just this one.
+ */
+export async function fileStamp(p: string): Promise<string> {
   try {
-    const s = fs.statSync(p);
+    const s = await fs.promises.stat(p);
     return `${s.mtimeMs}:${s.size}`;
   } catch {
     return '';
   }
 }
 
-/** Remembers each file's stamp; check() returns the files that changed since the last look. */
+/** Remembers each file's stamp; check() gives the files that changed since the last look. */
 export class StampTracker {
   private stamps = new Map<string, string>();
+  private busy: Promise<string[]> | undefined;
 
-  constructor(private files: string[], private stamp: (p: string) => string = fileStamp) {
-    this.check();
+  constructor(private files: string[], private stamp: (p: string) => string | Promise<string> = fileStamp) {
+    void this.check();
   }
 
-  check(): string[] {
+  /** A check still waiting on a slow disk is shared, not stacked. */
+  check(): Promise<string[]> {
+    return (this.busy ??= this.look().finally(() => (this.busy = undefined)));
+  }
+
+  private async look(): Promise<string[]> {
     const changed: string[] = [];
     for (const f of this.files) {
-      const s = this.stamp(f);
+      const s = await this.stamp(f);
       if (this.stamps.has(f) && this.stamps.get(f) !== s) changed.push(f);
       this.stamps.set(f, s);
     }

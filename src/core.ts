@@ -149,6 +149,9 @@ export class ReviewSession {
   private lastSidecarWrite: string | undefined;
   /** Counts sidecar events, so a pending re-read gives way to a newer one. */
   private sidecarEvents = 0;
+  /** The sidecar text last shown after a watcher event, so a second report of the same change is skipped. */
+  private lastSidecarSeen: string | undefined;
+  private disposed = false;
   private lastRendered: string | undefined;
   private watched = '';
   private lastParse: RenderedParse | undefined;
@@ -247,6 +250,11 @@ export class ReviewSession {
     this.ctx.post({ type: 'round', round: round.total ? round : null });
   }
 
+  /** The panel closed: pending re-reads do nothing. */
+  dispose(): void {
+    this.disposed = true;
+  }
+
   /**
    * Count the drafts Claude has left since the review started. It's finished
    * once Claude stamps reviewDoneAt (review-done) or reaches the cap.
@@ -285,7 +293,7 @@ export class ReviewSession {
     const delays = this.ctx.sidecarRetryMs ?? SIDECAR_RETRY_MS;
     const schedule = this.ctx.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
     const attempt = (i: number) => {
-      if (gen !== this.sidecarEvents) return; // a newer event reads it instead
+      if (this.disposed || gen !== this.sidecarEvents) return; // closed, or a newer event reads it instead
       let current: string | undefined;
       try {
         current = fs.readFileSync(store.sidecarPath(this.ctx.mdPath), 'utf8');
@@ -293,14 +301,19 @@ export class ReviewSession {
         current = undefined;
       }
       if (current !== undefined && current === this.lastSidecarWrite) return; // our own write
+      if (current !== undefined && current === this.lastSidecarSeen) return; // already shown (event and poll both saw it)
+      const retry = i < delays.length;
+      // An empty file is usually a writer that has truncated but not written yet.
+      if (current === '' && retry) return schedule(() => attempt(i + 1), delays[i]);
       let data: store.Sidecar;
       try {
         data = store.readSidecar(this.ctx.mdPath);
       } catch (e: any) {
-        if (i < delays.length) schedule(() => attempt(i + 1), delays[i]);
+        if (retry) schedule(() => attempt(i + 1), delays[i]);
         else this.postParseError(e);
         return;
       }
+      this.lastSidecarSeen = current;
       this.postComments(data);
     };
     attempt(0);
