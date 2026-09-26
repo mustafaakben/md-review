@@ -84,6 +84,7 @@ button[data-act="reopen"]::before { --ico: var(--i-reopen); }
 button[data-act="delete"]::before { --ico: var(--i-trash); }
 
 /* ---------- buttons ---------- */
+[hidden] { display: none !important; }
 button {
   font: inherit; font-size: 12.5px; line-height: 18px; padding: 4px 10px; border-radius: var(--radius); cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
@@ -286,7 +287,6 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
 .mdr-reply { padding: 6px 0 0 10px; border-left: 2px solid var(--soft); margin-top: 6px; }
 .mdr-actions { display: flex; flex-wrap: wrap; gap: 2px; margin: 6px 0 0 -8px; opacity: 0.75; transition: opacity 0.15s var(--ease); }
 .mdr-card:hover .mdr-actions, .mdr-card.active .mdr-actions, .mdr-actions:focus-within { opacity: 1; }
-.mdr-actions { opacity: 0.5; }
 .mdr-actions button { font-size: 11.5px; padding: 2px 8px; gap: 5px; }
 .mdr-actions button::before { width: 14px; height: 14px; -webkit-mask-size: 14px; mask-size: 14px; }
 .mdr-replybox { margin-top: 8px; animation: mdr-fade-in 0.14s var(--ease); }

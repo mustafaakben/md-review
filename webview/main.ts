@@ -468,6 +468,7 @@ function startEdit(el: HTMLElement, raw = false) {
 }
 
 function startInline(el: HTMLElement, caretAtEnd = false) {
+  if (editing || inline) return;
   docStale = true;
   inline = { el, ls: Number(el.dataset.ls), le: Number(el.dataset.le), kind: INLINE_KIND[el.tagName], oldText: el.textContent || '', oldHtml: el.innerHTML, saving: false };
   el.contentEditable = 'true';
@@ -568,7 +569,7 @@ doc.addEventListener('mouseleave', (e) => {
   }
 });
 editBtn.addEventListener('click', () => {
-  if (!hoverEl) return;
+  if (!hoverEl || editing || inline) return;
   const el = hoverEl;
   editBtn.hidden = true;
   if (canInline(el)) startInline(el, true);
