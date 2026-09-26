@@ -59,7 +59,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const session = new ReviewSession({
       mdPath,
-      author: () => cfg().get<string>('author') || systemUser(),
+      author: () => cfg().get<string>('author')?.trim() || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
       resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
@@ -69,6 +69,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       isDirty: () => document.isDirty,
       openLink: (href) => openLink(href, dir),
       watchFiles: watchBibs,
+      // In Restricted Mode a document can't make us read files elsewhere on the machine.
+      readableRoots: () => (vscode.workspace.isTrusted ? undefined : [dir, ...(vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath)]),
       suggestMode: () => cfg().get<string>('agent.editMode') === 'suggest',
       agentCwd: () => vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir,
       cliPath: vscode.Uri.joinPath(this.context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
@@ -111,6 +113,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.workspace.onDidChangeTextDocument((e) => {
         if (e.document.uri.toString() === document.uri.toString()) rerender();
       }),
+      vscode.workspace.onDidGrantWorkspaceTrust(() => rerender(true)),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('mdReview')) session.sendComments();
       }),
@@ -195,7 +198,12 @@ function readingPrefs(stored: unknown): { zoom: number; theme: string; font: str
 
 function openLink(href: string, dir: string) {
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) {
-    void vscode.env.openExternal(vscode.Uri.parse(href));
+    const uri = vscode.Uri.parse(href);
+    // file: links open here. In Restricted Mode only web and mail links leave
+    // VS Code; other schemes (vscode:, other apps' handlers) need trust.
+    if (uri.scheme === 'file') void vscode.commands.executeCommand('vscode.open', uri);
+    else if (vscode.workspace.isTrusted || ['http', 'https', 'mailto'].includes(uri.scheme)) void vscode.env.openExternal(uri);
+    else void vscode.window.showInformationMessage(`Trust this folder to open ${uri.scheme}: links.`);
     return;
   }
   const [p] = href.split('#');

@@ -76,6 +76,8 @@ export interface HostContext {
   openLink(href: string): void;
   /** True when Send to Claude should ask for suggestions instead of edits. */
   suggestMode?(): boolean;
+  /** Folders the bibliography may be read from; undefined means anywhere. */
+  readableRoots?(): string[] | undefined;
   /** Re-render when any of these files (the bibliography) changes. */
   watchFiles?(files: string[]): void;
   /**
@@ -128,7 +130,7 @@ export class ReviewSession {
     if (!force && text === this.lastRendered) return this.syncHistory();
     this.lastRendered = text;
     let html: string;
-    const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath) };
+    const env: RenderEnv = { docDir: path.dirname(this.ctx.mdPath), bibRoots: this.ctx.readableRoots?.() };
     this.lastParse = undefined;
     try {
       const r = renderParsed(text, this.ctx.resolveImage, env);

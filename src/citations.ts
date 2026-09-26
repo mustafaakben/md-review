@@ -13,7 +13,7 @@ import * as path from 'path';
 import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 import { parseFrontMatter } from './frontMatter';
-import { BibEntry, citeNames, citeYear, loadBibliography, referenceParts, referenceText } from './bibliography';
+import { BibEntry, citeNames, citeYear, insideRoots, loadBibliography, referenceParts, referenceText } from './bibliography';
 
 // Pandoc's key punctuation, minus < and > so `@key</span>` stops at the tag.
 const KEY = /^[\p{L}\p{N}_]+(?:[:.#$%&\-+?~/]+[\p{L}\p{N}_]+)*/u;
@@ -67,7 +67,7 @@ function parseItems(body: string): Item[] | null {
 }
 
 function setup(state: StateCore) {
-  const env = state.env as { docDir?: string; bibFiles?: string[]; mdrCite?: CiteEnv };
+  const env = state.env as { docDir?: string; bibFiles?: string[]; bibRoots?: string[]; mdrCite?: CiteEnv };
   const cite: CiteEnv = { active: false, xref: /@(?:fig|tbl|eq|sec):/i.test(state.src), entries: new Map(), files: [], problems: [], suppress: false, cited: [], targets: new Map() };
   env.mdrCite = cite;
   const first = state.tokens[0];
@@ -80,6 +80,10 @@ function setup(state: StateCore) {
     cite.files.push(path.basename(f));
     if (!env.docDir && !path.isAbsolute(f)) continue;
     const file = path.resolve(env.docDir || '', f);
+    if (env.bibRoots && !insideRoots(file, env.bibRoots)) {
+      cite.problems.push(`${f}: outside this folder, not read in Restricted Mode`);
+      continue;
+    }
     (env.bibFiles ||= []).push(file);
     const bib = loadBibliography(file);
     if (bib.error) cite.problems.push(`${f}: ${bib.error}`);

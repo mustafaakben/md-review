@@ -2,6 +2,7 @@
 // CSL-JSON (.json). Parsed into a small common shape and formatted
 // author-date (close to pandoc's default Chicago style), without CSL.
 import * as fs from 'fs';
+import * as path from 'path';
 
 export interface BibEntry {
   key: string;
@@ -236,10 +237,18 @@ export function parseCslJson(text: string): Map<string, BibEntry> {
 
 const cache = new Map<string, { stamp: string; bib: Bibliography }>();
 
-export function loadBibliography(file: string): Bibliography {
+/** Larger than any real reference library; stops a stray huge file freezing the view. */
+const MAX_BIB_BYTES = 50 * 1024 * 1024;
+
+export function loadBibliography(file: string, platform: NodeJS.Platform = process.platform): Bibliography {
+  // A UNC path would make Windows connect to that server (and send credentials).
+  if (platform === 'win32' && /^[\\/]{2}/.test(file)) return { entries: new Map(), error: 'network paths are not read' };
   let stamp: string;
   try {
     const st = fs.statSync(file);
+    // Reading a device or a pipe (/dev/zero, a FIFO) would never finish.
+    if (!st.isFile()) return { entries: new Map(), error: 'not a file' };
+    if (st.size > MAX_BIB_BYTES) return { entries: new Map(), error: 'too large' };
     stamp = `${st.mtimeMs}:${st.size}`;
   } catch {
     return { entries: new Map(), error: 'not found' };
@@ -248,7 +257,7 @@ export function loadBibliography(file: string): Bibliography {
   if (hit && hit.stamp === stamp) return hit.bib;
   let bib: Bibliography;
   try {
-    const text = fs.readFileSync(file, 'utf8').replace(/^﻿/, '');
+    const text = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
     const entries = /\.json$/i.test(file) ? parseCslJson(text) : parseBibTeX(text);
     bib = { entries };
   } catch (e) {
@@ -256,6 +265,26 @@ export function loadBibliography(file: string): Bibliography {
   }
   cache.set(file, { stamp, bib });
   return bib;
+}
+
+/** True if `file` (after following links) is inside one of `roots`. */
+export function insideRoots(file: string, roots: string[]): boolean {
+  let real: string;
+  try {
+    real = fs.realpathSync(file);
+  } catch {
+    real = path.resolve(file);
+  }
+  return roots.some((root) => {
+    let r: string;
+    try {
+      r = fs.realpathSync(root);
+    } catch {
+      r = path.resolve(root);
+    }
+    const rel = path.relative(r, real);
+    return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+  });
 }
 
 // ---- formatting ----

@@ -117,6 +117,8 @@ export function createRenderer(resolveImage: ResolveImage): MarkdownIt {
 /** `docDir`: the file's folder, for reading its `bibliography:`. */
 export interface RenderEnv {
   docDir?: string;
+  /** When set (an untrusted folder), only bibliographies inside these folders are read. */
+  bibRoots?: string[];
   /** Filled in by the render: the bibliography files it read, to watch. */
   bibFiles?: string[];
 }
