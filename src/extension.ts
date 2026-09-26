@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { MdReviewEditorProvider } from './editorProvider';
+import { addClaudeSkill, sendFolderToClaude } from './agentCommands';
 
 export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
@@ -18,6 +19,8 @@ export function activate(context: vscode.ExtensionContext) {
       if (!target) return;
       await vscode.commands.executeCommand('vscode.openWith', target, 'default', vscode.ViewColumn.Beside);
     }),
+    vscode.commands.registerCommand('mdReview.sendFolderToClaude', (uri?: vscode.Uri) => sendFolderToClaude(context, uri)),
+    vscode.commands.registerCommand('mdReview.addClaudeSkill', () => addClaudeSkill(context)),
     ...(
       [
         ['mdReview.undo', { type: 'command', command: 'undo' }],

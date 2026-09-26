@@ -145,7 +145,7 @@ function openLink(href: string, dir: string) {
  * Start the configured agent in a terminal. The review prompt is written to a
  * temp file and the agent gets one short argument that points at it.
  */
-function runAgent(prompt: string, fileName: string, cwd: string): string {
+export function runAgent(prompt: string, fileName: string, cwd: string): string {
   const cfg = vscode.workspace.getConfiguration('mdReview');
   const mode = cfg.get<string>('agent.mode', 'terminal');
   const command = (cfg.get<string>('agent.command') || 'claude').trim();

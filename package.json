@@ -77,6 +77,17 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "mdReview.sendFolderToClaude",
+        "title": "Send Open Reviews in Folder to Claude",
+        "category": "MD Review",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "mdReview.addClaudeSkill",
+        "title": "Add Claude Code Skill to Workspace",
+        "category": "MD Review"
+      },
+      {
         "command": "mdReview.zoomIn",
         "title": "Zoom In (Document)",
         "category": "MD Review"
@@ -120,6 +131,11 @@
           "command": "mdReview.open",
           "when": "resourceExtname == .md",
           "group": "navigation"
+        },
+        {
+          "command": "mdReview.sendFolderToClaude",
+          "when": "explorerResourceIsFolder",
+          "group": "navigation@9"
         }
       ],
       "commandPalette": [
@@ -166,6 +182,14 @@
         {
           "command": "mdReview.readingView",
           "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.sendFolderToClaude",
+          "when": "workspaceFolderCount > 0"
+        },
+        {
+          "command": "mdReview.addClaudeSkill",
+          "when": "workspaceFolderCount > 0"
         }
       ]
     },
