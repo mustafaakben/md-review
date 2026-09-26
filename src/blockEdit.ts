@@ -77,7 +77,7 @@ export function applyBlockEdit(filePath: string, lineStart: number, lineEnd: num
   return out;
 }
 
-const TASK_LINE = /^([ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)( |x|X)\]/;
+export const TASK_LINE = /^([ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)( |x|X)\]/;
 
 /**
  * Tick or untick the task list item that starts on `line` (0-based) by

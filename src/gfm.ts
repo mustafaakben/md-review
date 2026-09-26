@@ -5,6 +5,7 @@ import type MarkdownIt from 'markdown-it';
 import type Token from 'markdown-it/lib/token.mjs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mark = require('markdown-it-mark');
+import { TASK_LINE } from './blockEdit';
 
 // A small, common set keeps the host bundle and render time low. Unknown
 // languages render as plain code, as before.
@@ -42,6 +43,9 @@ function highlighter() {
   return hljs;
 }
 
+// Highlighting runs on every render; the same fences come back each keystroke.
+const highlighted = new Map<string, string>();
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const TASK = /^\[( |x|X)\][ \t]/;
@@ -53,10 +57,17 @@ function addClass(t: Token, cls: string) {
   t.attrSet('class', cur ? `${cur} ${cls}` : cls);
 }
 
-/** Drop `prefix` from the start of an inline token (content and first text child). */
+/** Drop the first `n` characters of an inline token (content and first text child). */
 function stripLead(inline: Token, n: number) {
   inline.content = inline.content.slice(n);
   const kids = inline.children || [];
+  // `[x]` was read as a link because the document defines `[x]: url`.
+  if (kids[0]?.type === 'link_open' && kids[1]?.type === 'text' && kids[2]?.type === 'link_close') {
+    kids.splice(0, 3);
+    const next = kids[0] as Token | undefined;
+    if (next?.type === 'text') next.content = next.content.replace(/^[ \t]+/, '');
+    return;
+  }
   const first = kids[0];
   if (first && first.type === 'text') {
     first.content = first.content.slice(n);
@@ -75,11 +86,18 @@ export function gfmPlugin(md: MarkdownIt): void {
       if (!lang) return '';
       const h = highlighter();
       if (!h.getLanguage(lang)) return '';
-      try {
-        return h.highlight(code, { language: lang, ignoreIllegals: true }).value;
-      } catch {
-        return '';
+      const key = `${lang}\0${code}`;
+      let out = highlighted.get(key);
+      if (out === undefined) {
+        try {
+          out = h.highlight(code, { language: lang, ignoreIllegals: true }).value as string;
+        } catch {
+          out = '';
+        }
+        if (highlighted.size >= 300) highlighted.delete(highlighted.keys().next().value!);
+        highlighted.set(key, out);
       }
+      return out;
     },
   });
 
@@ -95,6 +113,7 @@ export function gfmPlugin(md: MarkdownIt): void {
 
   md.core.ruler.after('inline', 'mdr_gfm', (state) => {
     const tokens = state.tokens;
+    let lines: string[] | null = null;
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
 
@@ -106,7 +125,12 @@ export function gfmPlugin(md: MarkdownIt): void {
           stripLead(inline, m[0].length);
           const box = new state.Token('html_inline', '', 0);
           const checked = m[1] !== ' ';
-          box.content = `<input type="checkbox" class="mdr-task" data-task-line="${t.map[0]}"${checked ? ' checked' : ''} aria-label="${checked ? 'Done' : 'To do'}">`;
+          // Only a box whose line toggleTask can rewrite is clickable (not one
+          // in a footnote or behind a second list marker).
+          lines ||= state.src.split('\n');
+          const live = TASK_LINE.test(lines[t.map[0]] || '');
+          const label = inline.content.split('\n')[0].trim().slice(0, 80);
+          box.content = `<input type="checkbox" class="mdr-task" data-task-line="${t.map[0]}"${checked ? ' checked' : ''}${live ? '' : ' disabled'} aria-label="${esc(label || (checked ? 'Done' : 'To do'))}">`;
           (inline.children ||= []).unshift(box);
           addClass(t, 'mdr-task-item');
           for (let j = i - 1; j >= 0; j--) {
@@ -119,11 +143,11 @@ export function gfmPlugin(md: MarkdownIt): void {
         }
       }
 
-      // GitHub alerts: a blockquote whose first line is [!NOTE] and friends.
-      if (t.type === 'blockquote_open' && tokens[i + 1]?.type === 'paragraph_open' && tokens[i + 2]?.type === 'inline') {
+      // GitHub alerts: a top-level blockquote whose first line is only [!NOTE] and friends.
+      if (t.type === 'blockquote_open' && t.level === 0 && tokens[i + 1]?.type === 'paragraph_open' && tokens[i + 2]?.type === 'inline') {
         const inline = tokens[i + 2];
         const m = ALERT.exec(inline.content);
-        if (m) {
+        if (m && /^[ \t]*(\n|$)/.test(inline.content.slice(m[0].length))) {
           const kind = m[1].toLowerCase();
           let n = m[0].length;
           if (inline.content[n] === '\n') n++;
@@ -139,7 +163,7 @@ export function gfmPlugin(md: MarkdownIt): void {
           inline.content = inline.content.slice(n);
           addClass(t, `mdr-alert mdr-alert-${kind}`);
           const title = new state.Token('html_block', '', 0);
-          title.content = `<div class="mdr-alert-title">${ALERT_TITLES[kind]}</div>\n`;
+          title.content = `<div class="mdr-alert-title mdr-ui">${ALERT_TITLES[kind]}</div>\n`;
           tokens.splice(i + 1, 0, title);
         }
       }

@@ -190,7 +190,7 @@ export class ReviewSession {
           this.assertEditable();
           this.recorded(() => toggleTask(this.ctx.mdPath, msg.line, msg.checked));
         } finally {
-          this.render(); // also puts the checkbox back if the write was refused
+          this.render(); // the webview repaints even if the HTML is unchanged, so a refused click is undone
         }
         return;
       case 'undo':

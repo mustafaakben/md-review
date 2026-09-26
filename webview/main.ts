@@ -34,6 +34,8 @@ let deferredPaint = false;
 let painted: Map<string, { status: Status; start: number; end: number }> | null = null;
 let paintedText = '';
 let docStale = false;
+/** The task checkbox to refocus after the repaint its click causes. */
+let focusTask: string | null = null;
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
@@ -150,6 +152,10 @@ function paint() {
   renderSidebar();
   afterPaint();
   window.scrollTo(0, y);
+  if (focusTask !== null) {
+    (doc.querySelector(`input.mdr-task[data-task-line="${focusTask}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
+    focusTask = null;
+  }
 }
 
 /**
@@ -497,6 +503,9 @@ doc.addEventListener('click', (e) => {
   // Task list checkbox: the host flips `[ ]`/`[x]` on that source line and re-renders.
   if (t instanceof HTMLInputElement && t.classList.contains('mdr-task')) {
     if (editing || inline) return e.preventDefault();
+    // Repaint whatever comes back, so a refused write unticks the box again.
+    docStale = true;
+    focusTask = t.dataset.taskLine ?? null;
     post({ type: 'toggleTask', line: Number(t.dataset.taskLine), checked: t.checked });
     return;
   }
