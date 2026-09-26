@@ -59,7 +59,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
     const session = new ReviewSession({
       mdPath,
-      author: () => cfg().get<string>('author') || os.userInfo().username,
+      author: () => cfg().get<string>('author') || systemUser(),
       showResolved: () => cfg().get<boolean>('showResolved', true),
       post: (m) => void webview.postMessage(m),
       resolveImage: (src) => webview.asWebviewUri(vscode.Uri.file(path.resolve(dir, src))).toString(),
@@ -168,6 +168,20 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <title>MD Review</title></head>
 <body data-reading-theme="${prefs.theme}" data-reading-font="${prefs.font}" data-prefs="${attr(JSON.stringify(prefs))}"><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
+}
+
+/**
+ * The OS user name. os.userInfo() throws when the user has no passwd entry,
+ * as in many dev containers and CI images that run under an arbitrary uid.
+ */
+function systemUser(): string {
+  try {
+    const name = os.userInfo().username;
+    if (name) return name;
+  } catch {
+    // fall through
+  }
+  return process.env.USER || process.env.USERNAME || 'Reviewer';
 }
 
 /** Stored reading preferences, with anything unexpected replaced by the default. */

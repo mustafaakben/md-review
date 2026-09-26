@@ -13,6 +13,23 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), and Add Claude Code Skill is off.",
+      "restrictedConfigurations": [
+        "mdReview.agent.command",
+        "mdReview.agent.launch"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "MD Review reads and writes the Markdown file and its comments on disk."
+    }
+  },
   "contributes": {
     "customEditors": [
       {
