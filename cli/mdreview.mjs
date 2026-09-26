@@ -93,6 +93,25 @@ function mutate(md, fn) {
   }
   return data;
 }
+// Mark the thread an agent is on, so the viewer can show "Claude is working"
+// there; reply and resolve clear it. Moving on clears our older marks.
+function claim(md, id) {
+  mutate(md, (d) => {
+    for (const x of d.comments) {
+      if (x.id === id) {
+        x.workingAt = now();
+        x.workingBy = author;
+      } else if (x.workingBy === author) {
+        delete x.workingAt;
+        delete x.workingBy;
+      }
+    }
+  });
+}
+function unclaim(c) {
+  delete c.workingAt;
+  delete c.workingBy;
+}
 function find(data, cid) {
   const c = (data.comments || []).find((x) => x.id === cid);
   if (!c) {
@@ -441,6 +460,7 @@ switch (cmd) {
       break;
     }
     const { md, c } = open[0];
+    if (awaits(c)) claim(md, c.id); // not a thread that's waiting on the reviewer (--all)
     const ctx = contextOf(md, c);
     if (asJson) {
       console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1, waiting }, null, 2));
@@ -460,6 +480,7 @@ switch (cmd) {
       process.exit(2);
     }
     const c = find(read(md), id);
+    if (c.status === 'submitted' && awaits(c)) claim(md, id);
     const ctx = contextOf(md, c);
     console.log(asJson ? JSON.stringify({ comment: c, ...ctx }, null, 2) : describeWithContext(c, ctx));
     break;
@@ -473,7 +494,11 @@ switch (cmd) {
   case 'reply': {
     const [mdArg, id, text] = rest;
     if (!mdArg || !id || !text) usage();
-    mutate(mdOf(mdArg), (d) => find(d, id).replies.push({ id: newId('r'), author, createdAt: now(), body: text }));
+    mutate(mdOf(mdArg), (d) => {
+      const c = find(d, id);
+      c.replies.push({ id: newId('r'), author, createdAt: now(), body: text });
+      unclaim(c);
+    });
     console.log(`Replied to ${id}`);
     break;
   }
@@ -485,6 +510,7 @@ switch (cmd) {
       if (text) c.replies.push({ id: newId('r'), author, createdAt: now(), body: text });
       c.status = 'resolved';
       c.resolvedAt = now();
+      unclaim(c);
     });
     console.log(`Resolved ${id}`);
     break;

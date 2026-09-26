@@ -19,7 +19,21 @@ export type ToWebview =
   | { type: 'toast'; message: string }
   | { type: 'agentPrompt'; prompt: string; count: number }
   | { type: 'prefs'; prefs: Record<string, unknown> }
+  | { type: 'round'; round: Round | null }
   | { type: 'error'; message: string };
+
+/**
+ * The threads handed to the agent by the last Send, and how far it has got. A
+ * thread is done once it's resolved or the agent has the last word (a question
+ * back to the reviewer).
+ */
+export interface Round {
+  total: number;
+  done: number;
+  resolved: number;
+  questions: number;
+  finished: boolean;
+}
 
 export type FromWebview =
   | { type: 'ready' }
@@ -39,7 +53,8 @@ export type FromWebview =
   | { type: 'redo' }
   | { type: 'sendToAgent'; id?: string }
   | { type: 'setPrefs'; prefs: Record<string, unknown> }
-  | { type: 'composing'; on: boolean };
+  | { type: 'composing'; on: boolean }
+  | { type: 'dismissRound' };
 
 export interface HostContext {
   mdPath: string;
@@ -67,6 +82,8 @@ export interface HostContext {
   setPrefs?(prefs: Record<string, unknown>): void;
   /** Absolute path to cli/mdreview.mjs, if available. */
   cliPath?: string;
+  /** Tell the user something happened while they may be looking elsewhere (the view isn't focused). */
+  notify?(message: string): void;
 }
 
 export class ReviewSession {
@@ -74,6 +91,8 @@ export class ReviewSession {
   private lastRendered = '';
   private watched = '';
   private history = new EditHistory();
+  /** The threads of the last Send to Claude; once finished, the summary stays as it was until dismissed. */
+  private round: { ids: string[]; summary?: Round } | null = null;
 
   constructor(private ctx: HostContext) {}
 
@@ -117,6 +136,30 @@ export class ReviewSession {
       return;
     }
     this.ctx.post({ type: 'comments', data, author: this.ctx.author(), showResolved: this.ctx.showResolved() });
+    this.updateRound(data);
+  }
+
+  private updateRound(data: store.Sidecar): void {
+    if (!this.round) return;
+    if (this.round.summary) return this.ctx.post({ type: 'round', round: this.round.summary });
+    const by = new Map(data.comments.map((c) => [c.id, c]));
+    const round: Round = { total: 0, done: 0, resolved: 0, questions: 0, finished: false };
+    for (const id of this.round.ids) {
+      const c = by.get(id);
+      if (!c) continue; // deleted: no longer part of the round
+      round.total++;
+      if (c.status === 'resolved') round.resolved++;
+      else if (c.status === 'submitted' && !store.awaitsAgent(c)) round.questions++;
+      else if (c.status === 'submitted') continue;
+      round.done++; // a draft again (reviewer took it back) counts as done
+    }
+    round.finished = round.done === round.total;
+    if (round.finished && round.total) {
+      const q = round.questions ? `, ${round.questions} question${round.questions === 1 ? '' : 's'} for you` : '';
+      this.ctx.notify?.(`Claude finished ${path.basename(this.ctx.mdPath)}: ${round.resolved} resolved${q}.`);
+      this.round.summary = round;
+    }
+    this.ctx.post({ type: 'round', round: round.total ? round : null });
   }
 
   /** Called by a file watcher when the sidecar changes on disk. */
@@ -211,6 +254,9 @@ export class ReviewSession {
         return this.undoRedo(msg.type);
       case 'sendToAgent':
         return this.sendToAgent(msg.id);
+      case 'dismissRound':
+        this.round = null;
+        return this.ctx.post({ type: 'round', round: null });
       case 'setPrefs':
         this.ctx.setPrefs?.(msg.prefs);
         return;
@@ -271,6 +317,13 @@ export class ReviewSession {
       this.ctx.post({ type: 'toast', message: 'No open comments to send. Add a comment first.' });
       return;
     }
+    // Only threads that are actually waiting on the agent count toward the round.
+    const ids = comments.filter((c) => store.awaitsAgent(c)).map((c) => c.id);
+    // Ask Claude on one thread while a round is still running adds to that round.
+    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
+    else this.round = ids.length ? { ids } : null;
+    if (this.round) this.updateRound(data);
+    else this.ctx.post({ type: 'round', round: null });
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
       cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
