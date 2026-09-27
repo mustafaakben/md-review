@@ -1262,19 +1262,24 @@ export class ReviewSession {
     const label = agent === 'codex' ? 'Codex' : 'Claude';
     this.starting = resume ? `Resuming ${label}…` : `Starting ${label}…`;
     this.postAgent();
-    agents.start(agent, resume).then(
-      (b) => {
+    const failed = (e: unknown) => {
+      this.starting = '';
+      this.waiting = null;
+      this.postAgent();
+      this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+    };
+    agents
+      .start(agent, resume)
+      .then((b) => {
         this.starting = '';
-        if (!b) return this.postAgent();
+        if (!b) {
+          // Nothing started (the host said why): a Send waiting for it is dropped, not sent somewhere later.
+          this.waiting = null;
+          return this.postAgent();
+        }
         this.bindTo(b);
-        this.ctx.post({ type: 'toast', message: `Connected to ${label}${b.name ? ` · ${b.name}` : ''}.` });
-      },
-      (e) => {
-        this.starting = '';
-        this.postAgent();
-        this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
-      },
-    );
+      }, failed)
+      .catch(failed);
   }
 
   /** Live delivery: comments saved within a moment of each other go as one message. */

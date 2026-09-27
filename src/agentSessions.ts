@@ -277,10 +277,20 @@ export function listSessions(folder: string, home = os.homedir()): AgentSession[
   return [...live, ...pastClaudeSessions(folder, home).filter((s) => !liveIds.has(s.id)), ...codexSessions(folder, home)];
 }
 
+/** Codex lookups for the chip's refresh read many rollout files; they are reused for a little while. */
+const codexCache = new Map<string, { at: number; list: AgentSession[] }>();
+const CODEX_CACHE_MS = 20000;
+
 /** The current state of a bound session, or undefined when it's gone from the list. */
 export function findSession(folder: string, b: Binding, home = os.homedir()): AgentSession | undefined {
   if (b.agent === 'claude') return liveClaudeSessions(folder, home).find((s) => s.id === b.id) ?? pastClaudeSessions(folder, home, 50).find((s) => s.id === b.id);
-  return codexSessions(folder, home, { days: 14, limit: 200 }).find((s) => s.id === b.id);
+  const key = `${home}\0${folder}`;
+  let hit = codexCache.get(key);
+  if (!hit || Date.now() - hit.at > CODEX_CACHE_MS || !hit.list.some((s) => s.id === b.id)) {
+    hit = { at: Date.now(), list: codexSessions(folder, home, { days: 14, limit: 200 }) };
+    codexCache.set(key, hit);
+  }
+  return hit.list.find((s) => s.id === b.id);
 }
 
 export class DeliveryError extends Error {}
