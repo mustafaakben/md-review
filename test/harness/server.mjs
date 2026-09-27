@@ -23,14 +23,32 @@ const dir = path.dirname(md);
 const clients = new Set();
 
 let prefs = {}; // reading prefs, kept for the life of the server
+// Agent sessions: the binding and delivery mode live as long as the server.
+// There's no terminal to open here, so starting a session hands the command
+// to the page, which copies it for the user to run.
+let binding;
+let delivery = 'onSend';
+const post = (m) => {
+  const line = `data: ${JSON.stringify(m)}\n\n`;
+  for (const c of clients) c.write(line);
+};
+const agents = lib.createAgentHost({
+  folder: () => dir,
+  fileName: path.basename(md),
+  getBinding: () => binding,
+  setBinding: (b) => (binding = b),
+  getDelivery: () => delivery,
+  setDelivery: (d) => (delivery = d),
+  command: (agent) => agent,
+  handOver: (command) => post({ type: 'handOver', command }),
+});
 const session = new lib.ReviewSession({
   mdPath: md,
   author: () => os.userInfo().username,
   showResolved: () => true,
-  post: (m) => {
-    const line = `data: ${JSON.stringify(m)}\n\n`;
-    for (const c of clients) c.write(line);
-  },
+  post,
+  agents,
+  runAgent: (prompt) => agents.deliverPrompt(prompt),
   resolveImage: (src) => '/doc/' + src.split('/').map(encodeURIComponent).join('/'),
   getText: () => fs.readFileSync(md, 'utf8').replace(/^﻿/, ''),
   isDirty: () => false,

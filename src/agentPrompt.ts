@@ -31,6 +31,17 @@ function rel(cwd: string, p: string): string {
   return !r || r.startsWith('..') || path.isAbsolute(r) ? p : r.split(path.sep).join('/');
 }
 
+/**
+ * `node <cli>` as the agent should type it. Inside the working folder it is a
+ * bare relative path (`node .claude/skills/md-review/mdreview.mjs`), which a
+ * permission rule like `Bash(node .claude/skills/md-review/mdreview.mjs:*)`
+ * matches; elsewhere the full path in quotes.
+ */
+export function cliCommand(cwd: string, cliPath: string, quote = (p: string) => `"${p}"`): string {
+  const r = rel(cwd, cliPath);
+  return r !== cliPath && /^[\w./-]+$/.test(r) ? `node ${r}` : `node ${quote(cliPath)}`;
+}
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 const ANCHOR_NOTE =
@@ -77,15 +88,15 @@ export function buildAgentPrompt(o: PromptOptions): string {
   const side = md + '.comments.json';
   const one = o.comments.length === 1 ? o.comments[0] : null;
   const scope = one ? `the review comment with id ${one.id}` : `the ${plural(o.comments.length, 'submitted review comment')}`;
-  const cli = o.cliPath ? `node "${o.cliPath}"` : undefined;
+  const cli = o.cliPath ? cliCommand(o.cwd, o.cliPath) : undefined;
   const lines = [`Please address ${scope} on ${md}.`, '', `The comments live in ${side} (MD Review sidecar, schema v1). ${ANCHOR_NOTE}`, '', ...steps(md, o.suggest, cli)];
   if (cli) {
     lines.push(
       '',
       'A helper CLI does the sidecar writes safely:',
       `  ${cli} context "${md}" <id>    # the comment plus the source lines its quote is on`,
-      `  ${cli} reply "${md}" <id> "what you changed"`,
-      `  ${cli} resolve "${md}" <id>`,
+      `  ${cli} resolve "${md}" <id> "what you changed"    # reply and resolve in one step`,
+      `  ${cli} reply "${md}" <id> "your question"    # only when you need the reviewer's answer`,
       ...(o.suggest ? [`  ${cli} suggest "${md}" <id> "replacement for the quote" "why"`] : []),
     );
   }
@@ -110,7 +121,7 @@ export function buildFolderPrompt(o: FolderPromptOptions): string {
   const here = path.relative(o.cwd, o.folder) === '';
   const folder = here ? '.' : rel(o.cwd, o.folder);
   const total = o.files.reduce((n, f) => n + f.open, 0);
-  const cli = `node "${o.cliPath}"`;
+  const cli = cliCommand(o.cwd, o.cliPath);
   return [
     `Please address the ${plural(total, 'open MD Review comment')} in ${plural(o.files.length, 'file')} ${here ? 'in this folder' : `under ${folder}`}:`,
     ...o.files.map((f) => `- ${rel(o.cwd, f.mdPath)} (${f.open} open)`),

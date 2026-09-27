@@ -9,6 +9,8 @@ export * from './agentPrompt';
 export * from './reviewPresets';
 export { insideRealRoots, loadBibliography, parseBibTeX, parseCslJson, realRoots } from './bibliography';
 export * from './agentLaunch';
+export * from './agentSessions';
+export { createAgentHost } from './agentHost';
 export * from './redlines';
 export * from './wordDiff';
 export * from './baselineStore';

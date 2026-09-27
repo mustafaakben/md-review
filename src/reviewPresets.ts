@@ -1,6 +1,7 @@
 // "Review with Claude": short built-in reviewer briefs, extra ones from
 // .mdreview/reviewers/*.md in the workspace, and the prompt that starts a
 // review. Claude only adds draft comments; the reviewer triages them.
+import { cliCommand } from './agentPrompt';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -164,7 +165,7 @@ export function buildReviewPrompt(o: ReviewPromptOptions): string {
   const md = rel(o.cwd, o.mdPath);
   const file = shellArg(md);
   const max = o.max ?? 12;
-  const cli = o.cliPath ? `node ${shellArg(o.cliPath)}` : 'node .claude/skills/md-review/mdreview.mjs';
+  const cli = o.cliPath ? cliCommand(o.cwd, o.cliPath, shellArg) : 'node .claude/skills/md-review/mdreview.mjs';
   const runOpt = o.run ? ` --run ${o.run}` : ''; // hex, safe unquoted
   const brief = o.preset.instructions.trim();
   return [

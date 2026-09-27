@@ -17,6 +17,39 @@ import * as redlines from './redlines';
 import { BaselineHook, memoryBaselines } from './baselineStore';
 import { diffSeq } from './wordDiff';
 import { SIDECAR_RETRY_MS } from './fileWatch';
+import type { AgentKind, AgentSession, Binding } from './agentSessions';
+
+/** When comments reach the agent: on Send (and Ask), or each one as it's saved. */
+export type Delivery = 'onSend' | 'live';
+
+/** The agent session a document talks to, as the view shows it. */
+export interface AgentState {
+  bound: (Binding & { live?: boolean; status?: string }) | null;
+  delivery: Delivery;
+  /** Filled when the session menu asked for the list. */
+  sessions?: AgentSession[];
+  /** Open the session menu: a Send is waiting for a session to go to. */
+  ask?: boolean;
+  /** A session is being started or waited for. */
+  starting?: string;
+}
+
+/**
+ * Running agent sessions and which one this document's messages go to. The
+ * host keeps the binding (per workspace folder in VS Code) and starts sessions
+ * (a terminal in VS Code; in the browser, the command is handed to the user).
+ */
+export interface AgentHost {
+  list(): AgentSession[];
+  binding(): Binding | undefined;
+  bind(b: Binding | undefined): void;
+  /** The bound session's current state, if it can be found. */
+  state(b: Binding): AgentSession | undefined;
+  /** Start a new session, or resume `resume`. Resolves to its binding, or null when nothing was started (the host said why). */
+  start(agent: AgentKind, resume?: string): Promise<Binding | null>;
+  delivery(): Delivery;
+  setDelivery(d: Delivery): void;
+}
 
 /** What the Changes view paints: the hunks against the current baseline. `v` names this comparison. */
 export interface Changes {
@@ -63,6 +96,9 @@ export type ToWebview =
   | { type: 'history'; canUndo: boolean; canRedo: boolean }
   | { type: 'toast'; message: string }
   | { type: 'agentPrompt'; prompt: string; count: number; review?: string }
+  | { type: 'agent'; agent: AgentState }
+  /** Browser mode: a command for the user to run in a terminal (the view copies it). */
+  | { type: 'handOver'; command: string }
   | { type: 'reviewers'; presets: { id: string; label: string; path?: string }[] }
   | { type: 'prefs'; prefs: Record<string, unknown> }
   | { type: 'round'; round: Round | null }
@@ -142,7 +178,15 @@ export type FromWebview =
   /** Revert or keep hunk `i` of the comparison `v`. */
   | { type: 'revertChange'; v: string; i: number }
   | { type: 'keepChange'; v: string; i: number }
-  | { type: 'acceptChanges' };
+  | { type: 'acceptChanges' }
+  /** The session menu opened: list the sessions it can bind to. */
+  | { type: 'listSessions' }
+  | { type: 'bindSession'; agent: AgentKind; id: string; name?: string }
+  | { type: 'unbindSession' }
+  | { type: 'startSession'; agent: AgentKind; resume?: string }
+  | { type: 'setDelivery'; delivery: Delivery }
+  /** Submit drafts and copy the prompt instead of sending it: for any other agent. */
+  | { type: 'copyPrompt' };
 
 export interface HostContext {
   mdPath: string;
@@ -162,12 +206,14 @@ export interface HostContext {
   /** Re-render when any of these files (the bibliography) changes. */
   watchFiles?(files: string[]): void;
   /**
-   * Hand the prompt to an agent (e.g. start Claude Code in a terminal). Returns
-   * a status line for the user ('' when it already told them), or null when no
-   * agent was started. When absent, the prompt goes back to the webview, which
-   * copies it to the clipboard.
+   * Hand the prompt to the agent (deliver it into the bound session). Returns
+   * a status line for the user ('' when it already told them), or null when
+   * nothing was delivered. When absent, the prompt goes back to the webview,
+   * which copies it to the clipboard.
    */
-  runAgent?(prompt: string): string | null;
+  runAgent?(prompt: string): string | null | Promise<string | null>;
+  /** Agent sessions and the binding; when absent, Send goes straight to runAgent. */
+  agents?: AgentHost;
   /** Working directory for the agent; defaults to the Markdown file's folder. */
   agentCwd?(): string;
   /** Per-user view preferences (reading theme, zoom), shared by every file. */
@@ -194,6 +240,9 @@ function readText(p: string): string | undefined {
     return undefined;
   }
 }
+
+/** Comments saved this close together in live mode go to the agent as one message. */
+const LIVE_COALESCE_MS = 1500;
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -284,6 +333,14 @@ export class ReviewSession {
   private touched: { id: string; ids: string[] } | null = null;
   /** The blocks of the last render's parse. */
   private curBlocks: { tokens: unknown; blocks: redlines.Block[] } | null = null;
+
+  /** A Send or review waiting for a session to be picked. */
+  private waiting: (() => void) | null = null;
+  /** 'Starting Claude…' while a session starts. */
+  private starting = '';
+  /** Threads saved in live mode, sent together after a moment. */
+  private live = new Set<string>();
+  private liveTimer = false;
 
   constructor(private ctx: HostContext) {}
 
@@ -762,15 +819,22 @@ export class ReviewSession {
         this.changesOn = false; // and starts with Changes off
         // Document last, so the view paints once with its look and comments.
         if (this.ctx.getPrefs) this.ctx.post({ type: 'prefs', prefs: this.ctx.getPrefs() });
+        this.postAgent();
         this.sendComments();
         this.postHistory();
         this.render(true);
         return;
-      case 'addComment':
-        return this.mutate((d) => {
+      case 'addComment': {
+        let id = '';
+        this.mutate((d) => {
           const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
           if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
+          id = c.id;
         });
+        // Live: praise needs nothing from the agent, so it stays a draft.
+        if (this.liveOn() && msg.meta?.kind !== 'praise') this.queueLive(id);
+        return;
+      }
       case 'applySuggestion': {
         this.assertEditable();
         // Kept with the undo entry, so Undo and Redo move the thread along with the text.
@@ -811,8 +875,16 @@ export class ReviewSession {
         });
       case 'setMeta':
         return this.mutate((d) => store.setMeta(d, msg.id, msg.meta));
-      case 'reply':
-        return this.mutate((d) => void store.addReply(d, msg.id, author, msg.body));
+      case 'reply': {
+        let toAgent = false;
+        this.mutate((d) => {
+          store.addReply(d, msg.id, author, msg.body);
+          toAgent = store.find(d, msg.id).status === 'submitted';
+        });
+        // Live: answering the agent on an open thread goes straight back to it.
+        if (toAgent && this.liveOn()) this.queueLive(msg.id);
+        return;
+      }
       case 'setStatus':
         return this.mutate((d) => store.setStatus(d, msg.id, msg.status));
       case 'editBody':
@@ -874,7 +946,21 @@ export class ReviewSession {
       case 'redo':
         return this.undoRedo(msg.type);
       case 'sendToAgent':
-        return this.sendToAgent(msg.id);
+        return this.sendToAgent(msg.id ? [msg.id] : undefined);
+      case 'copyPrompt':
+        return this.sendToAgent(undefined, true);
+      case 'listSessions':
+        return this.postAgent(true);
+      case 'bindSession':
+        return this.bindTo({ agent: msg.agent, id: msg.id, name: msg.name });
+      case 'unbindSession':
+        this.waiting = null;
+        return this.bindTo(undefined);
+      case 'startSession':
+        return this.startSession(msg.agent, msg.resume);
+      case 'setDelivery':
+        this.ctx.agents?.setDelivery(msg.delivery);
+        return this.postAgent();
       case 'dismissRound':
         if (msg.which === 'review') {
           this.review = null;
@@ -1014,56 +1100,178 @@ export class ReviewSession {
   }
 
   /**
-   * Submit what's pending and hand the open threads to an agent. With an id,
-   * only that thread is sent (and submitted if it was a draft).
+   * Submit what's pending and hand the open threads to the agent. With ids,
+   * only those threads are sent (and submitted if they were drafts). `copy`
+   * puts the prompt on the clipboard instead of sending it.
    */
-  private sendToAgent(id?: string): void {
+  private sendToAgent(ids?: string[], copy = false): void {
+    // No session yet: ask for one, and send once it's picked.
+    if (!copy && this.needsSession(() => this.sendToAgent(ids))) return;
     const { data, written } = store.mutate(this.ctx.mdPath, (d) => {
-      if (id) {
-        const c = store.find(d, id);
-        store.keepAgentDraft(d, id, this.ctx.author()); // acting on Claude's draft makes it yours
-        if (c.status === 'draft') store.setStatus(d, id, 'submitted');
+      if (ids) {
+        for (const id of ids) {
+          const c = store.find(d, id);
+          store.keepAgentDraft(d, id, this.ctx.author()); // acting on Claude's draft makes it yours
+          if (c.status === 'draft') store.setStatus(d, id, 'submitted');
+        }
       } else store.submitDrafts(d);
     });
     this.lastSidecarWrite = written;
     this.sendComments();
-    const comments = data.comments.filter((c) => (id ? c.id === id : c.status === 'submitted'));
+    const comments = data.comments.filter((c) => (ids ? ids.includes(c.id) : c.status === 'submitted'));
     if (!comments.length) {
       this.ctx.post({ type: 'toast', message: 'No open comments to send. Add a comment first.' });
       return;
     }
-    // The copy the Changes view compares against, taken before Claude can start.
+    // The copy the Changes view compares against, taken before the agent can start.
     const before = this.ctx.getText();
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
-      cwd: this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath),
+      cwd: this.agentCwd(),
       comments,
-      cliPath: this.ctx.cliPath,
+      cliPath: this.cliPath(),
       suggest: this.ctx.suggestMode?.(),
     });
-    if (this.ctx.runAgent) {
-      const status = this.ctx.runAgent(prompt);
-      // Nothing started (the host said why): no round to follow.
+    const started = () => {
+      // Only threads that are actually waiting on the agent count toward the round.
+      const waiting = comments.filter((c) => store.awaitsAgent(c));
+      const sent = waiting.map((c) => c.id);
+      this.snapshot(waiting, before);
+      // Ask on one thread (or a live send) while a round is still running adds to that round.
+      if (ids && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...sent])];
+      else this.round = sent.length ? { ids: sent } : null;
+      if (this.round) this.updateRound(data);
+      else this.ctx.post({ type: 'round', round: null });
+    };
+    if (copy || !this.ctx.runAgent) {
+      this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
+      return started();
+    }
+    this.hand(prompt, started);
+  }
+
+  /**
+   * Give the prompt to runAgent, then run `started` if it was delivered. A
+   * host that answers at once (tests, the clipboard) is handled at once.
+   */
+  private hand(prompt: string, started: () => void): void {
+    const done = (status: string | null) => {
+      // Nothing delivered (the host said why): nothing to follow.
       if (status === null) return;
       if (status) this.ctx.post({ type: 'toast', message: status });
-    } else this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
-    // Only threads that are actually waiting on the agent count toward the round.
-    const waiting = comments.filter((c) => store.awaitsAgent(c));
-    const ids = waiting.map((c) => c.id);
-    this.snapshot(waiting, before);
-    // Ask Claude on one thread while a round is still running adds to that round.
-    if (id && this.round && !this.round.summary) this.round.ids = [...new Set([...this.round.ids, ...ids])];
-    else this.round = ids.length ? { ids } : null;
-    if (this.round) this.updateRound(data);
-    else this.ctx.post({ type: 'round', round: null });
+      started();
+    };
+    let r: string | null | Promise<string | null>;
+    try {
+      r = this.ctx.runAgent!(prompt);
+    } catch (e) {
+      this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+      return;
+    }
+    if (r instanceof Promise) {
+      r.then(done, (e) => {
+        this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+        this.postAgent(); // the session may have gone: show it
+      });
+    } else done(r);
+  }
+
+  /**
+   * True (and `then` kept for later) when there are sessions to choose from
+   * but none is bound: the view opens the session menu.
+   */
+  private needsSession(then: () => void): boolean {
+    const agents = this.ctx.agents;
+    if (!agents || agents.binding()) return false;
+    this.waiting = then;
+    this.postAgent(true, true);
+    return true;
+  }
+
+  /** The agent state for the view: the binding, and the session list when asked for. */
+  private postAgent(list = false, ask = false): void {
+    const agents = this.ctx.agents;
+    if (!agents) return;
+    const b = agents.binding();
+    let bound: AgentState['bound'] = null;
+    if (b) {
+      const s = agents.state(b);
+      bound = { ...b, name: s?.name ?? b.name, live: s?.live ?? false, status: s?.status };
+    }
+    let sessions: AgentSession[] | undefined;
+    if (list) {
+      try {
+        sessions = agents.list();
+      } catch {
+        sessions = [];
+      }
+    }
+    this.ctx.post({ type: 'agent', agent: { bound, delivery: agents.delivery(), sessions, ask: ask || undefined, starting: this.starting || undefined } });
+  }
+
+  private bindTo(b: Binding | undefined): void {
+    this.ctx.agents?.bind(b);
+    this.postAgent();
+    const then = this.waiting;
+    this.waiting = null;
+    if (b && then) then();
+  }
+
+  private startSession(agent: AgentKind, resume?: string): void {
+    const agents = this.ctx.agents;
+    if (!agents) return;
+    const label = agent === 'codex' ? 'Codex' : 'Claude';
+    this.starting = resume ? `Resuming ${label}…` : `Starting ${label}…`;
+    this.postAgent();
+    agents.start(agent, resume).then(
+      (b) => {
+        this.starting = '';
+        if (!b) return this.postAgent();
+        this.bindTo(b);
+        this.ctx.post({ type: 'toast', message: `Connected to ${label}${b.name ? ` · ${b.name}` : ''}.` });
+      },
+      (e) => {
+        this.starting = '';
+        this.postAgent();
+        this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+      },
+    );
+  }
+
+  /** Live delivery: comments saved within a moment of each other go as one message. */
+  private queueLive(id: string): void {
+    this.live.add(id);
+    if (this.liveTimer) return;
+    this.liveTimer = true;
+    (this.ctx.schedule ?? ((fn, ms) => void setTimeout(fn, ms)))(() => {
+      this.liveTimer = false;
+      const ids = [...this.live];
+      this.live.clear();
+      if (ids.length) this.sendToAgent(ids);
+    }, LIVE_COALESCE_MS);
+  }
+
+  private liveOn(): boolean {
+    const a = this.ctx.agents;
+    return !!a && !!this.ctx.runAgent && a.delivery() === 'live' && !!a.binding();
   }
 
   private agentCwd(): string {
     return this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath);
   }
 
+  /** The helper CLI for prompts: the workspace's copy (installed by Connect) when there is one, so no prompt is needed to run it. */
+  private cliPath(): string | undefined {
+    const local = path.join(this.agentCwd(), '.claude', 'skills', 'md-review', 'mdreview.mjs');
+    try {
+      if (fs.statSync(local).isFile()) return local;
+    } catch {}
+    return this.ctx.cliPath;
+  }
+
   /** Start Claude as first reviewer: it reads the file and leaves drafts for you to triage. */
   private startReview(id: string, instruction?: string): void {
+    if (this.needsSession(() => this.startReview(id, instruction))) return;
     const cwd = this.agentCwd();
     // A workspace brief is read here, only for the reviewer picked.
     const preset = id === 'custom' ? { label: 'Custom', instructions: (instruction || '').trim().slice(0, 2000) } : findPreset(cwd, id);
@@ -1077,17 +1285,18 @@ export class ReviewSession {
     } catch {} // a broken sidecar is reported by sendComments
     const max = Math.max(1, Math.min(50, Math.round(this.ctx.reviewComments?.() ?? 12)));
     const run = crypto.randomBytes(4).toString('hex');
-    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.ctx.cliPath, existing, run });
+    const prompt = buildReviewPrompt({ mdPath: this.ctx.mdPath, cwd, preset, max, cliPath: this.cliPath(), existing, run });
     const since = store.now();
-    if (this.ctx.runAgent) {
-      const status = this.ctx.runAgent(prompt);
-      // Nothing started (the host said why): no review to follow.
-      if (status === null) return;
-      if (status) this.ctx.post({ type: 'toast', message: status });
-    } else this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
-    // A Send to Claude round still running keeps its own banner.
-    this.review = { run, since, max, ids: new Set(), finished: false };
-    this.sendComments();
+    const started = () => {
+      // A Send round still running keeps its own banner.
+      this.review = { run, since, max, ids: new Set(), finished: false };
+      this.sendComments();
+    };
+    if (!this.ctx.runAgent) {
+      this.ctx.post({ type: 'agentPrompt', prompt, count: 0, review: preset.label });
+      return started();
+    }
+    this.hand(prompt, started);
   }
 
   /**

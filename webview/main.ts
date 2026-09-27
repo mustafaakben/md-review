@@ -9,6 +9,7 @@ import { createHealth, orphanRows, WordTargets } from './health';
 import { passes, authorsOf, filterBar, FilterState, StatusFilter, isAgentDraft } from './filters';
 import { Round, ReviewRun, roundBanner, reviewBanner, isWorking, nextExpiry, reviewLeft } from './round';
 import { createReviewMenu } from './review';
+import { createAgentMenu } from './agentMenu';
 import { Suggestion, suggestionBlock, suggestionEdit } from './suggest';
 import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet, NEXT_CHANGE } from './keys';
 import { blockAtY, reveal, settle, viewTop } from './reveal';
@@ -111,6 +112,7 @@ app.innerHTML = `
   <div id="mdr-changes" class="mdr-changes mdr-ui" role="region" aria-label="Changes" hidden></div>
   <div id="mdr-reading" class="mdr-reading-panel mdr-ui" role="dialog" aria-label="Reading view" hidden></div>
   <div id="mdr-review" class="mdr-review-panel mdr-ui" hidden></div>
+  <div id="mdr-agent" class="mdr-review-panel mdr-agent-panel mdr-ui" hidden></div>
   <div id="mdr-health" class="mdr-reading-panel mdr-health-panel mdr-ui" role="dialog" aria-label="Document health" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
@@ -120,7 +122,8 @@ app.innerHTML = `
         <div class="mdr-review-heading"><h2>Review</h2><button id="mdr-doc-comment" class="mdr-doc-comment" title="A comment about the whole document, not a passage" aria-label="Comment on document">Add note</button></div>
         <div class="mdr-filters"></div>
         <span class="mdr-counts mdr-sr"></span>
-        <div class="mdr-review-actions"><button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button><button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button></div>
+        <div class="mdr-review-actions"><button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button><button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and send the open threads to the connected agent session', 'Mod+Alt+Enter')}">Send to Claude</button></div>
+        <div class="mdr-agent-row"><button id="mdr-agent-btn" class="mdr-agent-chip" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-agent-menu"></button></div>
         <div class="mdr-review-options"><button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button><label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label></div>
       </div>
       <div id="mdr-round" class="mdr-round" role="status" aria-live="polite" hidden></div>
@@ -165,6 +168,7 @@ const reading = createReading(
   },
   (msg) => toast(msg),
 );
+const agentMenu = createAgentMenu(document.getElementById('mdr-agent-btn') as HTMLButtonElement, document.getElementById('mdr-agent')!, (m) => post(m), () => sendLabel());
 const reviewMenu = createReviewMenu(document.getElementById('mdr-review-btn')!, document.getElementById('mdr-review')!, (m) => post(m), () => setSidebarOpen(true));
 // The host puts the stored reading look into the page (see shell()).
 try {
@@ -205,17 +209,24 @@ const fmt = (iso: string | null) => {
 };
 const post = (m: unknown) => {
   const type = (m as { type: string }).type;
-  if (['sendToAgent', 'startReview', 'submitReview', 'applySuggestion', 'revertChange'].includes(type) && live.dirty) {
+  if (['sendToAgent', 'copyPrompt', 'startReview', 'submitReview', 'applySuggestion', 'revertChange'].includes(type) && live.dirty) {
     live.whenSaved(() => vscode.postMessage(m));
   } else vscode.postMessage(m);
 };
 
-function toast(msg: string, isError = false) {
+/** Drafts and open threads Send would hand over. */
+let sendable = 0;
+function sendLabel() {
+  sendBtn.disabled = sendable === 0;
+  sendBtn.textContent = `Send to ${agentMenu.name()}${sendable ? ` (${sendable})` : ''}`;
+}
+
+function toast(msg: string, isError = false, ms = isError ? 7000 : 2500) {
   toastEl.textContent = msg;
   toastEl.className = 'mdr-toast mdr-ui' + (isError ? ' error' : '');
   toastEl.hidden = false;
   clearTimeout((toastEl as any)._t);
-  (toastEl as any)._t = setTimeout(() => (toastEl.hidden = true), isError ? 7000 : 2500);
+  (toastEl as any)._t = setTimeout(() => (toastEl.hidden = true), ms);
 }
 
 const moreTools = document.getElementById('mdr-more') as HTMLDetailsElement;
@@ -566,9 +577,8 @@ function renderSidebar() {
   const sevCount: Record<string, number> = {};
   for (const c of comments) if (c.severity && passes(c, { ...filter, severity: '' }, showResolved)) sevCount[c.severity] = (sevCount[c.severity] || 0) + 1;
   filtersEl.innerHTML = filterBar(filter, authorsOf(comments), fc, sevCount);
-  const sendable = n.draft + n.submitted;
-  sendBtn.disabled = sendable === 0;
-  sendBtn.textContent = sendable ? `Send to Claude (${sendable})` : 'Send to Claude';
+  sendable = n.draft + n.submitted;
+  sendLabel();
 
   const visible = comments.filter((c) => c.id === revealed || passes(c, filter, showResolved));
   const byPos = (a: Comment, b: Comment) => positions.get(a.id)! - positions.get(b.id)!;
@@ -1942,13 +1952,20 @@ window.addEventListener('message', (ev) => {
         toast(
           !ok ? 'Could not copy the prompt.'
           : m.review ? `Review prompt (${m.review}) copied. Paste it into Claude Code.`
-          : `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into Claude Code.`,
+          : `Prompt for ${m.count} thread${m.count > 1 ? 's' : ''} copied. Paste it into your agent.`,
           !ok,
         ),
       );
       break;
     case 'reviewers':
       reviewMenu.setReviewers(m.presets || []);
+      break;
+    case 'agent':
+      agentMenu.set(m.agent);
+      break;
+    case 'handOver':
+      // Browser mode can't open a terminal: the user runs the command.
+      copyText(m.command).then((ok) => toast(`${ok ? 'Copied. ' : ''}Run this in a terminal: ${m.command}`, false, 20000));
       break;
     case 'prefs':
       reading.apply(m.prefs || {});

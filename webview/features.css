@@ -822,3 +822,37 @@ button.mdr-chip.on { color: var(--fg); border-color: transparent; background: va
 }
 .mdr-comment-tooltip { left: var(--mdr-tip-x, 50%); }
 .mdr-pop:not(.mdr-selection-action) { max-width: calc(100vw - 24px); }
+
+/* Agent chip and session menu: where comments go (see agentMenu.ts). */
+.mdr-agent-row { display: flex; }
+button.mdr-agent-chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; font-size: 11.5px; padding: 4px 9px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--fg);
+}
+button.mdr-agent-chip:hover { background: var(--soft); }
+.mdr-agent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mdr-agent-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.mdr-agent-dot[data-state="idle"] { background: #16a34a; }
+.mdr-agent-dot[data-state="busy"] { background: #d97706; }
+.mdr-agent-dot[data-state="off"] { background: transparent; border: 1px solid var(--muted); }
+.mdr-agent-dot[data-state="none"] { background: transparent; border: 1px dashed var(--muted); }
+.mdr-agent-dot[data-state="starting"] { background: var(--accent); animation: mdr-agent-pulse 1s ease-in-out infinite alternate; }
+@keyframes mdr-agent-pulse { from { opacity: .3; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mdr-agent-dot[data-state="starting"] { animation: none; } }
+.mdr-agent-live { flex: none; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); padding: 0 5px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mdr-agent-panel { width: 300px; max-height: min(460px, calc(100vh - 16px)); overflow-y: auto; }
+.mdr-agent-panel .mdr-rv-list button { display: flex; align-items: center; gap: 7px; width: 100%; }
+.mdr-agent-panel [role="menuitemradio"][aria-checked="true"] { background: var(--soft); font-weight: 600; }
+.mdr-agent-panel [role="menuitemradio"][data-delivery]::before { content: ''; flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--muted); box-sizing: border-box; }
+.mdr-agent-panel [role="menuitemradio"][data-delivery][aria-checked="true"]::before { border: 3px solid var(--accent); }
+.mdr-agent-tag { flex: none; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--soft); color: var(--muted); }
+.mdr-agent-tag[data-agent="claude"] { color: #c2410c; background: color-mix(in srgb, #c2410c 10%, transparent); }
+.mdr-agent-tag[data-agent="codex"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mdr-agent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdr-agent-meta { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); font-weight: 400; }
+.mdr-agent-empty { margin: 2px 8px 4px; color: var(--muted); font-size: 12px; }
+.mdr-agent-sep { height: 1px; margin: 6px 4px; background: var(--hairline, var(--border)); }
+@media (forced-colors: active) {
+  .mdr-agent-dot { forced-color-adjust: none; border: 1px solid CanvasText; }
+  .mdr-agent-panel [role="menuitemradio"][aria-checked="true"] { outline: 1px solid Highlight; }
+}
