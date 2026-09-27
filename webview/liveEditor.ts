@@ -16,7 +16,7 @@ const focusState = StateField.define({ create: () => false, update: (v, tr) => t
 const parser = new MarkdownIt({ html: false });
 interface Rich { from: number; to: number; html: string }
 interface Thread { id: string; anchor: { quote: string; lineStart: number; lineEnd: number }; status: string }
-export interface LiveSelection { quote: string; lineStart: number; lineEnd: number; rect: { left: number; bottom: number } }
+export interface LiveSelection { quote: string; lineStart: number; lineEnd: number; rect: { left: number; right: number; top: number; bottom: number }; atLineEnd: boolean }
 export interface Draft { original: string; text: string; changes: SourceChange[] }
 export interface LiveOptions {
   recovery?: Draft;
@@ -142,7 +142,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     const quote = holder.textContent?.trim() || '';
     const rect = view.coordsAtPos(to);
     if (!quote || !rect) return null;
-    return { quote, lineStart: view.state.doc.lineAt(from).number, lineEnd: view.state.doc.lineAt(to).number, rect };
+    return { quote, lineStart: view.state.doc.lineAt(from).number, lineEnd: view.state.doc.lineAt(to).number, rect, atLineEnd: !view.state.sliceDoc(to, view.state.doc.lineAt(to).to).trim() };
   }
   function remember() {
     if (baseline === null) return;
@@ -195,6 +195,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       },
       compositionend: () => { timer = setTimeout(flush, 600); },
       mouseup: () => { if (!commentGesture) setTimeout(() => options.selection(currentSelection()), 0); },
+      keyup: event => { if (event.key !== 'Escape') options.selection(currentSelection()); },
       mouseover: event => {
         if (commentGesture) return;
         const mark = (event.target as Element).closest('[data-thread]');

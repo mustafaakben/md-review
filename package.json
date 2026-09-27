@@ -1,7 +1,7 @@
 {
   "name": "md-review",
   "displayName": "MD Review",
-  "description": "Review Markdown with AI agents: select-and-comment threads stored in a sidecar JSON that Claude, Codex, or any script can read and answer, plus light editing that only rewrites the bytes you changed.",
+  "description": "Write and review Markdown in a continuous live canvas with autosave, contextual comment threads, and an AI-agent review workflow. Comments stay in a portable JSON sidecar.",
   "version": "0.1.0",
   "publisher": "mustafaakben",
   "license": "MIT",

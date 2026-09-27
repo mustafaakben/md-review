@@ -4,7 +4,7 @@
 
 MD Review is a VS Code extension that opens any `.md` file in a clean, rendered view. You select text and leave comments. When you press **Submit review**, the comments are written to a small JSON file next to your document, where Claude, Codex, or any script can read them, edit the Markdown, reply in the thread, and mark it resolved. The view updates live while the agent works.
 
-![MD Review: the outline, a rendered document with highlighted comments, and the comments pane with filters, Send to Claude, and a thread Claude replied to](docs/screenshot.png)
+![MD Review: charcoal outline, continuous Markdown canvas, and review threads beside the document](docs/screenshot.png)
 
 ```
 paper.md                   ← your document; comments never touch it
@@ -16,13 +16,13 @@ paper.md.comments.json     ← the comment threads (schema below)
 - A reading view with tables, footnotes, KaTeX math, and images (including pandoc `{width=…}` sizes).
 - Comments on any selection, with drafts, one-click **Submit review**, replies, and resolve/reopen.
 - An agent protocol and a zero-dependency CLI, so any agent can find submitted comments and answer them.
-- Light editing directly in the rendered view that **never re-serializes the file**. Only the bytes you changed are written, and line endings, spacing, and markup elsewhere stay exactly as they were.
+- A continuous Markdown writing canvas with live formatting, natural Enter and list behavior, and autosave that **never re-serializes the file**. Untouched bytes, line endings, spacing, and markup stay intact.
 - **Send to Claude**: one click hands the open threads to Claude Code in a terminal (or copies the prompt for any other agent).
 - A **review inbox** in the Explorer: every thread in the workspace, grouped by whose turn it is.
 - An outline pane, find in document, `j`/`k` jumps between comments, and status and author filters.
 - Reading themes (Paper, Sepia, Dusk, Night), a serif option, and zoom for the document column.
 - Byte-exact undo and redo of edits made in the view.
-- A collapsible comments pane, keyboard access to the outline, reading panel, and threads, and a browser mode that runs without VS Code.
+- A collapsible review pane, compact comment popups, modifier-key hover previews, keyboard access, and a browser mode that runs without VS Code.
 
 It was built for academic manuscripts, but works for any Markdown: docs, specs, notes, or READMEs.
 
@@ -62,16 +62,18 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 ```
 
 **Commenting.**
-- Select text, click **Comment**, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) or `c` to go straight to the comment box.
+- Select text, click the **Add comment** icon beside the selection, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) to go straight to the comment box.
 - In the comment box, pick a kind: **Comment** (asks for a change), **Question** (asks for an answer, not an edit) or **Praise** (no action). Optionally mark it **Major**, **Minor** or **Nit** (Alt+1/2/3, ⌥1/2/3 on macOS). Plain comments look exactly as before.
-- Selections snap to whole words, so a drag that stops mid-word quotes the whole word.
+- Comments are anchored with quoted text and source-line hints, so agents can locate the passage after edits.
 - **Suggest edit.** In the comment box, **Suggest edit** opens a "Replace with" box holding the selection. Rewrite it (or clear it to suggest deleting it) and save. The card shows the change as a small redline with **Apply**, which rewrites just that text in the file through the checked rendered-text edit path, then resolves the thread. Undo reverts it. If the quote spans blocks or sits next to math or citations, Apply opens the source instead.
-- **Whole sections and the whole document.** Hover a heading and click the comment icon at its right to comment on that section. **Comment on document** in the comments pane is for notes about the whole file.
+- **Whole-document notes.** **Add note** at the top of the review pane creates a comment about the whole file. Section-scoped threads use a heading as their anchor and apply to the section below it.
 - The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
 - Each thread has Reply, Resolve/Reopen, and Delete. A draft is deleted at once; a submitted or resolved thread asks "Delete thread?" first, since deleting it removes its replies too and can't be undone.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
 - The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. With the pane closed, clicking a highlighted passage opens a compact thread popup beside it. Reply, resolve/reopen, or explicitly **Open in review pane** from the popup. Holding ⌘ while hovering a highlight (Ctrl on Windows/Linux) shows a brief preview; releasing the modifier dismisses the preview. Escape or clicking outside dismisses it. **Edit passage** places the cursor in the text, and dragging across a highlight still selects text. Alt+Enter (Option+Return on macOS) opens the comment at the cursor.
 - With the pane open, clicking a highlighted passage reveals and activates its thread. Clicking a thread’s quote scrolls to and highlights the passage without moving the writing cursor. Toggling the pane preserves the current reading position through the change in text wrapping.
+
+[See the contextual comment popup](docs/comment-popup.png).
 
 **Writing: a continuous live Markdown canvas.**
 - Click anywhere and write. The document is one editor: there are no block editing boxes, active-paragraph fills, or Edit/Done switches.
@@ -79,7 +81,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Enter** continues writing on a new line. Lists and quotes continue their markers automatically; Enter on an empty list item exits the list. Backspace and selection work across paragraph boundaries.
 - Changes save automatically after a short pause and when focus leaves the document. A quiet status shows **Unsaved**, **Saving…**, or **Saved**. Ctrl+S / ⌘S flushes a pending save.
 - Tables, math, images, citations, and fenced code use the existing renderer when the cursor is outside them. Move into a complex block to edit its Markdown directly in the same canvas.
-- Select a passage and click **Comment**, or press Ctrl+Alt+M / ⌥⌘M. Pending writing saves before the comment is created. The comments pane, outline, document health, and agent workflow remain alongside the editor.
+- Select a passage and click the **Add comment** icon, or press Ctrl+Alt+M / ⌥⌘M. Pending writing saves before the comment is created. The comments pane, outline, document health, and agent workflow remain alongside the editor.
 - Saves apply source transactions rather than re-serializing Markdown. The host checks the original document before writing and preserves untouched bytes, including BOM and existing line endings. New lines use the file's line-ending style.
 - If another editor changes the file while you have unsaved writing, your draft stays in the canvas and automatic saves stop. **Copy my writing** preserves the draft on the clipboard; **Load updated file** loads the external version. The VS Code view also retains an unsaved draft in its saved view state for recovery when it reopens.
 
@@ -87,13 +89,13 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 
 **Getting around.**
 - **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O / ⇧⌘O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
-- **Find** (Ctrl+F / ⌘F, or `/`) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
+- **Find** (Ctrl+F / ⌘F) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
 - **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
 **Word counts and document health.**
 - The document footer shows the word count and reading time (at about 230 words a minute), and the outline shows each section's words, its heading and subsections included, so the top-level sections add up to the total. Only the prose counts: not code blocks, the front-matter card, footnotes, generated citations and references, or text CriticMarkup deletes. Inline code counts; a formula (with its equation number) or a web address counts as one word, an emoji on its own counts as a word, and Chinese and Japanese characters count one each. Counting happens while the view is idle, so it never delays opening or repainting a file, and after an edit only the changed blocks are counted again.
-- Set targets in the front matter; section names match headings, ignoring case. A section over its target turns amber in the outline ("312 / 250 words" on hover), and so does the toolbar count when the whole document is over.
+- Set targets in the front matter; section names match headings, ignoring case. A section over its target turns amber in the outline ("312 / 250 words" on hover), and so does the footer count when the whole document is over.
 
   ```yaml
   mdreview:
@@ -120,31 +122,34 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Claude Code skill.** Run **MD Review: Add Claude Code Skill to Workspace** once per project. It writes `.claude/skills/md-review/` (a short `SKILL.md` plus a copy of the CLI), so a Claude Code session in that folder knows the review loop when you just say "go through my review comments". From a terminal, `node cli/mdreview.mjs init-claude <folder>` does the same.
 
 **Review with Claude.**
-- **Review with Claude** in the toolbar (the sparkle, or **MD Review: Review with Claude** in the Command Palette) asks Claude to read the document first and leave comments for you, before you review it yourself. Pick a reviewer: **Copy edit**, **Clarity and flow**, **Methods reviewer**, **Claims need citations**, **Reviewer 2 (tough but fair)**, or **Custom…** to type one line of your own.
+- **Review with Claude** in the review pane (or **MD Review: Review with Claude** in the Command Palette) asks Claude to read the document first and leave comments for you, before you review it yourself. Pick a reviewer: **Copy edit**, **Clarity and flow**, **Methods reviewer**, **Claims need citations**, **Reviewer 2 (tough but fair)**, or **Custom…** to type one line of your own.
 - Claude starts the same way as Send to Claude (a terminal, or the clipboard in browser mode). It leaves at most 12 comments (`mdReview.agent.reviewComments`), most important first, each with a severity and sometimes a suggested replacement. It doesn't edit the file.
 - Its comments arrive as drafts under **From Claude** at the top of the comments pane, with their own filter chip, and dashed highlights in the text. Each has three buttons: **Keep** makes it your draft (it goes out with your review, noting Claude raised it), **Do it** keeps it and queues it for Claude (it's submitted, so the next **Send to Claude** hands it over with everything else you queued), and **Discard** deletes it. Submit review and Send to Claude leave untriaged drafts from Claude alone, and the draft count leaves them out.
 - While Claude reviews, the comments pane shows **Claude is reviewing · 3 comments so far**. When Claude says it's done (the CLI's `review-done`), reaches the limit, or goes quiet for five minutes, it shows **Claude left 5 comments · 3 to triage** with **Show them**, and **All 5 of Claude's comments triaged** once you're through. A Send to Claude round started meanwhile gets its own row.
 - Add your own reviewers as Markdown files in `.mdreview/reviewers/` in the workspace. The file name is the label (`House style.md` shows as "House style") and the content is the brief (the first 64 KB). The menu lists the files when it opens and reads only the one you pick; symlinks and anything that isn't a plain file are left out. Claude gets the brief as quoted material from whoever set up the workspace, under rules that keep it to leaving comments.
 
-**Keyboard.** Press `?` in the view (or the keyboard icon in the toolbar) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind the Ctrl/⌘ shortcuts under **Keyboard Shortcuts** in VS Code (search for "MD Review"); the single-letter keys are fixed.
+**Keyboard.** Press `?` outside the writing canvas (or open **More tools → Keyboard shortcuts**) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind the Ctrl/⌘ shortcuts under **Keyboard Shortcuts** in VS Code (search for "MD Review"); the single-letter keys are fixed.
 
 | Action | Windows / Linux | macOS |
 | --- | --- | --- |
-| Comment on the selected text | Ctrl+Alt+M or `c` | ⌥⌘M or `c` |
+| Comment on the selected text | Ctrl+Alt+M | ⌥⌘M |
+| Save pending writing | Ctrl+S | ⌘S |
 | Save a comment or reply | Ctrl+Enter | ⌘↩ |
+| Open the comment at the writing cursor | Alt+Enter | ⌥↩ |
+| Preview a comment while hovering | Hold Ctrl | Hold ⌘ |
 | Reply to the current thread | `r` | `r` |
 | Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
 | Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
 | Next / previous comment | Alt+↓ / Alt+↑, or `j` / `k` | ⌥↓ / ⌥↑, or `j` / `k` |
 | Next / previous change | `]` / `[` | `]` / `[` |
-| Find in document | Ctrl+F or `/` | ⌘F or `/` |
+| Find in document | Ctrl+F | ⌘F |
 | Outline | Ctrl+Shift+O | ⇧⌘O |
 | Comments pane | Ctrl+Alt+P | ⌥⌘P |
 | Undo / redo edit | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | ⌘Z / ⇧⌘Z |
 | Zoom in / out / reset | Ctrl+= / Ctrl+− / Ctrl+0 | ⌘= / ⌘− / ⌘0 |
 | Keyboard shortcuts | `?` | `?` |
 
-Single-letter keys work when you're not typing in a box. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
+Single-letter navigation keys work outside the writing canvas and text fields. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 
@@ -295,6 +300,7 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 | `src/redlines.ts`, `src/wordDiff.ts` | Changes view: baselines, block matching, word diff |
 | `src/docModel.ts`, `src/textQuote.ts` | the view's text and blocks without a browser; quote anchoring shared with the webview |
 | `src/docx.ts`, `src/wordImport.ts`, `src/zip.ts`, `src/wordCommands.ts` | Word export with comments, comment/tracked-change import, the ZIP container; bundled apart as `dist/word.js`, loaded on first use |
+| `webview/threadPopover.ts` | Contextual comment popup, reply drafts, and modifier-key hover previews |
 | `webview/liveEditor.ts`, `src/sourceEdit.ts` | Continuous live Markdown editor, autosave and checked source transactions |
 | `webview/` | UI: selection → comment, highlights, threads, block editor; `outline.ts`, `search.ts`, `filters.ts`, `reading.ts`, `redlines.ts` |
 | `cli/mdreview.mjs`, `cli/SKILL.md` | agent CLI and the Claude Code skill `init-claude` installs |
@@ -315,6 +321,8 @@ Every block carries `data-ls`/`data-le` attributes: its 0-based source line rang
 npm install
 npm test            # builds, then runs the node --test suites
 npm run typecheck
+npm run test:smoke  # opens an isolated VS Code extension test host
+npm run package     # builds the installable VSIX
 npm run watch       # rebuild on change; press F5 in VS Code to launch an Extension Development Host
 npm run harness -- path/to/file.md   # browser mode on http://127.0.0.1:4417/
 ```
@@ -322,6 +330,10 @@ npm run harness -- path/to/file.md   # browser mode on http://127.0.0.1:4417/
 The fixtures in `test/fixtures/` are a fictional paper generated by `node test/make-fixtures.mjs`: one copy with CRLF line endings and one with LF. The tests check that every edit leaves all bytes outside the edited block identical, and that each file keeps its own line-ending style. `.gitattributes` keeps git from converting the fixtures.
 
 Issues and pull requests are welcome.
+
+## Third-party assets
+
+The selection action uses Tabler’s `message-circle-plus` icon under the MIT license; its license is included in [media/tabler-icons-LICENSE.txt](media/tabler-icons-LICENSE.txt). The other interface icons use Microsoft Codicons under CC BY 4.0. Runtime library dependencies and their licenses are recorded in `package.json` and `package-lock.json`.
 
 ## License
 

@@ -229,6 +229,10 @@ moreTools.addEventListener('keydown', event => {
   if (event.key === 'Escape') { moreTools.open = false; moreTools.querySelector('summary')!.focus(); event.stopPropagation(); }
 });
 
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !pop.hidden && pop.classList.contains('mdr-selection-action')) hidePop();
+}, true);
+
 // ---------------------------------------------------------------- painting
 function paint() {
   if (editing || inline) {
@@ -766,6 +770,7 @@ function blockRange(node: Node): [number, number] | null {
 
 function hidePop() {
   pop.hidden = true;
+  pop.classList.remove('mdr-selection-action');
   pop.innerHTML = '';
   pendingAnchor = null;
   popAnchor = null;
@@ -786,6 +791,24 @@ function closeBox() {
 // (off-screen blocks take their real size when shown, and a repaint resets
 // them), so it follows the block holding the selection instead.
 let popAnchor: { ref: BlockRef; el: Element; dy: number } | null = null;
+
+/** The compact selection action shares the composer, but has no outer card. */
+function showSelectionAction(action: 'live-comment' | 'new-comment', rect: { left: number; right: number; top: number; bottom: number }, beside = false) {
+  pop.classList.add('mdr-selection-action');
+  pop.innerHTML = `<button class="mdr-comment-action" data-act="${action}" aria-label="Add comment" aria-describedby="mdr-add-comment-tip" aria-haspopup="dialog"></button><span id="mdr-add-comment-tip" class="mdr-comment-tooltip" role="tooltip">Add comment</span>`;
+  pop.hidden = false;
+  const column = document.getElementById(doc.hidden ? 'mdr-canvas' : 'mdr-doc')!.getBoundingClientRect();
+  const right = Math.min(window.innerWidth - 12, column.right - 12);
+  const fits = beside && rect.right + 44 <= right;
+  const left = fits ? rect.right + 10 : Math.min(rect.right, right - 34);
+  const top = fits ? rect.top + (rect.bottom - rect.top - 34) / 2 : rect.bottom + 8;
+  const x = Math.max(12, left);
+  pop.style.left = `${x + window.scrollX}px`;
+  const tipWidth = pop.querySelector<HTMLElement>('.mdr-comment-tooltip')!.offsetWidth;
+  pop.style.setProperty('--mdr-tip-x', `${Math.max(tipWidth / 2 + 8, Math.min(x + 17, window.innerWidth - tipWidth / 2 - 8)) - x}px`);
+  pop.style.top = `${Math.max(viewTop() + 8, Math.min(top, window.innerHeight - 72)) + window.scrollY}px`;
+  if (popAnchor) popAnchor.dy = parseFloat(pop.style.top) - window.scrollY - popAnchor.el.getBoundingClientRect().top;
+}
 
 function placePop(at: Range | Element) {
   const rect = at.getBoundingClientRect();
@@ -845,8 +868,9 @@ document.addEventListener('mouseup', (ev) => {
     }
     const range = inline && !inline.saving && inline.el.textContent !== inline.oldText ? sel.getRangeAt(0) : selectionRange();
     if (!range) return;
-    pop.innerHTML = `<button class="mdr-primary" data-act="new-comment" title="${tip('Comment', 'Mod+Alt+M', 'C')}">Comment</button>`;
     placePop(range);
+    const rects = Array.from(range.getClientRects()).filter(r => r.width > 0);
+    showSelectionAction('new-comment', rects[rects.length - 1] || range.getBoundingClientRect());
   }, 0);
 });
 
@@ -865,6 +889,8 @@ document.addEventListener('focusin', trackComposing);
 document.addEventListener('focusout', trackComposing);
 
 function openCommentBox(top: number) {
+  pop.classList.remove('mdr-selection-action');
+  pop.style.left = `${Math.max(12, Math.min(parseFloat(pop.style.left) || 12, window.innerWidth - 352))}px`;
   const a = pendingAnchor!;
   const what =
     a.scope === 'document'
@@ -1711,10 +1737,7 @@ const live = createLiveEditor(canvas, {
     if (pop.querySelector('textarea')) return;
     if (!selection) return hidePop();
     popAnchor = null;
-    pop.innerHTML = `<button class="mdr-primary" data-act="live-comment">Comment</button>`;
-    pop.hidden = false;
-    pop.style.left = `${Math.max(8, Math.min(window.innerWidth - 330, selection.rect.left))}px`;
-    pop.style.top = `${selection.rect.bottom + window.scrollY + 8}px`;
+    showSelectionAction('live-comment', selection.rect, selection.atLineEnd);
   },
   comment: () => liveComment(),
   thread: (id, keyboard) => openThread(id, keyboard),

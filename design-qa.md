@@ -1,47 +1,40 @@
-# Bear-inspired MD Review design QA
+# MD Review verification notes
 
-Final result: passed.
+## Scope
 
-## Target and scope
+The current interface adapts the approved Bear-inspired visual direction to MD Review's continuous Markdown canvas, outline, and review threads. The approved selection action is a small white icon button with a muted red icon and a compact tooltip. It is integrated into the application rather than remaining only in the local mockup.
 
-The approved reference is Bear's official desktop screenshot, downloaded from https://bear.app/images/home/hero_mac.jpg and inspected at `/tmp/md-review-design-references/bear.jpg`. This is a visual adaptation for MD Review's existing document-and-review workflow: the charcoal rail is an outline, the central area remains a continuous Markdown editor, and the right pane holds review threads. Bear's note list, photographs, proprietary font, and native window frame are not requirements for this adaptation.
+The reference was [Bear's official desktop screenshot](https://bear.app/images/home/hero_mac.jpg). Public examples of the implementation are [the workspace](docs/screenshot.png) and [a contextual comment popup](docs/comment-popup.png). The screenshots use a fictional manuscript and synthetic reviewer comments. The outline and review pane intentionally serve different purposes from Bear's note-library panels.
 
-The implementation was inspected in Chrome through its browser extension at http://127.0.0.1:4429/ using a fictional manuscript and synthetic review threads. The final desktop screenshot is `/tmp/md-review-bear-qa/desktop.png`. The reference and implementation images were presented together in the same visual comparison call. Their content and outer framing differ deliberately; comparison focused on typography, palette, spacing, and control hierarchy rather than pixel identity.
+## Automated verification
 
-## Findings and corrections
+- `npm run typecheck`: passed.
+- `npm test`: 293 passed, zero failed; one optional LibreOffice conversion test skipped because LibreOffice was unavailable.
+- `VSCODE_VERSION=1.100.0 npm run test:smoke`: passed in an isolated macOS ARM64 VS Code test host. This checks extension activation, editor opening, registered commands, sidecar writes, checked editing, undo, and command routing; it is not an exhaustive visual test of the VS Code webview.
+- `npm run package`: passed. The package includes the new selection-action icon and its license; temporary mockups are excluded.
+- `git diff --check`: passed.
 
-- P2, typography: CodeMirror's invisible caret-buffer images inherited document image margins, causing excess spacing around hidden Markdown markers and formatted text. Their margins, borders, and padding now reset to zero. Browser readback confirmed zero margins and the final screenshot shows consistent text flow.
-- P2, compact layout: the editor's flex content retained a rendered table's intrinsic width, clipping prose at a 391 CSS-pixel viewport. The editor content now shrinks, its containing editor does not inherit block-level content containment, and rich blocks scroll internally when needed. Browser readback confirmed equal content and scroller widths of approximately 329 pixels, with no document-level horizontal overflow.
-- P2, keyboard focus: closing Document health or keyboard help after launching it from the new menu could return focus to a hidden menu item. Both return to the More tools disclosure when it is closed. Verified Escape returns focus to More tools.
-- P3, outline: narrow navigation labels were truncated too aggressively. Labels now wrap to two lines, keeping the section names readable.
+## Browser interaction verification
 
-## Fidelity surfaces
+- Continuous writing: live headings and inline formatting, Enter/list continuation, returning from a list to prose, multiline paste, undo/redo, and autosave.
+- File protection: queued edits survived a delayed save. Conflicting external changes retained the local draft and exposed recovery controls. External synchronization cleared stale writing undo history.
+- Review: exact selected quotes survived opening the composer and were read back from saved sidecars. Replies, resolve/reopen, filters, outline navigation, and re-anchoring were exercised.
+- Contextual threads: a highlight click opened a compact popup with the review pane closed. The writing caret remained at the same character offset. Opening the pane preserved the active passage's vertical position in a reflow test. Sidebar quote navigation highlighted and scrolled to the correct passage.
+- Hover: ordinary hovering remained silent; Command-hover showed the preview, and releasing Command dismissed it. Option+Return opened a comment at the writing cursor. Dragging across a highlight still selected text.
+- Selection action: the 34px icon button had no surrounding card. Its tooltip appeared on focus, Escape dismissed the action, and the existing comment composer saved the exact selected quotation.
+- Search and tables: Find/Replace used the application styles and moved between matches. Table header and body widths matched at desktop and compact widths, without blank whitespace gaps.
+- Browser console: no reported application warnings or errors during the final interaction checks.
 
-- Fonts and typography: Avenir Next with native system fallbacks approximates the reference's geometric reading typography. The body is 16px with 1.7 line spacing, headings have a restrained scale, and comment text is distinct from secondary metadata. Bear's proprietary font is not bundled.
-- Spacing and layout: the desktop outline, continuous canvas, and review margin have distinct proportions and consistent padding. The toolbar exposes the primary navigation and reading controls; secondary tools remain available in a native disclosure. On compact screens the outline becomes a drawer and the review pane stacks below the document.
-- Colors and tokens: the navigation rail uses charcoal `#2f3235`, the main surface white, the review surface `#fafafa`, text `#3e4143`, and the primary accent `#b64f59`. Status colors retain semantic meaning. The palette includes a dark VS Code variant and forced-colors rules; those host-specific states were not visually exercised in this browser pass.
-- Assets and icons: the existing Codicons family remains in use. The added ellipsis is the original Microsoft Codicons asset at `media/ellipsis.svg`. No Bear logo, proprietary artwork, or imitation illustration was added.
-- Copy and content: the preview uses an explicitly fictional manuscript and synthetic comments. The product labels identify writing, review, and document tools. Documentation now describes the relocated tools and word count.
+## Visual corrections
 
-## Verification
+The review caught and corrected several problems: invisible editor caret markers inheriting image margins; wide rendered tables stretching the editor's flex content; table row groups sizing independently under block display; default search-field styling; and keyboard focus returning to hidden tools after their dialogs closed.
 
-- Confirmed the correct page, populated document, absence of error overlays, and no reported browser console warnings or errors.
-- Desktop verification at the normal browser viewport of 1091 × 731 CSS pixels; no horizontal overflow. A wider viewport was also checked by DOM geometry, but its cropped browser capture was not used as final visual evidence.
-- Compact verification at 391 CSS pixels; corrected wrapping and no document-level horizontal overflow. Screenshot capture was affected by browser viewport scaling; DOM dimensions supplied the precise width evidence.
-- Exercised More tools, Document health, Escape focus return, review filtering, reply-composer opening, and outline navigation.
-- Typed into the continuous editor, waited for Saved, invoked Undo from More tools, and confirmed the test text was removed and the document saved again.
-- TypeScript checking and build passed. Existing automated suite: 293 passed, zero failed, one optional LibreOffice test skipped. `git diff --check` passed.
+Typography uses Avenir Next with native system fallbacks. Bear's proprietary font and artwork are not bundled. Existing interface icons use Codicons, and the selection action uses the MIT-licensed Tabler icon included in `media/`. The design uses a charcoal outline, a white canvas, muted red accents, and a quieter review surface.
 
-## Remaining scope
+Compact layout checks included a 391px CSS viewport. Prose wrapped to the available width, the search controls reflowed, and document-level horizontal overflow was absent. Desktop verification used normal browser windows, including a 1091 × 731 CSS viewport.
 
-The installed VS Code extension was not replaced. Native VS Code dark/high-contrast rendering and exhaustive screen-reader behavior remain outside this browser verification. The local source, compiled preview, and documentation contain the redesign.
+## Remaining limits
 
-## Follow-up: tables and search
+Native VS Code dark/high-contrast visual states, touch interaction, and exhaustive screen-reader behavior have not received the same manual coverage as Chrome desktop. The smoke test runs in an isolated extension host and does not replace the user's installed extension. Historical performance figures in the changelog have not been re-measured for the continuous editor.
 
-User screenshots identified two missed states in the initial visual pass: split table header/body sizing and unthemed CodeMirror search controls. Both are corrected. Tables use native table layout with normal whitespace; header and body widths matched exactly at both desktop (approximately 340/289px) and compact (approximately 176/152px) sizes. The search panel now uses the application font, palette, field borders, focus states, and buttons. At a 391px viewport its search field remained approximately 303px wide with no horizontal page overflow. Consecutive Next actions selected different matching lines. TypeScript, build, and diff checks passed; no browser console warnings or errors were reported. Updated evidence: `/tmp/md-review-bear-qa/table-fixed.png` and `/tmp/md-review-bear-qa/search-fixed.png`.
-
-## Follow-up: contextual comment threads
-
-With the review pane closed, a normal click on a highlighted passage now opens an anchored, nonmodal thread popup. The popup supports replying, resolve/reopen, explicit editing of the passage, and an explicit action to open the review pane. Hover previews require Command on macOS or Control on Windows/Linux; ordinary hovering is silent, and releasing the modifier dismisses only the transient preview. Option/Alt+Enter opens the comment at the writing cursor.
-
-Browser checks used an isolated copy of the test manuscript at http://127.0.0.1:4430/. Verified closed-pane popup opening, saving a reply, resolve/reopen, sidebar-to-passage navigation, drag selection across a highlight, and keyboard opening. A comment click preserved the caret at character offset 2. In a narrower reflow test, opening the full pane preserved the active passage's top position at approximately 398.35px before and after. Command-hover appeared, ordinary hover remained hidden beyond the preview delay, and native Command release hid the preview. The test manuscript remained byte-identical to its original fixture. The existing suite passed 293 tests with one optional LibreOffice skip; TypeScript, build, and diff checks passed. Final popup evidence: `/tmp/md-review-popup-qa/thread-popup.png`.
+Local design experiments live in the ignored `.temp/` directory and are not part of the repository or extension package.

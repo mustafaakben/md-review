@@ -12,3 +12,6 @@ media/style.css
 media/katex/
 media/features.css
 media/mermaid/
+
+# Local design mockups and scratch work
+.temp/
