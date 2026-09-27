@@ -252,7 +252,7 @@ function readText(p: string): string | undefined {
 }
 
 /** Comments saved this close together in live mode go to the agent as one message. */
-const LIVE_COALESCE_MS = 1500;
+const LIVE_COALESCE_MS = 400;
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -1155,6 +1155,7 @@ export class ReviewSession {
       comments,
       cliPath: this.cliPath(),
       suggest: this.ctx.suggestMode?.(),
+      source: before,
     });
     const started = () => {
       // Only threads that are actually waiting on the agent count toward the round.

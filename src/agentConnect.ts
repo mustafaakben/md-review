@@ -13,6 +13,10 @@ import * as path from 'path';
 
 export const SKILL_DIR = path.join('.claude', 'skills', 'md-review');
 export const CLI_RULE = 'Bash(node .claude/skills/md-review/mdreview.mjs:*)';
+/** Markdown edits without a prompt (when the CLI's apply can't place a text and the agent edits itself)… */
+export const EDIT_RULE = 'Edit(**/*.md)';
+/** …but never the agent's own instructions or settings. Deny wins over allow. */
+export const EDIT_DENY = ['Edit(**/CLAUDE.md)', 'Edit(**/AGENTS.md)', 'Edit(.claude/**)'];
 const hookCommand = (event: string) => `node "$CLAUDE_PROJECT_DIR/.claude/skills/md-review/mdreview.mjs" hook ${event} --agent claude`;
 const HOOK_MARK = 'mdreview.mjs" hook ';
 
@@ -61,7 +65,14 @@ export function mergeSettings(s: Record<string, any>, acceptInbound = false): { 
     allow.push(CLI_RULE);
     changes.push('permission to run the MD Review CLI');
   }
+  if (!allow.includes(EDIT_RULE)) {
+    allow.push(EDIT_RULE);
+    changes.push('permission to edit Markdown files (not CLAUDE.md, AGENTS.md or .claude/)');
+  }
   out.permissions.allow = allow;
+  const deny: string[] = Array.isArray(out.permissions.deny) ? out.permissions.deny : [];
+  for (const r of EDIT_DENY) if (!deny.includes(r)) deny.push(r);
+  out.permissions.deny = deny;
   if (acceptInbound && out.crossSessionInbound !== 'accept') {
     out.crossSessionInbound = 'accept';
     changes.push('crossSessionInbound: accept');

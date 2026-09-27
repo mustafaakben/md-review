@@ -20,6 +20,8 @@ node .claude/skills/md-review/mdreview.mjs next [file-or-folder] # first open co
 node .claude/skills/md-review/mdreview.mjs context <file.md> <id>
 node .claude/skills/md-review/mdreview.mjs reply   <file.md> <id> "what you changed"
 node .claude/skills/md-review/mdreview.mjs resolve <file.md> <id> ["closing reply"]
+node .claude/skills/md-review/mdreview.mjs fix     <file.md> <id> "<old source text>" "<new source text>" "note"
+node .claude/skills/md-review/mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "note" reply <id> "text" resolve <id> "note" …
 node .claude/skills/md-review/mdreview.mjs list    [paths…] --status submitted
 ```
 
@@ -37,6 +39,13 @@ node .claude/skills/md-review/mdreview.mjs list    [paths…] --status submitted
    so it moves on to the next one.
 4. Repeat until `next` says there are no open comments, then summarize what
    you changed and which threads you left open.
+
+`fix` does steps 2 and 3 in one command: it replaces the exact source text
+(markup included, as your own edit tool would) and resolves the thread with
+your note. `apply` does it for several threads at once, mixing `fix`, `reply`
+and `resolve`; if any part fails, nothing is written. When MD Review sends you
+comments, the message includes their source lines, so use one `apply` command
+instead of reading the files first.
 
 ## Reviewing a document first
 

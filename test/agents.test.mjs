@@ -121,13 +121,13 @@ test('Connect merges into the settings and keeps what is there; running it again
   const s0 = { model: 'opus', permissions: { allow: ['Bash(ls:*)'], deny: ['Read(.env)'] }, hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo mine' }] }] } };
   const { settings, changes } = lib.mergeSettings(s0);
   assert.equal(settings.model, 'opus');
-  assert.deepEqual(settings.permissions.deny, ['Read(.env)']);
-  assert.deepEqual(settings.permissions.allow, ['Bash(ls:*)', lib.CLI_RULE]);
+  assert.deepEqual(settings.permissions.deny, ['Read(.env)', ...lib.EDIT_DENY]);
+  assert.deepEqual(settings.permissions.allow, ['Bash(ls:*)', lib.CLI_RULE, lib.EDIT_RULE]);
   assert.equal(settings.hooks.SessionStart.length, 2);
   assert.equal(settings.hooks.SessionStart[0].hooks[0].command, 'echo mine');
   assert.match(settings.hooks.SessionStart[1].hooks[0].command, /mdreview\.mjs" hook session-start --agent claude$/);
   assert.equal(settings.crossSessionInbound, undefined, 'only when asked');
-  assert.deepEqual(changes, ['SessionStart hook', 'SessionEnd hook', 'permission to run the MD Review CLI']);
+  assert.deepEqual(changes, ['SessionStart hook', 'SessionEnd hook', 'permission to run the MD Review CLI', 'permission to edit Markdown files (not CLAUDE.md, AGENTS.md or .claude/)']);
   assert.deepEqual(lib.mergeSettings(settings).changes, []);
   assert.deepEqual(lib.mergeSettings(settings, true).changes, ['crossSessionInbound: accept']);
   assert.deepEqual(s0.permissions.allow, ['Bash(ls:*)'], 'the input is left alone');
@@ -282,4 +282,50 @@ test('a delivery that fails says why and starts no round', async () => {
   await new Promise((r) => setImmediate(r));
   assert.match(t.posted.filter((m) => m.type === 'error').at(-1).message, /isn't running/);
   assert.equal(t.posted.filter((m) => m.type === 'round' && m.round).length, 0);
+});
+
+// Speed: the prompt carries the source lines and one `apply` command does the work.
+test('the prompt names the file absolutely, shows each quote\'s source lines, and asks for one apply command', () => {
+  const src = '# T\n\nPlain **bold words** here.\n\nOther line.\n';
+  const c = (id, quote, line, body, extra = {}) => ({ id, anchor: { quote, prefix: '', suffix: '', lineStart: line, lineEnd: line }, body, status: 'submitted', replies: [], ...extra });
+  const p = lib.buildAgentPrompt({ mdPath: '/w/d/a.md', cwd: '/w', cliPath: '/w/.claude/skills/md-review/mdreview.mjs', source: src, comments: [c('c_1', 'bold words here', 3, 'Fix.'), c('c_2', 'Other line.', 1, 'Why?', { kind: 'question' })] });
+  assert.match(p, /^MD Review: 2 comments on d\/a\.md \(\/w\/d\/a\.md\)\.$/m);
+  assert.match(p, /run in \/w exactly as written:\n {2}node \.claude\/skills\/md-review\/mdreview\.mjs apply "d\/a\.md" <actions>/);
+  assert.match(p, /^ {4}3 \| Plain \*\*bold words\*\* here\.$/m, 'found through the markup');
+  assert.match(p, /^ {4}5 \| Other line\.$/m, 'a stale line hint still finds the line');
+  assert.match(p, /\[question\]: answer with reply/);
+  assert.doesNotMatch(p, /\[praise\]|major before minor|whole section/, 'rules only for what the comments use');
+  // Suggest mode keeps the full prompt.
+  assert.match(lib.buildAgentPrompt({ mdPath: '/w/a.md', cwd: '/w', cliPath: '/x/m.mjs', source: src, comments: [c('c_1', 'Other line.', 5, 'x')], suggest: true }), /suggest "a\.md"/);
+  assert.deepEqual(lib.quoteLines(src, { anchor: { quote: 'not in the file', lineStart: 1, lineEnd: 1 } }), []);
+});
+
+test('fix and apply: byte-exact edits, one write, nothing written when any part fails', () => {
+  const dir = mk('apply');
+  const md = path.join(dir, 'p.md');
+  const orig = '﻿# T\r\n\r\nThe same words. And more.\r\n\r\nThe same words. Twice.\r\n';
+  fs.writeFileSync(md, orig);
+  lib.store.mutate(md, (d) => {
+    for (const [q, l] of [['And more.', 3], ['Twice.', 5], ['T', 1]]) lib.store.addComment(d, 'R', { quote: q, prefix: '', suffix: '', lineStart: l, lineEnd: l }, 'x').status = 'submitted';
+  });
+  const [a, b, h] = lib.store.readSidecar(md).comments.map((c) => c.id);
+  const cli1 = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
+  // Ambiguous text and a missing one: refused, and nothing changes.
+  let r = cli1('apply', md, 'fix', a, 'The same words.', 'Same words.', 'n', 'fix', b, 'missing', 'x', 'n');
+  assert.equal(r.status, 2);
+  assert.equal(fs.readFileSync(md, 'utf8'), orig);
+  assert.ok(lib.store.readSidecar(md).comments.every((c) => c.status === 'submitted' && !c.replies.length));
+  // Twice in the file, but once on the comment's line: that one. Line endings and BOM kept.
+  r = cli1('apply', md, 'fix', b, 'The same words. Twice.', 'The same words, twice.', 'Joined.', 'reply', h, 'Kept the title.', 'resolve', a, 'Nothing to do.');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(md, 'utf8'), orig.replace('The same words. Twice.', 'The same words, twice.'));
+  const cs = lib.store.readSidecar(md).comments;
+  assert.deepEqual(cs.map((c) => [c.status, c.replies.at(-1)?.body]), [['resolved', 'Nothing to do.'], ['resolved', 'Joined.'], ['submitted', 'Kept the title.']]);
+  // fix alone, with the default note; a new line written as \n becomes \r\n here.
+  r = cli1('fix', md, h, '# T', '# Title\nline');
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(fs.readFileSync(md, 'utf8').startsWith('﻿# Title\r\nline\r\n'));
+  assert.equal(lib.store.readSidecar(md).comments[2].replies.at(-1).body, 'Changed "# T" to "# Title line".');
+  assert.notEqual(cli1('apply', md, 'fix', a).status, 0, 'too few arguments');
+  assert.notEqual(cli1('apply', md, 'resolve', 'c_nope', 'x').status, 0, 'unknown id');
 });

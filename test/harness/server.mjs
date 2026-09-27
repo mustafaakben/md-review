@@ -68,7 +68,7 @@ fs.watch(dir, (_ev, name) => {
     t1 = setTimeout(() => session.render(), 150);
   } else if (name === path.basename(md) + '.comments.json') {
     clearTimeout(t2);
-    t2 = setTimeout(() => session.onSidecarChanged(), 150);
+    t2 = setTimeout(() => session.onSidecarChanged(), 30); // fs.watch reports a write more than once; the sidecar re-read is cheap
   }
 });
 

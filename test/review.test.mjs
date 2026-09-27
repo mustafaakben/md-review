@@ -197,7 +197,7 @@ test('Submit and Send to Claude leave agent drafts alone; Keep and Do it triage 
   assert.match(posted.at(-1).message, /^Queued for Claude\. Send to Claude when you've triaged the rest\.$/);
   s.handle({ type: 'sendToAgent' });
   const asked = posted.filter((m) => m.type === 'agentPrompt').at(-1);
-  assert.match(asked.prompt, new RegExp(`- ${two.id}\\b`));
+  assert.match(asked.prompt, new RegExp(`^${two.id}: `, 'm'));
   // Dismiss is a plain delete.
   s.handle({ type: 'deleteComment', id: one.id });
   assert.equal(store.readSidecar(md).comments.length, 2);

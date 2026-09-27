@@ -66,7 +66,7 @@ async function connectWithConsent(context: vscode.ExtensionContext, folder: stri
       detail: [
         `Adds to ${name}/.claude/:`,
         `• skills/md-review/ (the skill and CLI${plan.skillDiffers ? ', replacing the version there' : ''})`,
-        '• settings.local.json: SessionStart and SessionEnd hooks, so Claude sessions started here register with MD Review, and a rule that lets them run the MD Review CLI without asking.',
+        '• settings.local.json: SessionStart and SessionEnd hooks, so Claude sessions started here register with MD Review, and rules that let them run the MD Review CLI and edit Markdown files without asking (never CLAUDE.md, AGENTS.md or anything in .claude/).',
         '',
         '"Accept messages" also sets crossSessionInbound to accept. Sessions that skip permission prompts then take messages from other sessions (MD Review included) without holding them for your approval.',
       ].join('\n'),

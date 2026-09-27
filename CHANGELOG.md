@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Agent rounds about 3–4× faster
+
+Measured end to end with a real Claude Code session (Haiku, 3 comments, median of 3–5 runs, permission prompts approved instantly): **38.8 s → 11.6 s** in manual mode and **47.1 s → 11.8 s** with accept-edits; Claude's steps 9 → 1, tool calls 11 → 1, permission prompts 4 → 0. Slow baseline runs (up to 197 s) came from Claude hunting for the file; that's gone.
+
+- The message names the file by its full path and shows the source lines each comment's quote is on, numbered, so the agent doesn't search for the file or look the lines up (steps 9 → 3).
+- New CLI commands `fix` (replace exact source text and resolve, in one step) and `apply` (every thread in one command, all or nothing). The message asks for one `apply`, which the CLI permission rule covers, so edits no longer wait on a prompt.
+- A shorter message: the rules for kinds, severities and scopes are included only when a comment uses them, with no summary asked for at the end.
+- Connect also allows Markdown edits without a prompt, for when the agent edits the file itself, and denies edits to `CLAUDE.md`, `AGENTS.md` and `.claude/`.
+- Live sends 400 ms after the last saved comment (was 1.5 s), and the browser harness shows an agent's reply 40 ms after it's written (was 160 ms).
+
 ### Comments go into a running agent session
 
 - Send to Claude, Ask Claude, Review with Claude, and the folder and inbox sends no longer start a new Claude Code process for each click. They deliver the prompt into a Claude Code or Codex session that is already running, with its context. Claude Code sessions get it through their session inbox; Codex sessions through `codex queue`. An idle session starts on it at once, and a busy one reads it between steps (Claude) or after the current turn (Codex).
