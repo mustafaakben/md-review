@@ -41,6 +41,8 @@ const agents = lib.createAgentHost({
   setDelivery: (d) => (delivery = d),
   command: (agent) => agent,
   handOver: (command) => post({ type: 'handOver', command }),
+  // The page's menu is the confirmation here: connect straight away, messages included.
+  connect: async () => `Connected ${path.basename(dir)}: ${lib.connectFolder(dir, { cliDir: path.join(root, 'cli'), acceptInbound: true }).join(', ')}.`,
 });
 const session = new lib.ReviewSession({
   mdPath: md,

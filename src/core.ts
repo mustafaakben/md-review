@@ -32,6 +32,8 @@ export interface AgentState {
   ask?: boolean;
   /** A session is being started or waited for. */
   starting?: string;
+  /** The folder has MD Review's skill and hooks (Connect this folder). */
+  connected?: boolean;
 }
 
 /**
@@ -49,6 +51,10 @@ export interface AgentHost {
   start(agent: AgentKind, resume?: string): Promise<Binding | null>;
   delivery(): Delivery;
   setDelivery(d: Delivery): void;
+  /** The folder has MD Review's hooks installed. */
+  connected?(): boolean;
+  /** Install the skill and hooks (after asking, where the host asks). Resolves to a status line, or null if cancelled. */
+  connect?(): Promise<string | null>;
 }
 
 /** What the Changes view paints: the hunks against the current baseline. `v` names this comparison. */
@@ -186,7 +192,11 @@ export type FromWebview =
   | { type: 'startSession'; agent: AgentKind; resume?: string }
   | { type: 'setDelivery'; delivery: Delivery }
   /** Submit drafts and copy the prompt instead of sending it: for any other agent. */
-  | { type: 'copyPrompt' };
+  | { type: 'copyPrompt' }
+  /** Install the skill and hooks in the workspace folder. */
+  | { type: 'connectFolder' }
+  /** Refresh the chip: is the bound session still running, idle or busy? */
+  | { type: 'agentState' };
 
 export interface HostContext {
   mdPath: string;
@@ -961,6 +971,20 @@ export class ReviewSession {
       case 'setDelivery':
         this.ctx.agents?.setDelivery(msg.delivery);
         return this.postAgent();
+      case 'agentState':
+        return this.postAgent();
+      case 'connectFolder': {
+        const connect = this.ctx.agents?.connect;
+        if (!connect) return;
+        connect().then(
+          (status) => {
+            if (status) this.ctx.post({ type: 'toast', message: status });
+            this.postAgent();
+          },
+          (e) => this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) }),
+        );
+        return;
+      }
       case 'dismissRound':
         if (msg.which === 'review') {
           this.review = null;
@@ -1183,6 +1207,17 @@ export class ReviewSession {
   private needsSession(then: () => void): boolean {
     const agents = this.ctx.agents;
     if (!agents || agents.binding()) return false;
+    // One session started here with MD Review's hook: that's the one.
+    let hooked: AgentSession[] = [];
+    try {
+      hooked = agents.list().filter((s) => s.live && s.connected);
+    } catch {}
+    if (hooked.length === 1) {
+      const s = hooked[0];
+      agents.bind({ agent: s.agent, id: s.id, name: s.name });
+      this.postAgent();
+      return false;
+    }
     this.waiting = then;
     this.postAgent(true, true);
     return true;
@@ -1206,7 +1241,11 @@ export class ReviewSession {
         sessions = [];
       }
     }
-    this.ctx.post({ type: 'agent', agent: { bound, delivery: agents.delivery(), sessions, ask: ask || undefined, starting: this.starting || undefined } });
+    let connected: boolean | undefined;
+    try {
+      connected = agents.connected?.();
+    } catch {}
+    this.ctx.post({ type: 'agent', agent: { bound, delivery: agents.delivery(), sessions, ask: ask || undefined, starting: this.starting || undefined, connected } });
   }
 
   private bindTo(b: Binding | undefined): void {

@@ -856,3 +856,4 @@ button.mdr-agent-chip:hover { background: var(--soft); }
   .mdr-agent-dot { forced-color-adjust: none; border: 1px solid CanvasText; }
   .mdr-agent-panel [role="menuitemradio"][aria-checked="true"] { outline: 1px solid Highlight; }
 }
+.mdr-agent-hooked { flex: none; font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }

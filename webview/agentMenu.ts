@@ -11,6 +11,7 @@ export interface AgentState {
   sessions?: Session[];
   ask?: boolean;
   starting?: string;
+  connected?: boolean;
 }
 
 export interface AgentMenu {
@@ -55,7 +56,7 @@ export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, p
     const bound = state.bound?.id === s.id;
     const meta = s.live ? (s.status || 'running') : ago(s.updatedAt);
     return `<button role="menuitemradio" aria-checked="${bound}" tabindex="-1" data-bind="${esc(s.id)}" data-agent="${s.agent}"${s.name ? ` data-name="${esc(s.name)}"` : ''} title="${esc(s.id)}">
-      <span class="mdr-agent-tag" data-agent="${s.agent}">${agentLabel(s.agent)}</span><span class="mdr-agent-title">${esc(short(s))}</span><span class="mdr-agent-meta">${s.live ? '<span class="mdr-agent-dot" data-state="' + (s.status === 'busy' ? 'busy' : 'idle') + '"></span>' : ''}${esc(meta)}</span></button>`;
+      <span class="mdr-agent-tag" data-agent="${s.agent}">${agentLabel(s.agent)}</span><span class="mdr-agent-title">${esc(short(s))}</span>${s.connected ? '<span class="mdr-agent-hooked" title="Started with MD Review\'s hook">hooked</span>' : ''}<span class="mdr-agent-meta">${s.live ? '<span class="mdr-agent-dot" data-state="' + (s.status === 'busy' ? 'busy' : 'idle') + '"></span>' : ''}${esc(meta)}</span></button>`;
   }
 
   function render() {
@@ -79,6 +80,7 @@ export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, p
         ${radio('onSend', 'When I press Send', 'Comments wait as drafts until Send (or Ask on one thread)')}
         ${radio('live', 'Live, as I save each one', 'Each comment, and each reply on an open thread, goes to the session when you save it')}
         <div class="mdr-agent-sep" role="separator"></div>
+        ${state.connected === false ? '<button role="menuitem" tabindex="-1" data-act="connect" title="Adds the md-review skill and CLI, and SessionStart/SessionEnd hooks, to this folder\'s .claude/. Claude sessions started here then connect by themselves and run the CLI without asking.">Connect this folder…</button>' : ''}
         <button role="menuitem" tabindex="-1" data-act="copy" title="Submit drafts and copy the prompt, to paste into any other agent">Copy prompt instead</button>
         ${state.bound ? '<button role="menuitem" tabindex="-1" data-act="unbind">Disconnect</button>' : ''}
       </div>`;
@@ -132,6 +134,7 @@ export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, p
       post({ type: 'setDelivery', delivery: d.delivery });
       return; // keep the menu open: it's a setting
     } else if (d.act === 'copy') post({ type: 'copyPrompt' });
+    else if (d.act === 'connect') post({ type: 'connectFolder' });
     else if (d.act === 'unbind') post({ type: 'unbindSession' });
     close(true);
   });

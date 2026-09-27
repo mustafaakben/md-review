@@ -2,6 +2,7 @@
 // harness: which session this document's messages go to, starting one, and
 // delivering a prompt into it. Where the binding is kept and how a terminal
 // is opened are the host's business.
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { AgentHost, Delivery } from './core';
@@ -25,10 +26,22 @@ export interface AgentHostOptions {
    */
   openTerminal?(argv: string[], name: string, cwd: string): boolean;
   handOver?(commandLine: string): void;
+  /** Connect this folder (skill + hooks), asking first where the host asks. */
+  connect?(): Promise<string | null>;
   home?: string;
   /** How long to wait for a started session to show up (ms). */
   startTimeoutMs?: number;
   pollMs?: number;
+}
+
+/** The folder's Claude settings run MD Review's SessionStart hook. */
+export function hooksInstalled(folder: string): boolean {
+  for (const f of ['settings.local.json', 'settings.json']) {
+    try {
+      if (fs.readFileSync(path.join(folder, '.claude', f), 'utf8').includes('mdreview.mjs" hook session-start')) return true;
+    } catch {}
+  }
+  return false;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -75,6 +88,8 @@ export function createAgentHost(o: AgentHostOptions): AgentHost & { deliverPromp
     bind: (b: Binding | undefined) => o.setBinding(b),
     state: (b: Binding) => findSession(o.folder(), b, home),
     delivery: () => o.getDelivery(),
+    connected: () => hooksInstalled(o.folder()),
+    connect: o.connect,
     setDelivery: (d: Delivery) => o.setDelivery(d),
 
     async start(agent: AgentKind, resume?: string): Promise<Binding | null> {

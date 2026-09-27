@@ -214,6 +214,8 @@ const post = (m: unknown) => {
   } else vscode.postMessage(m);
 };
 
+/** Keeps the agent chip's running/idle/busy dot current, once the host has said it has agents. */
+let agentPoll: ReturnType<typeof setInterval> | undefined;
 /** Drafts and open threads Send would hand over. */
 let sendable = 0;
 function sendLabel() {
@@ -1962,6 +1964,7 @@ window.addEventListener('message', (ev) => {
       break;
     case 'agent':
       agentMenu.set(m.agent);
+      if (!agentPoll) agentPoll = setInterval(() => document.hidden || post({ type: 'agentState' }), 5000);
       break;
     case 'handOver':
       // Browser mode can't open a terminal: the user runs the command.

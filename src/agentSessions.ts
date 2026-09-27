@@ -190,6 +190,34 @@ function firstLine(file: string): string {
   }
 }
 
+/**
+ * id, cwd and timestamp from a rollout's session_meta line. The line carries
+ * the whole base instructions and can be far longer than what's read, so the
+ * fields are picked from its start rather than parsed.
+ */
+export function codexMeta(head: string): { id: string; cwd: string; timestamp: string } | undefined {
+  try {
+    const m = JSON.parse(head)?.payload;
+    if (m?.id && typeof m.cwd === 'string') return { id: m.id, cwd: m.cwd, timestamp: m.timestamp };
+  } catch {}
+  if (!head.includes('"session_meta"')) return undefined;
+  const field = (k: string) => {
+    const m = head.match(new RegExp(`"${k}":"((?:[^"\\\\]|\\\\.)*)"`));
+    if (!m) return undefined;
+    try {
+      return JSON.parse(`"${m[1]}"`) as string;
+    } catch {
+      return undefined;
+    }
+  };
+  const p = head.indexOf('"payload"');
+  const rest = p < 0 ? head : head.slice(p);
+  const id = (rest.match(/"id":"([0-9a-f-]{36})"/) || [])[1];
+  const cwd = field('cwd');
+  const timestamp = (rest.match(/"timestamp":"([^"]+)"/) || [])[1] ?? '';
+  return id && cwd ? { id, cwd, timestamp } : undefined;
+}
+
 function codexNames(home: string): Map<string, string> {
   const names = new Map<string, string>();
   try {
@@ -227,12 +255,7 @@ export function codexSessions(folder: string, home = os.homedir(), opts: { days?
     }
     for (const n of files) {
       const f = path.join(dir, n);
-      let meta: any;
-      try {
-        meta = JSON.parse(firstLine(f)).payload;
-      } catch {
-        continue;
-      }
+      const meta = codexMeta(firstLine(f));
       if (!meta?.id || typeof meta.cwd !== 'string' || !within(folder, meta.cwd)) continue;
       const created = Date.parse(meta.timestamp) || 0;
       if (opts.sinceMs && created < opts.sinceMs) continue;
@@ -257,7 +280,7 @@ export function listSessions(folder: string, home = os.homedir()): AgentSession[
 /** The current state of a bound session, or undefined when it's gone from the list. */
 export function findSession(folder: string, b: Binding, home = os.homedir()): AgentSession | undefined {
   if (b.agent === 'claude') return liveClaudeSessions(folder, home).find((s) => s.id === b.id) ?? pastClaudeSessions(folder, home, 50).find((s) => s.id === b.id);
-  return codexSessions(folder, home, { days: 30, limit: 500 }).find((s) => s.id === b.id);
+  return codexSessions(folder, home, { days: 14, limit: 200 }).find((s) => s.id === b.id);
 }
 
 export class DeliveryError extends Error {}
