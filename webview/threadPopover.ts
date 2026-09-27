@@ -29,7 +29,7 @@ export function createThreadPopover(options: Options) {
   function place() {
     if (!id || el.hidden) return;
     const r = options.rect(id);
-    if (!r || r.bottom < 56 || r.top > innerHeight) { if (!pinned) close(); return; }
+    if (!r || r.bottom < 56 || r.top > innerHeight) { close(); return; }
     const width = Math.min(350, innerWidth - 24);
     el.style.width = `${width}px`;
     el.style.left = `${Math.max(12, Math.min(r.left, innerWidth - width - 12))}px`;
@@ -62,7 +62,7 @@ export function createThreadPopover(options: Options) {
   function show(next: string, pin: boolean, keyboard = false) {
     clearTimeout(hoverTimer); clearTimeout(leaveTimer);
     if (pinned && !pin) return;
-    if (id !== next) { remember(); composing = false; }
+    if (id !== next) { remember(); composing = false; el.replaceChildren(); }
     if (pin && !pinned) returnFocus = document.activeElement as HTMLElement;
     id = next; pinned = pin; render();
     if (keyboard) el.querySelector<HTMLButtonElement>('[data-thread-action="close"]')?.focus({ preventScroll: true });
@@ -100,9 +100,10 @@ export function createThreadPopover(options: Options) {
   return {
     show, close,
     refresh() { if (id) render(); },
-    hover(next: string | null) {
+    hover(next: string | null, immediate = false) {
       clearTimeout(hoverTimer); clearTimeout(leaveTimer);
       if (pinned) return;
+      if (!next && immediate) return close();
       if (next) hoverTimer = setTimeout(() => show(next, false), 300);
       else leaveTimer = setTimeout(() => close(), 180);
     },

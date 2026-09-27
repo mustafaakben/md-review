@@ -70,7 +70,8 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
 - Each thread has Reply, Resolve/Reopen, and Delete. A draft is deleted at once; a submitted or resolved thread asks "Delete thread?" first, since deleting it removes its replies too and can't be undone.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
-- The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. The choice is remembered, and clicking a highlighted comment in the text reopens the pane.
+- The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. With the pane closed, clicking a highlighted passage opens a compact thread popup beside it. Reply, resolve/reopen, or explicitly **Open in review pane** from the popup. Holding ⌘ while hovering a highlight (Ctrl on Windows/Linux) shows a brief preview; releasing the modifier dismisses the preview. Escape or clicking outside dismisses it. **Edit passage** places the cursor in the text, and dragging across a highlight still selects text. Alt+Enter (Option+Return on macOS) opens the comment at the cursor.
+- With the pane open, clicking a highlighted passage reveals and activates its thread. Clicking a thread’s quote scrolls to and highlights the passage without moving the writing cursor. Toggling the pane preserves the current reading position through the change in text wrapping.
 
 **Writing: a continuous live Markdown canvas.**
 - Click anywhere and write. The document is one editor: there are no block editing boxes, active-paragraph fills, or Edit/Done switches.

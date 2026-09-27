@@ -1,3 +1,4 @@
+import { createThreadPopover } from './threadPopover';
 import { createLiveEditor, LiveSelection } from './liveEditor';
 import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
@@ -39,6 +40,7 @@ let showResolved = true;
 /** A thread the review inbox jumped to: shown whatever the filters say, until they change. Never saved. */
 let revealed: string | null = null;
 let activeId: string | null = null;
+let liveReady = false;
 let pendingAnchor: (Omit<Captured, 'start' | 'end'> & { lineStart: number; lineEnd: number; scope?: 'section' | 'document' }) | null = null;
 let editing: { ls: number; le: number; original: string; el: HTMLElement; box: HTMLElement } | null = null;
 let deferredPaint = false;
@@ -728,16 +730,16 @@ function card(c: Comment, now = Date.now()): string {
 
 function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
   activeId = id;
+  if (liveReady) live.activateThread(id, scrollDoc && !redlines.isOn());
   document.querySelectorAll('.mdr-hl.active, .mdr-card.active').forEach((e) => e.classList.remove('active'));
   if (!id) return;
-  if (scrollCard) setSidebarOpen(true); // clicking a highlight brings its thread into view
+  if (scrollCard) setSidebarOpen(true, !scrollDoc); // explicit passage jumps may intentionally change the reading position
   const marks = doc.querySelectorAll(`.mdr-hl[data-cid="${id}"]`);
   marks.forEach((m) => m.classList.add('active'));
   const cardEl = sidebar.querySelector(`.mdr-card[data-id="${id}"]`);
   cardEl?.classList.add('active');
   if (scrollDoc) {
-    if (!redlines.isOn()) live.jump(comments.find(c => c.id === id)?.anchor.lineStart || 1);
-    else reveal(marks[0], 'center');
+    if (redlines.isOn()) reveal(marks[0], 'center');
   }
   // In one column the thread list is below the document, in the same scroll:
   // there the highlight wins.
@@ -1155,7 +1157,7 @@ doc.addEventListener('click', (e) => {
     return;
   }
   const m = t.closest('.mdr-hl') as HTMLElement | null;
-  if (m && window.getSelection()?.isCollapsed) activate(m.dataset.cid!, false, true);
+  if (m && window.getSelection()?.isCollapsed) openThread(m.dataset.cid!);
 });
 
 submitBtn.addEventListener('click', () => post({ type: 'submitReview' }));
@@ -1354,13 +1356,17 @@ showResolvedBox.addEventListener('change', () => {
 });
 
 // Collapsible comments pane; the choice is remembered per editor.
-function setSidebarOpen(open: boolean) {
+function setSidebarOpen(open: boolean, preserve = true) {
+  const changed = open === document.body.classList.contains('mdr-side-collapsed');
+  const restore = liveReady && changed && preserve ? live.keepReadingPlace(activeId) : null;
+  if (liveReady) threadPopover.close();
   document.body.classList.toggle('mdr-side-collapsed', !open);
   sideToggle.textContent = open ? '' : 'Comments';
   sideToggle.setAttribute('aria-label', open ? 'Hide comments' : 'Show comments');
   sideToggle.title = tip(open ? 'Hide the comments pane' : 'Show the comments pane', 'Mod+Alt+P');
   sideToggle.setAttribute('aria-expanded', String(open));
   vscode.setState({ ...(vscode.getState() || {}), sidebarOpen: open });
+  restore?.();
 }
 sideToggle.addEventListener('click', () => setSidebarOpen(document.body.classList.contains('mdr-side-collapsed')));
 setSidebarOpen((vscode.getState() || {}).sidebarOpen ?? true);
@@ -1525,7 +1531,7 @@ doc.addEventListener('focusout', (e) => {
 // commenting do not require a separate mode.
 doc.addEventListener('click', (e) => {
   if (editing || e.button !== 0 || e.altKey || e.ctrlKey || e.metaKey) return;
-  if ((e.target as Element).closest('a, button, input, .mdr-ui, .mdr-rl-ui')) return;
+  if ((e.target as Element).closest('a, button, input, .mdr-ui, .mdr-rl-ui, .mdr-hl')) return;
   const sel = window.getSelection();
   if (!sel || !sel.isCollapsed) return;
   const el = (e.target as Element).closest(EDITABLE) as HTMLElement | null;
@@ -1711,7 +1717,8 @@ const live = createLiveEditor(canvas, {
     pop.style.top = `${selection.rect.bottom + window.scrollY + 8}px`;
   },
   comment: () => liveComment(),
-  thread: (id) => activate(id, false, true),
+  thread: (id, keyboard) => openThread(id, keyboard),
+  hoverThread: (id, immediate) => threadPopover.hover(id, immediate),
   link: (href) => {
     if (href.startsWith('#')) {
       let id = href.slice(1); try { id = decodeURIComponent(id); } catch {}
@@ -1721,6 +1728,28 @@ const live = createLiveEditor(canvas, {
   },
   history: (canUndo, canRedo) => { undoBtn.disabled = !canUndo; redoBtn.disabled = !canRedo; },
 });
+const threadPopover = createThreadPopover({
+  get: id => comments.find(c => c.id === id),
+  rect: id => live.threadRect(id) || doc.querySelector<HTMLElement>(`.mdr-hl[data-cid="${CSS.escape(id)}"]`)?.getBoundingClientRect() || null,
+  reply: (id, body) => post({ type: 'reply', id, body }),
+  resolve: (id, status) => post({ type: 'setStatus', id, status }),
+  sidebar: id => activate(id, false, true),
+  edit: id => live.editThread(id),
+});
+liveReady = true;
+function openThread(id: string, keyboard = false) {
+  hidePop();
+  // A filtered-out thread must still be reachable from its passage.
+  const c = comments.find(c => c.id === id);
+  if (c && !passes(c, filter, showResolved)) { revealed = id; renderSidebar(); }
+  if (document.body.classList.contains('mdr-side-collapsed')) {
+    activate(id, false, false);
+    threadPopover.show(id, true, keyboard);
+  } else {
+    threadPopover.close();
+    activate(id, false, true);
+  }
+}
 function liveComment() {
   const selected = live.selection() || liveSelection;
   if (!selected) return toast('Select a passage to comment on it.');
@@ -1824,6 +1853,7 @@ window.addEventListener('message', (ev) => {
     case 'comments':
       comments = m.data.comments || [];
       live.setThreads(comments);
+      threadPopover.refresh();
       author = m.author;
       // A remembered From Claude filter with nothing left to triage opens on All instead.
       if (!commentsSeen && filter.status === 'agent' && !comments.some(isAgentDraft)) setFilter({ status: 'all' }, false);

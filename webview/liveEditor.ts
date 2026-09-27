@@ -6,6 +6,7 @@ import { syntaxTree } from '@codemirror/language';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 import MarkdownIt from 'markdown-it';
 import { createDiagrams } from './diagrams';
+import { isMac } from './keys';
 import type { SourceChange } from '../src/sourceEdit';
 
 const remote = Annotation.define<boolean>();
@@ -24,7 +25,8 @@ export interface LiveOptions {
   status(message: string, conflict?: boolean): void;
   selection(s: LiveSelection | null): void;
   comment(): void;
-  thread(id: string): void;
+  thread(id: string, keyboard?: boolean): void;
+  hoverThread(id: string | null, immediate?: boolean): void;
   link(href: string): void;
   history(undo: boolean, redo: boolean): void;
 }
@@ -60,6 +62,10 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let rich: Rich[] = [];
   let threads: Thread[] = [];
+  let activeThread: string | null = null;
+  const threadRanges = new Map<string, { from: number; to: number }>();
+  let commentGesture = false;
+  let hoveredThread: string | null = null;
   let waiting: (() => void)[] = [];
   let recovery = options.recovery;
   const historySlot = new Compartment();
@@ -103,8 +109,8 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       }
       if (name === 'ListMark') mark(node.from, node.to, 'mdr-live-syntax');
     }});
+    threadRanges.clear();
     for (const thread of threads) {
-      if (thread.status === 'resolved') continue;
       const start = state.doc.line(Math.max(1, Math.min(state.doc.lines, thread.anchor.lineStart || 1))).from;
       const end = state.doc.line(Math.max(1, Math.min(state.doc.lines, thread.anchor.lineEnd || 1))).to;
       const source = state.doc.toString();
@@ -113,7 +119,10 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       const found = matches.sort((a, b) => Math.abs(a - start) - Math.abs(b - start))[0] ?? -1;
       const from = found < 0 ? start : found;
       const to = found < 0 ? end : from + thread.anchor.quote.length;
-      if (from < to && !widgets.some(r => from < r.to && to > r.from)) out.push(Decoration.mark({ class: 'mdr-live-comment', attributes: { 'data-thread': thread.id } }).range(from, to));
+      if (from >= to) continue;
+      threadRanges.set(thread.id, { from, to });
+      if (thread.status === 'resolved' && thread.id !== activeThread) continue;
+      if (!widgets.some(r => from < r.to && to > r.from)) out.push(Decoration.mark({ class: 'mdr-live-comment' + (activeThread === thread.id ? ' active' : ''), attributes: { 'data-thread': thread.id, role: 'button', 'aria-keyshortcuts': 'Alt+Enter', 'aria-label': 'Read comment on ' + thread.anchor.quote.slice(0, 80) } }).range(from, to));
     }
     return Decoration.set(out, true);
   }
@@ -164,20 +173,67 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     keymap.of([
       { key: 'Enter', run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
       { key: 'Backspace', run: deleteMarkupBackward },
+      { key: 'Alt-Enter', run: () => {
+        const pos = view.state.selection.main.head;
+        const hit = [...threadRanges].find(([, r]) => pos >= r.from && pos <= r.to);
+        if (!hit) return false;
+        options.thread(hit[0], true); return true;
+      } },
       { key: 'Mod-Alt-m', run: () => { options.comment(); return true; } },
       { key: 'Mod-s', run: () => { flush(); return true; } },
       ...historyKeymap, ...searchKeymap, ...defaultKeymap,
     ]),
     EditorView.contentAttributes.of({ 'aria-label': 'Markdown document', spellcheck: 'true' }),
     EditorView.domEventHandlers({
-      focus: () => { view.dispatch({ effects: focused.of(true) }); },
-      blur: () => { view.dispatch({ effects: focused.of(false) }); flush(); },
+      focus: event => {
+        if ((event.target as Element).closest('[data-thread]')) return;
+        view.dispatch({ effects: focused.of(true) });
+      },
+      blur: event => {
+        if (view.contentDOM.contains(event.relatedTarget as Node)) return;
+        view.dispatch({ effects: focused.of(false) }); flush();
+      },
       compositionend: () => { timer = setTimeout(flush, 600); },
-      mouseup: () => { setTimeout(() => options.selection(currentSelection()), 0); },
+      mouseup: () => { if (!commentGesture) setTimeout(() => options.selection(currentSelection()), 0); },
+      mouseover: event => {
+        if (commentGesture) return;
+        const mark = (event.target as Element).closest('[data-thread]');
+        if (mark && !mark.contains(event.relatedTarget as Node)) {
+          hoveredThread = mark.getAttribute('data-thread');
+          options.hoverThread((isMac ? event.metaKey : event.ctrlKey) ? hoveredThread : null, true);
+        }
+      },
+      mouseout: event => {
+        const mark = (event.target as Element).closest('[data-thread]');
+        if (mark && !mark.contains(event.relatedTarget as Node)) { hoveredThread = null; options.hoverThread(null); }
+      },
+      mousedown: event => {
+        const id = (event.target as Element).closest('[data-thread]')?.getAttribute('data-thread');
+        if (!id || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+        event.preventDefault(); commentGesture = true; options.hoverThread(null);
+        const x = event.clientX, y = event.clientY;
+        const start = view.posAtCoords({ x, y });
+        let dragged = false;
+        const move = (e: MouseEvent) => {
+          if (!dragged && Math.hypot(e.clientX - x, e.clientY - y) < 5) return;
+          dragged = true;
+          const to = view.posAtCoords({ x: e.clientX, y: e.clientY });
+          if (start !== null && to !== null) { view.dispatch({ selection: EditorSelection.range(start, to) }); view.focus(); }
+        };
+        const up = () => {
+          document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
+          commentGesture = false;
+          if (dragged) options.selection(currentSelection());
+          else options.thread(id);
+        };
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up, { once: true });
+        return true;
+      },
       click: event => {
         const a = (event.target as Element).closest('a');
         if (a) { event.preventDefault(); options.link(a.getAttribute('href') || ''); return true; }
-        const id = (event.target as Element).closest('[data-thread]')?.getAttribute('data-thread'); if (id) options.thread(id); },
+        const id = (event.target as Element).closest('[data-thread]')?.getAttribute('data-thread');
+        if (id && !event.altKey) { event.preventDefault(); if (event.detail === 0) options.thread(id, true); return true; } },
     }),
     EditorView.updateListener.of(update => {
       if (update.docChanged) {
@@ -202,6 +258,13 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       '.cm-panels': { backgroundColor: 'var(--doc-bg)', color: 'var(--doc-fg)', border: '1px solid var(--doc-rule)' },
     }),
   ] }) });
+  document.addEventListener('keydown', event => {
+    if (event.key === (isMac ? 'Meta' : 'Control') && !event.repeat && hoveredThread && !commentGesture) options.hoverThread(hoveredThread);
+  });
+  document.addEventListener('keyup', event => {
+    if (!(isMac ? event.metaKey : event.ctrlKey)) options.hoverThread(null, true);
+  });
+  window.addEventListener('blur', () => options.hoverThread(null, true));
   const footer = document.createElement('div');
   footer.className = 'mdr-live-generated';
   parent.appendChild(footer);
@@ -277,6 +340,37 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     text: () => view.state.doc.toString(),
     undo: () => undo(view), redo: () => redo(view), find: () => openSearchPanel(view),
     refreshTheme: drawDiagrams,
+    activateThread(id: string | null, scroll = false) {
+      activeThread = id; view.dispatch({ effects: refresh.of(null) });
+      const range = id && threadRanges.get(id);
+      if (scroll && range) view.dispatch({ effects: EditorView.scrollIntoView(range.from, { y: 'center' }) });
+    },
+    threadRect(id: string) {
+      const marks = Array.from(parent.querySelectorAll<HTMLElement>('[data-thread]')).filter(el => el.dataset.thread === id);
+      const mark = marks.find(el => { const r = el.getBoundingClientRect(); return r.bottom > 56 && r.top < innerHeight; });
+      return mark?.getBoundingClientRect() || null;
+    },
+    editThread(id: string) {
+      const range = threadRanges.get(id);
+      if (range) { view.dispatch({ selection: { anchor: range.from }, effects: EditorView.scrollIntoView(range.from, { y: 'center' }) }); view.focus(); }
+    },
+    keepReadingPlace(id?: string | null) {
+      const box = view.contentDOM.getBoundingClientRect();
+      const y = Math.max(80, box.top + 8);
+      const passage = id ? threadRanges.get(id) : null;
+      const passageTop = passage ? view.coordsAtPos(passage.from)?.top : undefined;
+      const pos = passage && passageTop !== undefined && passageTop >= 56 && passageTop < innerHeight ? passage.from : view.posAtCoords({ x: box.left + 12, y }, false) ?? view.viewport.from;
+      const top = view.coordsAtPos(pos)?.top;
+      const selection = view.state.selection;
+      return () => {
+        view.requestMeasure({
+          read: () => top === undefined ? 0 : (view.coordsAtPos(Math.min(pos, view.state.doc.length))?.top ?? top) - top,
+          write: delta => { if (delta) window.scrollBy(0, delta); },
+        });
+        // Width changes never move the caret or turn the passage into an edit.
+        if (!view.state.selection.eq(selection)) view.dispatch({ selection });
+      };
+    },
     setThreads(value: Thread[]) { threads = value; view.dispatch({ effects: refresh.of(null) }); },
     lineTop(line: number) {
       const pos = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines))).from;

@@ -41,6 +41,7 @@ const SHEET: { title: string; rows: Row[] }[] = [
       { label: 'Comment on a section (heading reached from the outline)', keys: [['C']] },
       { label: 'Mark Major, Minor or Nit (in a comment box)', keys: [['Alt+1'], ['Alt+2'], ['Alt+3']] },
       { label: 'Save a comment or reply', keys: [['Mod+Enter']] },
+      { label: 'Open comment at cursor', keys: [['Alt+Enter']] },
       { label: 'Reply to the current thread', keys: [['R']] },
       { label: 'Submit review', keys: [['Mod+Shift+Enter']] },
       { label: 'Send to Claude', keys: [['Mod+Alt+Enter']] },
