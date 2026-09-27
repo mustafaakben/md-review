@@ -19,10 +19,10 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In a folder you haven't trusted, Send to Claude only copies the review prompt (Claude Code would load the folder's own settings and hooks), Add Claude Code Skill is off, the review inbox lists threads without Send All, and Export to Word reads images only from the document's folder and the workspace.",
+      "description": "In a folder you haven't trusted, MD Review doesn't start or resume agent sessions or connect the folder (Claude Code and Codex would load the folder's own settings and hooks); comments can still go to a session that is already running. Export to Word reads images only from the document's folder and the workspace.",
       "restrictedConfigurations": [
         "mdReview.agent.command",
-        "mdReview.agent.launch"
+        "mdReview.agent.codexCommand"
       ]
     },
     "virtualWorkspaces": {
@@ -163,13 +163,13 @@
       },
       {
         "command": "mdReview.sendFolderToClaude",
-        "title": "Send Open Reviews in Folder to Claude",
+        "title": "Send Open Reviews in Folder to Agent",
         "category": "MD Review",
         "icon": "$(sparkle)"
       },
       {
         "command": "mdReview.addClaudeSkill",
-        "title": "Add Claude Code Skill to Workspace",
+        "title": "Connect Agents to Workspace",
         "category": "MD Review"
       },
       {
@@ -210,7 +210,7 @@
       },
       {
         "command": "mdReview.inbox.sendAll",
-        "title": "Send All to Claude",
+        "title": "Send All to Agents",
         "category": "MD Review",
         "icon": "$(sparkle)"
       },
@@ -413,20 +413,26 @@
           "type": "string",
           "scope": "machine",
           "default": "claude",
-          "markdownDescription": "Program started by **Send to Claude**, followed by the review prompt as its last argument. Extra arguments are allowed, e.g. `claude --permission-mode acceptEdits`. Quote a path with spaces: `\"C:\\Program Files\\Claude\\claude.exe\"`. When the program isn't on PATH, the usual install folders are checked too."
+          "markdownDescription": "Program for Claude Code when MD Review **starts or resumes** a session, with any extra arguments, e.g. `claude --permission-mode acceptEdits`. Quote a path with spaces: `\"C:\\\\Program Files\\\\Claude\\\\claude.exe\"`. When the program isn't on PATH, the usual install folders are checked too."
         },
-        "mdReview.agent.launch": {
+        "mdReview.agent.codexCommand": {
+          "type": "string",
+          "scope": "machine",
+          "default": "codex",
+          "markdownDescription": "Program for Codex when MD Review starts or resumes a session, and for `codex queue`, which delivers comments to a running one. Extra arguments apply when starting a session."
+        },
+        "mdReview.agent.delivery": {
           "type": "string",
           "enum": [
-            "direct",
-            "shell"
+            "onSend",
+            "live"
           ],
-          "default": "direct",
+          "default": "onSend",
           "enumDescriptions": [
-            "Start the agent as the terminal's own process; the terminal closes when it exits.",
-            "Open your default shell and run the agent in it; the shell stays open afterwards (e.g. for `claude --continue`)."
+            "Comments wait as drafts until you press Send (or Ask on one thread).",
+            "Each comment, and each reply on an open thread, goes to the connected session when you save it."
           ],
-          "description": "How Send to Claude starts the agent in its terminal."
+          "markdownDescription": "When comments go to the connected Claude Code or Codex session. Also switchable from the session menu in the review pane."
         },
         "mdReview.agent.editMode": {
           "type": "string",
@@ -447,19 +453,6 @@
           "minimum": 1,
           "maximum": 50,
           "markdownDescription": "The most comments **Review with Claude** asks Claude to leave in one review."
-        },
-        "mdReview.agent.mode": {
-          "type": "string",
-          "enum": [
-            "terminal",
-            "clipboard"
-          ],
-          "default": "terminal",
-          "enumDescriptions": [
-            "Start the agent command in a new terminal (the prompt is also copied).",
-            "Only copy the prompt to the clipboard, to paste into any agent."
-          ],
-          "description": "What Send to Claude does with the review prompt."
         }
       }
     },

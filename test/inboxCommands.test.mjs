@@ -1,9 +1,11 @@
-// The review inbox's commands against a stand-in vscode API: Send All starts
-// one Claude per workspace folder with open reviews, and jumping to a thread
+// The review inbox's commands against a stand-in vscode API: Send All delivers
+// each workspace folder's open reviews into the Claude session bound to that
+// folder (stand-in sessions with real inbox sockets), and jumping to a thread
 // in a file that won't open leaves nothing queued for a later panel.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -35,8 +37,8 @@ const mkroot = (name) => {
   fs.mkdirSync(dir);
   return dir;
 };
-const state = { folders: [], mode: 'terminal', trusted: true, pick: undefined, openWith: async () => {} };
-const calls = { terminals: [], info: [], warnings: [], openWith: [] };
+const state = { folders: [], trusted: true, pick: undefined, quickPick: undefined, openWith: async () => {} };
+const calls = { terminals: [], info: [], warnings: [], errors: [], openWith: [], quickPicks: [] };
 
 const Uri = {
   file: (p) => ({ fsPath: p, scheme: 'file', toString: () => `file://${p}` }),
@@ -49,7 +51,6 @@ function walk(dir, acc = []) {
   }
   return acc;
 }
-const promptFile = (t) => t.shellArgs.at(-1).replace('Read and follow the review instructions in ', '');
 const folder = (p) => ({ uri: Uri.file(p), name: path.basename(p), index: 0 });
 const vscode = {
   Uri,
@@ -69,12 +70,19 @@ const vscode = {
     showWorkspaceFolderPick: async () => state.pick,
     showInformationMessage: async (m) => void calls.info.push(m),
     showWarningMessage: async (m) => void calls.warnings.push(m),
+    showErrorMessage: async (m) => void calls.errors.push(m),
+    showQuickPick: async (items, o) => {
+      calls.quickPicks.push({ items, placeHolder: o?.placeHolder });
+      return state.quickPick?.(items);
+    },
     createTerminal: (o) => {
       calls.terminals.push(o);
-      made.push(path.dirname(promptFile(o))); // runAgent's own temporary folder
-      return { show() {} };
+      return { show() {}, state: {} };
     },
+    onDidChangeTerminalShellIntegration: () => ({ dispose() {} }),
   },
+  QuickPickItemKind: { Separator: -1 },
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
   commands: {
     executeCommand: async (id, ...args) => {
       if (id !== 'vscode.openWith') return;
@@ -82,7 +90,7 @@ const vscode = {
       return state.openWith(...args);
     },
   },
-  env: { clipboard: { writeText: async () => {} } },
+  env: { clipboard: { writeText: async () => {} }, shell: '/bin/sh' },
   workspace: {
     get workspaceFolders() {
       return state.folders.map(folder);
@@ -93,7 +101,8 @@ const vscode = {
     textDocuments: [],
     getWorkspaceFolder: (uri) => state.folders.map(folder).find((f) => uri.fsPath.startsWith(f.uri.fsPath + path.sep)),
     getConfiguration: () => ({
-      get: (k, d) => ({ 'agent.mode': state.mode, 'agent.command': process.execPath, 'agent.launch': 'direct' })[k] ?? d,
+      get: (k, d) => ({ 'agent.command': 'claude' })[k] ?? d,
+      update: async () => {},
     }),
     findFiles: async (pattern) => walk(pattern.base.fsPath),
     fs: {
@@ -109,6 +118,38 @@ const load = Module._load;
 Module._load = function (request, ...rest) {
   return request === 'vscode' ? vscode : load.call(this, request, ...rest);
 };
+// Sessions are found under the home folder: a stand-in one, with stand-in Claude sessions in it.
+const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-home-')));
+made.push(home);
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+const inboxes = [];
+/** A running Claude session in `cwd`: a sessions file and an inbox socket that records what arrives. */
+async function claudeSession(cwd, id, { hooked = false } = {}) {
+  const sock = process.platform === 'win32' ? `\\\\.\\pipe\\mdr-test-${id}` : path.join(home, `${id.slice(-12)}.sock`);
+  const got = [];
+  const server = net.createServer((c) => {
+    let buf = '';
+    c.on('data', (d) => (buf += d));
+    c.on('end', () => buf.split('\n').filter(Boolean).forEach((l) => got.push(JSON.parse(l))));
+  });
+  await new Promise((r) => server.listen(sock, r));
+  inboxes.push(server);
+  const dir = path.join(home, '.claude', 'sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  // Our own pid: a process that is certainly alive. One file per session, so a fake pid suffix keeps them apart.
+  fs.writeFileSync(path.join(dir, `${process.pid}${inboxes.length}.json`), JSON.stringify({ pid: process.pid, sessionId: id, cwd, kind: 'interactive', status: 'idle', messagingSocketPath: sock, name: `s-${id.slice(0, 4)}`, updatedAt: Date.now() }));
+  if (hooked) {
+    fs.mkdirSync(path.join(home, '.mdreview', 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.mdreview', 'sessions', `claude-${id}.json`), '{}');
+  }
+  return got;
+}
+const arrived = async (got, n = 1) => {
+  for (let i = 0; i < 100 && got.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+  return got.map((m) => m.message.content);
+};
+const bind = (dir, id) => context.workspaceState.update(`mdReview.agent.binding:${dir}`, { agent: 'claude', id });
 const { sendWorkspaceToClaude, MdReviewEditorProvider } = require(buildCommands());
 const lib = require('../dist/lib.cjs');
 const storage = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-cmd-store-')));
@@ -136,25 +177,30 @@ const three = mkroot('three');
 review(one, 'a.md', 'submitted');
 review(two, 'docs/b.md', 'submitted');
 review(three, 'c.md', 'resolved'); // nothing waiting on Claude here
-const promptOf = (t) => fs.readFileSync(promptFile(t), 'utf8');
 const reset = () => {
   calls.terminals = [];
   calls.info = [];
   calls.warnings = [];
+  calls.errors = [];
   calls.openWith = [];
+  calls.quickPicks = [];
 };
+const inboxOne = await claudeSession(one, '11111111-0000-4000-8000-000000000001');
+const inboxTwo = await claudeSession(two, '22222222-0000-4000-8000-000000000002');
+bind(one, '11111111-0000-4000-8000-000000000001');
+bind(two, '22222222-0000-4000-8000-000000000002');
 
-test('Send All: one Claude per workspace folder with open reviews, each in its own folder', async () => {
+test("Send All: each workspace folder's open reviews go into the session bound to it, and nothing starts", async () => {
   reset();
   state.folders = [one, two, three];
   await sendWorkspaceToClaude(context);
-  assert.deepEqual(
-    calls.terminals.map((t) => t.cwd),
-    [one, two],
-  );
-  assert.match(promptOf(calls.terminals[0]), /- a\.md \(1 open\)/);
-  assert.match(promptOf(calls.terminals[1]), /- docs\/b\.md \(1 open\)/);
-  assert.deepEqual(calls.info, ['Sent the open reviews in one, two to Claude, each in its own terminal.']);
+  assert.equal(calls.terminals.length, 0, 'no new process: the sessions are running');
+  const [a] = await arrived(inboxOne);
+  const [b] = await arrived(inboxTwo);
+  assert.match(a, /- a\.md \(1 open\)/);
+  assert.match(b, /- docs\/b\.md \(1 open\)/);
+  assert.deepEqual(calls.info, ["Sent the open reviews in one, two, each to its folder's session."]);
+  inboxOne.length = inboxTwo.length = 0;
 });
 
 test('Send All saves the copy the Changes view compares against, as Send in a panel does', async () => {
@@ -179,7 +225,7 @@ test('Send All saves the copy the Changes view compares against, as Send in a pa
   MdReviewEditorProvider.panels.set(panel, { session, key: lib.nameKey(a, process.platform), ready: true });
   try {
     await sendWorkspaceToClaude(context);
-    assert.equal(calls.terminals.length, 2);
+    assert.equal((await arrived(inboxOne)).length + (await arrived(inboxTwo)).length, 2);
     assert.deepEqual(mem.get().threads, ['c1']);
     assert.equal(mem.read().toString(), '# Doc\n');
     assert.ok(posted.some((m) => m.type === 'baseline' && m.info), 'the panel was told');
@@ -194,6 +240,8 @@ test('Send All saves the copy the Changes view compares against, as Send in a pa
     vscode.workspace.textDocuments = [];
     await sendWorkspaceToClaude(context);
     assert.equal(saved.read().toString(), '# Doc, unsaved\n');
+    await arrived(inboxOne, 2);
+    await arrived(inboxTwo, 2);
   } finally {
     MdReviewEditorProvider.panels.delete(panel);
     vscode.workspace.textDocuments = [];
@@ -202,30 +250,59 @@ test('Send All saves the copy the Changes view compares against, as Send in a pa
 });
 
 test('Send All with one folder, or nothing open', async () => {
+  inboxOne.length = inboxTwo.length = 0;
   reset();
   state.folders = [two, three];
   await sendWorkspaceToClaude(context);
-  assert.deepEqual(
-    calls.terminals.map((t) => t.cwd),
-    [two],
-  );
-  assert.match(calls.info[0], /^Sent to /);
+  assert.equal((await arrived(inboxTwo)).length, 1);
+  assert.match(calls.info[0], /^Sent to Claude · s-2222\./);
   reset();
   state.folders = [three];
   await sendWorkspaceToClaude(context);
-  assert.equal(calls.terminals.length, 0);
   assert.deepEqual(calls.info, ['No open review comments in three. Submit a review first.']);
 });
 
-test('Send All when prompts only go to the clipboard: one folder, picked', async () => {
+test('no session bound: the one started with MD Review\'s hook is taken; otherwise the user picks, and cancelling sends nothing', async () => {
+  const four = mkroot('four');
+  review(four, 'd.md', 'submitted');
+  const hooked = await claudeSession(four, '44444444-0000-4000-8000-000000000004', { hooked: true });
   reset();
-  state.folders = [one, two];
-  state.mode = 'clipboard';
-  state.pick = folder(two);
+  state.folders = [four];
+  await sendWorkspaceToClaude(context);
+  assert.equal(calls.quickPicks.length, 0, 'no question asked');
+  assert.match((await arrived(hooked))[0], /- d\.md \(1 open\)/);
+  assert.equal(context.workspaceState.get(`mdReview.agent.binding:${four}`).id, '44444444-0000-4000-8000-000000000004');
+
+  const five = mkroot('five');
+  review(five, 'e.md', 'submitted');
+  const a = await claudeSession(five, '55555555-0000-4000-8000-00000000000a');
+  const b = await claudeSession(five, '55555555-0000-4000-8000-00000000000b');
+  reset();
+  state.folders = [five];
+  state.quickPick = () => undefined; // cancelled
+  await sendWorkspaceToClaude(context);
+  assert.equal(calls.quickPicks.length, 1);
+  assert.deepEqual(calls.quickPicks[0].items.filter((i) => i.detail).map((i) => i.detail).sort(), ['55555555-0000-4000-8000-00000000000a', '55555555-0000-4000-8000-00000000000b']);
+  assert.deepEqual(calls.info, []);
+  assert.equal(a.length + b.length, 0);
+  // Picked: bound, and sent there.
+  reset();
+  state.quickPick = (items) => items.find((i) => i.detail === '55555555-0000-4000-8000-00000000000b');
+  await sendWorkspaceToClaude(context);
+  assert.match((await arrived(b))[0], /- e\.md \(1 open\)/);
+  assert.equal(a.length, 0);
+  state.quickPick = undefined;
+});
+
+test('a bound session that has stopped: an error, nothing sent, and no terminal', async () => {
+  const six = mkroot('six');
+  review(six, 'f.md', 'submitted');
+  bind(six, '66666666-0000-4000-8000-000000000006'); // no such session running
+  reset();
+  state.folders = [six];
   await sendWorkspaceToClaude(context);
   assert.equal(calls.terminals.length, 0);
-  assert.deepEqual(calls.info, ['Review prompt copied. Paste it into your agent.']);
-  state.mode = 'terminal';
+  assert.match(calls.errors[0] || '', /isn't running/);
 });
 
 test('jumping to a thread whose file is gone says so and opens nothing', async () => {
@@ -252,5 +329,6 @@ test('a jump whose editor fails to open leaves nothing queued', async () => {
 });
 
 after(() => {
+  for (const s of inboxes) s.close();
   for (const d of made) fs.rmSync(d, { recursive: true, force: true });
 });

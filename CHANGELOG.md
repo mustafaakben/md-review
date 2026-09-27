@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Comments go into a running agent session
+
+- Send to Claude, Ask Claude, Review with Claude, and the folder and inbox sends no longer start a new Claude Code process for each click. They deliver the prompt into a Claude Code or Codex session that is already running, with its context. Claude Code sessions get it through their session inbox; Codex sessions through `codex queue`. An idle session starts on it at once, and a busy one reads it between steps (Claude) or after the current turn (Codex).
+- A session chip under Send shows where comments go, with a dot for idle, busy, or not running. Its menu lists the sessions running in this folder, starts a new Claude or Codex session (a terminal that stays open, bound before it starts), resumes a past one, and offers **Copy prompt instead** and **Disconnect**. Each workspace folder remembers its session. Send with nothing bound opens the menu and sends once you pick; if exactly one running session was started with MD Review's hook, it is picked without asking.
+- **Send comments: When I press Send / Live, as I save each one** (`mdReview.agent.delivery`). Live sends each saved comment, and each reply on an open thread, to the session; comments saved within a moment of each other go as one message. Praise stays a draft.
+- **Connect this folder** (session menu, or **MD Review: Connect Agents to Workspace**, or the CLI's `init-claude`) installs the md-review skill and CLI plus SessionStart and SessionEnd hooks in `.claude/settings.local.json`. A Claude session started in the folder registers itself with MD Review (`~/.mdreview/sessions`) and is told how comments reach it, and a permission rule lets it run the CLI without asking. Optionally sets `crossSessionInbound: accept`, so sessions that skip permission prompts don't hold MD Review's messages for approval. The settings file is merged, never replaced. New CLI command: `hook session-start|session-end`.
+- Prompts point at the folder's copy of the CLI by a relative path when there is one, and ask the agent to resolve with its note in one step, so a round's summary no longer counts a resolved thread as a question.
+- The browser harness sends for real too: it lists and binds sessions the same way, and starting one copies the command for you to run.
+- Removed `mdReview.agent.mode` and `mdReview.agent.launch`. `mdReview.agent.command` now starts or resumes Claude sessions; new `mdReview.agent.codexCommand` and `mdReview.agent.delivery`. In a folder you haven't trusted, MD Review doesn't start sessions or connect the folder, but comments still go to a session that's running.
+- The smoke test uses a short VS Code user-data folder, so it runs from a deep checkout.
+
 ### Keyboard shortcuts that don't type
 
 - Replace the single-key shortcuts with modifier chords that work everywhere, including while writing in the canvas: reply Ctrl+Alt+Y / ⌥⌘Y (was `r`), next/previous comment Ctrl+Alt+J/K / ⌥⌘J/K (was `j`/`k`/`n`/`p` and Alt+↓/↑, which the canvas uses to move a line), next/previous change Alt+F5 / Shift+Alt+F5 on Windows and Linux and ⌥⌘] / ⌥⌘[ on macOS (was `]`/`[`), and the shortcuts sheet Ctrl+Alt+, / ⌥⌘, (`?` still works outside the canvas). `c` and `/` are gone: comment with Ctrl+Alt+M / ⌥⌘M and find with Ctrl+F / ⌘F. Pressing `c` over a selection in the canvas used to type over it.

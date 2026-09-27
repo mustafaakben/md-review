@@ -1,11 +1,11 @@
 // Workspace-level agent commands: send every open review under a folder to
-// Claude, and install the Claude Code skill that teaches it the review loop.
+// the folder's agent session, and connect a folder (skill, CLI and hooks).
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { awaitsAgent, readSidecar } from './commentStore';
 import { buildFolderPrompt } from './agentPrompt';
-import { runAgent } from './agentRun';
+import { agentHostFor, pickSession } from './agentRun';
 import { MdReviewEditorProvider } from './editorProvider';
 
 const SIDECAR = '.md.comments.json';
@@ -53,85 +53,71 @@ export async function sendFolderToClaude(context: vscode.ExtensionContext, uri?:
     void vscode.window.showInformationMessage(`No open review comments in ${name}. Submit a review first.`);
     return;
   }
-  const status = startAgent(context, folder, ws?.uri.fsPath ?? folder.fsPath, files);
+  const status = await sendReviews(context, folder, ws?.uri.fsPath ?? folder.fsPath, files);
   if (status) void vscode.window.showInformationMessage(status);
 }
 
 /**
- * The review inbox's Send All: every workspace folder with open reviews gets
- * its own Claude, started in that folder. When prompts only go to the
- * clipboard there is room for one, so it asks for a folder as above.
+ * The review inbox's Send All: every workspace folder with open reviews sends
+ * them to the session bound to that folder (asking for one where none is).
  */
 export async function sendWorkspaceToClaude(context: vscode.ExtensionContext): Promise<void> {
   const folders = vscode.workspace.workspaceFolders ?? [];
-  const clipboard = vscode.workspace.getConfiguration('mdReview').get<string>('agent.mode') === 'clipboard' || !vscode.workspace.isTrusted;
-  if (folders.length < 2 || clipboard) return sendFolderToClaude(context);
+  if (folders.length < 2) return sendFolderToClaude(context);
   const sent: string[] = [];
   let status: string | null = '';
   for (const ws of folders) {
     const files = await openReviews(ws.uri);
     if (!files.length) continue;
-    status = startAgent(context, ws.uri, ws.uri.fsPath, files);
-    // null: nothing started (no claude found), and the user was already told.
-    if (status === null) return;
-    sent.push(ws.name);
+    status = await sendReviews(context, ws.uri, ws.uri.fsPath, files);
+    if (status !== null) sent.push(ws.name);
   }
-  if (!sent.length) void vscode.window.showInformationMessage('No open review comments in this workspace. Submit a review first.');
-  else if (sent.length > 1) void vscode.window.showInformationMessage(`Sent the open reviews in ${sent.join(', ')} to Claude, each in its own terminal.`);
+  if (!sent.length && status === '') void vscode.window.showInformationMessage('No open review comments in this workspace. Submit a review first.');
+  else if (sent.length > 1) void vscode.window.showInformationMessage(`Sent the open reviews in ${sent.join(', ')}, each to its folder's session.`);
   else if (status) void vscode.window.showInformationMessage(status);
 }
 
-function startAgent(context: vscode.ExtensionContext, folder: vscode.Uri, cwd: string, files: { mdPath: string; open: number }[]): string | null {
+/**
+ * Deliver the folder's open reviews to its bound session. Returns a status
+ * line, or null when nothing was sent (cancelled, or the user was told why).
+ */
+async function sendReviews(context: vscode.ExtensionContext, folder: vscode.Uri, cwd: string, files: { mdPath: string; open: number }[]): Promise<string | null> {
+  const host = agentHostFor(context, cwd, path.basename(cwd));
+  if (!(await pickSession(host, path.basename(cwd)))) return null;
+  const local = path.join(cwd, '.claude', 'skills', 'md-review', 'mdreview.mjs');
   const prompt = buildFolderPrompt({
     folder: folder.fsPath,
     cwd,
     files,
-    cliPath: vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
+    cliPath: fs.existsSync(local) ? local : vscode.Uri.joinPath(context.extensionUri, 'cli', 'mdreview.mjs').fsPath,
     suggest: vscode.workspace.getConfiguration('mdReview').get<string>('agent.editMode') === 'suggest',
   });
-  // The copies the Changes view compares against, taken before Claude can start (as Send in a panel does).
+  // The copies the Changes view compares against, taken before the agent can start (as Send in a panel does).
   const before = files.map((f) => [f.mdPath, MdReviewEditorProvider.textOf(f.mdPath)] as const);
-  const status = runAgent(prompt, path.basename(folder.fsPath), cwd);
-  // null: nothing started, so nothing to compare against.
+  let status: string | null;
+  try {
+    status = await host.deliverPrompt(prompt);
+  } catch (e) {
+    void vscode.window.showErrorMessage((e as Error).message);
+    return null;
+  }
   if (status !== null) for (const [mdPath, text] of before) if (text !== undefined) MdReviewEditorProvider.snapshotSent(context, mdPath, text);
   return status;
 }
 
+/** Connect Agents to Workspace: the skill, CLI and hooks for Claude Code in a workspace folder. */
 export async function addClaudeSkill(context: vscode.ExtensionContext): Promise<void> {
-  if (!vscode.workspace.isTrusted) {
-    void vscode.window.showInformationMessage('Trust this folder first; the skill is for running Claude Code in it.');
-    return;
-  }
-  const ws = await pickWorkspaceFolder('Add the MD Review skill to which folder?');
+  const ws = await pickWorkspaceFolder('Connect which folder to MD Review?');
   if (ws === null) return;
   if (!ws) {
-    void vscode.window.showInformationMessage('Open a folder first; the skill is added to its .claude/skills.');
+    void vscode.window.showInformationMessage('Open a folder first; connecting adds to its .claude folder.');
     return;
   }
-  const src = (f: string) => vscode.Uri.joinPath(context.extensionUri, 'cli', f).fsPath;
-  const dest = path.join(ws.uri.fsPath, '.claude', 'skills', 'md-review');
-  const skill = path.join(dest, 'SKILL.md');
-  const existing = fs.existsSync(skill) ? fs.readFileSync(skill, 'utf8') : undefined;
-  if (existing !== undefined && existing !== fs.readFileSync(src('SKILL.md'), 'utf8')) {
-    const replace = 'Replace';
-    const pick = await vscode.window.showWarningMessage(
-      `${ws.name}/.claude/skills/md-review/SKILL.md already exists and differs from this version.`,
-      { modal: true },
-      replace,
-    );
-    if (pick !== replace) return;
-  }
+  const host = agentHostFor(context, ws.uri.fsPath, ws.name);
   try {
-    fs.mkdirSync(dest, { recursive: true });
-    for (const f of ['SKILL.md', 'mdreview.mjs']) fs.copyFileSync(src(f), path.join(dest, f));
+    const status = await host.connect?.();
+    if (status) void vscode.window.showInformationMessage(status);
   } catch (e) {
-    void vscode.window.showErrorMessage(`Couldn't write ${dest}: ${(e as Error).message}`);
-    return;
+    void vscode.window.showErrorMessage(`Couldn't connect ${ws.name}: ${(e as Error).message}`);
   }
-  const open = 'Open SKILL.md';
-  const pick = await vscode.window.showInformationMessage(
-    `Added the MD Review skill to ${ws.name}. Claude Code started in this folder can now work through your review comments when you ask.`,
-    open,
-  );
-  if (pick === open) void vscode.window.showTextDocument(vscode.Uri.file(skill));
 }

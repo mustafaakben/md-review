@@ -12,8 +12,10 @@ const root = path.resolve(here, '../..');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-smoke-'));
 fs.writeFileSync(path.join(work, 'doc.md'), '# Title\n\nA bold claim here.\n\nSecond para.\n');
 fs.mkdirSync(path.join(work, '.vscode'));
-// Send to Claude only copies the prompt: no terminal, no agent needed.
-fs.writeFileSync(path.join(work, '.vscode', 'settings.json'), JSON.stringify({ 'mdReview.agent.mode': 'clipboard' }));
+fs.writeFileSync(path.join(work, '.vscode', 'settings.json'), JSON.stringify({}));
+// VS Code's IPC socket lives in the user data folder, and its path must stay under
+// about 103 characters: the default (.vscode-test/ in the repo) is too long in a deep checkout.
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'mdr-ud-'));
 
 try {
   await runTests({
@@ -21,11 +23,12 @@ try {
     extensionDevelopmentPath: root,
     extensionTestsPath: path.join(here, 'suite.cjs'),
     extensionTestsEnv: { MDR_SMOKE_DIR: work },
-    launchArgs: [work, '--disable-extensions', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes'],
+    launchArgs: [work, '--user-data-dir', userData, '--disable-extensions', '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes'],
   });
 } catch (e) {
   console.error(e);
   process.exitCode = 1;
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
+  fs.rmSync(userData, { recursive: true, force: true });
 }

@@ -38,7 +38,8 @@ export interface AgentHostOptions {
 export function hooksInstalled(folder: string): boolean {
   for (const f of ['settings.local.json', 'settings.json']) {
     try {
-      if (fs.readFileSync(path.join(folder, '.claude', f), 'utf8').includes('mdreview.mjs" hook session-start')) return true;
+      const groups = JSON.parse(fs.readFileSync(path.join(folder, '.claude', f), 'utf8'))?.hooks?.SessionStart;
+      if (Array.isArray(groups) && groups.some((g) => g?.hooks?.some?.((h: any) => typeof h?.command === 'string' && h.command.includes('mdreview.mjs" hook session-start')))) return true;
     } catch {}
   }
   return false;
@@ -56,6 +57,8 @@ export function createAgentHost(o: AgentHostOptions): AgentHost & { deliverPromp
   const home = o.home ?? os.homedir();
   const poll = o.pollMs ?? 1000;
   const timeout = o.startTimeoutMs ?? 120000;
+  /** Sessions this host started or resumed, and until when to wait for them to come up. */
+  const starting = new Map<string, number>();
 
   /** argv for an agent: the program (found where installers put it) and the setting's extra arguments. */
   function program(agent: AgentKind): string[] {
@@ -100,6 +103,7 @@ export function createAgentHost(o: AgentHostOptions): AgentHost & { deliverPromp
         const id = resume ?? newSessionId();
         const argv = [...program('claude'), ...(resume ? ['--resume', id] : ['--session-id', id, '-n', name])];
         if (!run(argv, title)) return null;
+        starting.set(id, Date.now() + timeout);
         return { agent, id, name: resume ? undefined : name };
       }
       if (resume) {
@@ -119,8 +123,8 @@ export function createAgentHost(o: AgentHostOptions): AgentHost & { deliverPromp
     async deliverPrompt(prompt: string): Promise<string | null> {
       const b = o.getBinding();
       if (!b) return null;
-      // A session just started (or resumed) takes a moment to open its inbox.
-      if (b.agent === 'claude' && !findSession(o.folder(), b, home)?.live) {
+      // A session just started (or resumed) takes a moment to open its inbox; any other that isn't running has stopped.
+      if (b.agent === 'claude' && !findSession(o.folder(), b, home)?.live && (starting.get(b.id) ?? 0) > Date.now()) {
         const up = await waitFor(() => {
           const s = findSession(o.folder(), b, home);
           return s?.live && s.socket ? s : undefined;

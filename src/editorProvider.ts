@@ -7,7 +7,7 @@ import { ReviewSession, FromWebview, linkPath } from './core';
 import { BaselineStore } from './baselineStore';
 import { saveSendBaseline } from './redlines';
 import { awaitsAgent, readSidecar, Comment } from './commentStore';
-import { runAgent } from './agentRun';
+import { agentHostFor } from './agentRun';
 import { sameName, shouldPoll, folderKey, nameKey, StampTracker, POLL_MS } from './fileWatch';
 import { hasUrlScheme } from './render';
 import { inlineImage, isInside } from './localImage';
@@ -143,6 +143,9 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return w;
       });
     };
+    // Comments go to the session bound to this workspace folder (a lone file: its own folder).
+    const agentFolder = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir;
+    const agents = agentHostFor(this.context, agentFolder, path.basename(mdPath));
     const session = new ReviewSession({
       mdPath,
       author: () => cfg().get<string>('author')?.trim() || systemUser(),
@@ -178,7 +181,8 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
         for (const p of MdReviewEditorProvider.panels.keys()) if (p !== panel) void p.webview.postMessage({ type: 'prefs', prefs });
       },
       baselines: this.baselines.forFile(mdPath),
-      runAgent: (prompt) => runAgent(prompt, path.basename(mdPath), vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath ?? dir),
+      agents,
+      runAgent: (prompt) => agents.deliverPrompt(prompt),
       // The panel shows the summary itself; only reach out when it's out of sight.
       notify: (message) => {
         if (panel.visible) return; // the banner already says it
