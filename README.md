@@ -19,7 +19,7 @@ paper.md.comments.json     ← the comment threads (schema below)
 - A continuous Markdown writing canvas with live formatting, natural Enter and list behavior, and autosave that **never re-serializes the file**. Untouched bytes, line endings, spacing, and markup stay intact.
 - **Send to Claude**: one click hands the open threads to Claude Code in a terminal (or copies the prompt for any other agent).
 - A **review inbox** in the Explorer: every thread in the workspace, grouped by whose turn it is.
-- An outline pane, find in document, `j`/`k` jumps between comments, and status and author filters.
+- An outline pane, find in document, Ctrl+Alt+J/K (⌥⌘J/K) jumps between comments, and status and author filters.
 - Reading themes (Paper, Sepia, Dusk, Night), a serif option, and zoom for the document column.
 - Byte-exact undo and redo of edits made in the view.
 - A collapsible review pane, compact comment popups, modifier-key hover previews, keyboard access, and a browser mode that runs without VS Code.
@@ -90,7 +90,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 **Getting around.**
 - **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O / ⇧⌘O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
 - **Find** (Ctrl+F / ⌘F) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
-- **Jump between comments** with `j` / `k` (or Alt+↓ / Alt+↑). `r` opens a reply on the current thread.
+- **Jump between comments** with Ctrl+Alt+J / Ctrl+Alt+K (⌥⌘J / ⌥⌘K on macOS). Ctrl+Alt+Y (⌥⌘Y) opens a reply on the current thread.
 - **Filter threads** above the comment list by status (All, Drafts, Open, Resolved) and by author. An author filter also matches threads they replied to.
 
 **Word counts and document health.**
@@ -111,7 +111,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - **Send to Claude** at the top of the comments pane submits your drafts and starts [Claude Code](https://claude.com/claude-code) in a new terminal with a prompt that tells it how to work through the open threads. **Ask Claude** on a card sends just that thread.
 - While Claude works, the comments pane shows **Claude is working · 2 of 5** with a progress bar, and the thread Claude is on right now pulses in the document and the list. When every sent thread has an answer you get a summary, "Claude finished: 4 resolved, 1 question for you", with **Show questions** to jump to the threads that need you. If the panel is in the background, VS Code shows the summary as a notification.
 - The prompt is always copied to the clipboard too, so you can paste it into any other agent.
-- **See what Claude changed.** Send to Claude saves a copy of the file first. The **Changes** icon in the toolbar (or `]`) paints a redline over the view: inserted words are underlined and deleted words are struck through, in your theme's diff colours. Math, code, diagrams and tables are marked as changed as a whole, with **Show before** beside them. Each change has **Keep** and **Revert**. Revert puts the old lines back through the same checked, byte-exact path as your own edits, so Undo brings the change back, and it's refused if the file changed since the view was drawn. **Accept all** drops the copy. Edits you make in the view after sending are yours, so they don't show, unless they're inside a change Claude made. `]` and `[` step through the changes.
+- **See what Claude changed.** Send to Claude saves a copy of the file first. The **Changes** icon in the toolbar (or Next Change: Alt+F5, ⌥⌘] on macOS) paints a redline over the view: inserted words are underlined and deleted words are struck through, in your theme's diff colours. Math, code, diagrams and tables are marked as changed as a whole, with **Show before** beside them. Each change has **Keep** and **Revert**. Revert puts the old lines back through the same checked, byte-exact path as your own edits, so Undo brings the change back, and it's refused if the file changed since the view was drawn. **Accept all** drops the copy. Edits you make in the view after sending are yours, so they don't show, unless they're inside a change Claude made. Alt+F5 / Shift+Alt+F5 (⌥⌘] / ⌥⌘[ on macOS) step through the changes.
 - Threads Claude resolved or answered get **Show change**, which jumps to the changes inside that thread's text. When Claude finishes, the summary says how many blocks changed, with **Review changes**.
 - The copy is a file in the extension's workspace storage (in memory in browser mode), never next to your file; only its time and threads go in workspace state. If you send again before reviewing the last round's changes, the older copy stays, so nothing drops out of view. Each file has one copy, a workspace keeps at most 50 of them and 64 MB in all (the oldest go first), **Accept all** deletes it, and files over 4 MB get none (Send says so).
 - Set `mdReview.agent.editMode` to `suggest` and Claude proposes a replacement on each thread instead of editing the file. Its suggestions show on the card with **Apply** and **Dismiss**, so nothing changes until you say so.
@@ -128,28 +128,28 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 - While Claude reviews, the comments pane shows **Claude is reviewing · 3 comments so far**. When Claude says it's done (the CLI's `review-done`), reaches the limit, or goes quiet for five minutes, it shows **Claude left 5 comments · 3 to triage** with **Show them**, and **All 5 of Claude's comments triaged** once you're through. A Send to Claude round started meanwhile gets its own row.
 - Add your own reviewers as Markdown files in `.mdreview/reviewers/` in the workspace. The file name is the label (`House style.md` shows as "House style") and the content is the brief (the first 64 KB). The menu lists the files when it opens and reads only the one you pick; symlinks and anything that isn't a plain file are left out. Claude gets the brief as quoted material from whoever set up the workspace, under rules that keep it to leaving comments.
 
-**Keyboard.** Press `?` outside the writing canvas (or open **More tools → Keyboard shortcuts**) for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Rebind the Ctrl/⌘ shortcuts under **Keyboard Shortcuts** in VS Code (search for "MD Review"); the single-letter keys are fixed.
+**Keyboard.** Press `?` outside the writing canvas, or Ctrl+Alt+, (⌥⌘, on macOS), or open **More tools → Keyboard shortcuts** for the full list. Every shortcut uses the native keys on each platform: Ctrl on Windows and Linux, ⌘ on macOS, and Option (⌥) where Windows uses Alt. Toolbar tooltips show the keys for your platform. Every shortcut except `?` has a modifier, so none of them can type over the document, and all of them work while you write in the canvas. They are chosen to stay clear of VS Code's own keys, the canvas editor's keys (Alt+↑/↓ moves a line), macOS system shortcuts, and characters typed with AltGr on Windows. Rebind any of them under **Keyboard Shortcuts** in VS Code (search for "MD Review").
 
 | Action | Windows / Linux | macOS |
 | --- | --- | --- |
-| Comment on the selected text | Ctrl+Alt+M | ⌥⌘M |
+| Comment on the selected text (or a heading reached from the outline) | Ctrl+Alt+M | ⌥⌘M |
 | Save pending writing | Ctrl+S | ⌘S |
 | Save a comment or reply | Ctrl+Enter | ⌘↩ |
 | Open the comment at the writing cursor | Alt+Enter | ⌥↩ |
 | Preview a comment while hovering | Hold Ctrl | Hold ⌘ |
-| Reply to the current thread | `r` | `r` |
+| Reply to the current thread | Ctrl+Alt+Y | ⌥⌘Y |
 | Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
 | Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
-| Next / previous comment | Alt+↓ / Alt+↑, or `j` / `k` | ⌥↓ / ⌥↑, or `j` / `k` |
-| Next / previous change | `]` / `[` | `]` / `[` |
+| Next / previous comment | Ctrl+Alt+J / Ctrl+Alt+K | ⌥⌘J / ⌥⌘K |
+| Next / previous change | Alt+F5 / Shift+Alt+F5 | ⌥⌘] / ⌥⌘[ |
 | Find in document | Ctrl+F | ⌘F |
 | Outline | Ctrl+Shift+O | ⇧⌘O |
 | Comments pane | Ctrl+Alt+P | ⌥⌘P |
 | Undo / redo edit | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | ⌘Z / ⇧⌘Z |
 | Zoom in / out / reset | Ctrl+= / Ctrl+− / Ctrl+0 | ⌘= / ⌘− / ⌘0 |
-| Keyboard shortcuts | `?` | `?` |
+| Keyboard shortcuts | Ctrl+Alt+, (or `?` outside the canvas) | ⌥⌘, (or `?` outside the canvas) |
 
-Single-letter navigation keys work outside the writing canvas and text fields. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
+Next / previous change uses VS Code's own Next Change key on Windows and Linux, because Ctrl+Alt+] is AltGr+~ on German and other layouts. Tab reaches the toolbar, the outline, and the comments. In the outline, ↑/↓ move between headings, Enter jumps (and moves focus to that heading), and Esc closes it. In the reading panel, the arrow keys pick a theme or font and Esc closes it. Esc inside a text box or editor only closes that box.
 
 **Live reload.** When Claude edits the `.md` or the sidecar, the view updates on its own.
 

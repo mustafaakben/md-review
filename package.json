@@ -94,6 +94,16 @@
         "category": "MD Review"
       },
       {
+        "command": "mdReview.nextChange",
+        "title": "Next Change",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.previousChange",
+        "title": "Previous Change",
+        "category": "MD Review"
+      },
+      {
         "command": "mdReview.toggleOutline",
         "title": "Toggle Outline",
         "category": "MD Review",
@@ -102,6 +112,11 @@
       {
         "command": "mdReview.addComment",
         "title": "Comment on Selection",
+        "category": "MD Review"
+      },
+      {
+        "command": "mdReview.replyToThread",
+        "title": "Reply to Current Thread",
         "category": "MD Review"
       },
       {
@@ -264,6 +279,18 @@
         },
         {
           "command": "mdReview.previousComment",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.nextChange",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.previousChange",
+          "when": "activeCustomEditorId == 'mdReview.editor'"
+        },
+        {
+          "command": "mdReview.replyToThread",
           "when": "activeCustomEditorId == 'mdReview.editor'"
         },
         {
@@ -478,12 +505,26 @@
       },
       {
         "command": "mdReview.nextComment",
-        "key": "alt+down",
+        "key": "ctrl+alt+j",
+        "mac": "cmd+alt+j",
         "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
         "command": "mdReview.previousComment",
-        "key": "alt+up",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.nextChange",
+        "key": "alt+f5",
+        "mac": "cmd+alt+]",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.previousChange",
+        "key": "shift+alt+f5",
+        "mac": "cmd+alt+[",
         "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
@@ -541,6 +582,12 @@
         "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       },
       {
+        "command": "mdReview.replyToThread",
+        "key": "ctrl+alt+y",
+        "mac": "cmd+alt+y",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
         "command": "mdReview.submitReview",
         "key": "ctrl+shift+enter",
         "mac": "cmd+shift+enter",
@@ -556,6 +603,12 @@
         "command": "mdReview.sendToClaude",
         "key": "ctrl+alt+enter",
         "mac": "cmd+alt+enter",
+        "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
+      },
+      {
+        "command": "mdReview.showShortcuts",
+        "key": "ctrl+alt+,",
+        "mac": "cmd+alt+,",
         "when": "activeCustomEditorId == 'mdReview.editor' && !inputFocus && !sideBarFocus && !panelFocus && !auxiliaryBarFocus && !terminalFocus"
       }
     ]

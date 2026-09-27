@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Keyboard shortcuts that don't type
+
+- Replace the single-key shortcuts with modifier chords that work everywhere, including while writing in the canvas: reply Ctrl+Alt+Y / ⌥⌘Y (was `r`), next/previous comment Ctrl+Alt+J/K / ⌥⌘J/K (was `j`/`k`/`n`/`p` and Alt+↓/↑, which the canvas uses to move a line), next/previous change Alt+F5 / Shift+Alt+F5 on Windows and Linux and ⌥⌘] / ⌥⌘[ on macOS (was `]`/`[`), and the shortcuts sheet Ctrl+Alt+, / ⌥⌘, (`?` still works outside the canvas). `c` and `/` are gone: comment with Ctrl+Alt+M / ⌥⌘M and find with Ctrl+F / ⌘F. Pressing `c` over a selection in the canvas used to type over it.
+- New commands **Reply to Current Thread**, **Next Change** and **Previous Change**, rebindable under Keyboard Shortcuts.
+
 ### Continuous writing and contextual review
 
 - Replace paragraph-by-paragraph editing with a continuous Markdown canvas. Headings, emphasis, inline code, and links format as you write; Enter continues paragraphs, lists, and quotes without an Edit/Done switch.

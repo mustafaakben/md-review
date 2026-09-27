@@ -32,17 +32,19 @@ export const tip = (label: string, ...combos: string[]) => `${label} (${combos.m
 /** "Alt" or "Option", for prose such as Alt+double-click. */
 export const altName = isMac ? 'Option' : 'Alt';
 
+/** Next / previous change. Windows and Linux use VS Code's own Next Change key: Ctrl+Alt+] would fire on AltGr+~ (German and others). */
+export const NEXT_CHANGE = isMac ? ['Mod+Alt+]', 'Mod+Alt+['] : ['Alt+F5', 'Shift+Alt+F5'];
+
 interface Row { label: string; keys: string[][] } // alternatives, each a list of combos shown together
 const SHEET: { title: string; rows: Row[] }[] = [
   {
     title: 'Review',
     rows: [
-      { label: 'Comment on selection', keys: [['Mod+Alt+M'], ['C']] },
-      { label: 'Comment on a section (heading reached from the outline)', keys: [['C']] },
+      { label: 'Comment on the selection, or on a heading reached from the outline', keys: [['Mod+Alt+M']] },
       { label: 'Mark Major, Minor or Nit (in a comment box)', keys: [['Alt+1'], ['Alt+2'], ['Alt+3']] },
       { label: 'Save a comment or reply', keys: [['Mod+Enter']] },
       { label: 'Open comment at cursor', keys: [['Alt+Enter']] },
-      { label: 'Reply to the current thread', keys: [['R']] },
+      { label: 'Reply to the current thread', keys: [['Mod+Alt+Y']] },
       { label: 'Submit review', keys: [['Mod+Shift+Enter']] },
       { label: 'Send to Claude', keys: [['Mod+Alt+Enter']] },
     ],
@@ -50,9 +52,9 @@ const SHEET: { title: string; rows: Row[] }[] = [
   {
     title: 'Move around',
     rows: [
-      { label: 'Next / previous comment', keys: [['Alt+ArrowDown', 'Alt+ArrowUp'], ['J', 'K']] },
-      { label: 'Next / previous change (turns on Changes)', keys: [[']', '[']] },
-      { label: 'Find in document', keys: [['Mod+F'], ['/']] },
+      { label: 'Next / previous comment', keys: [['Mod+Alt+J', 'Mod+Alt+K']] },
+      { label: 'Next / previous change (turns on Changes)', keys: [NEXT_CHANGE] },
+      { label: 'Find in document', keys: [['Mod+F']] },
       { label: 'Next / previous match', keys: [['Enter', 'Shift+Enter']] },
       { label: 'Outline', keys: [['Mod+Shift+O']] },
       { label: 'Comments pane', keys: [['Mod+Alt+P']] },
@@ -72,7 +74,7 @@ const SHEET: { title: string; rows: Row[] }[] = [
     rows: [
       { label: 'Zoom in / out', keys: [['Mod+=', 'Mod+-']] },
       { label: 'Reset zoom', keys: [['Mod+0']] },
-      { label: 'Keyboard shortcuts', keys: [['?']] },
+      { label: 'Keyboard shortcuts', keys: [['Mod+Alt+,'], ['?']] },
     ],
   },
 ];

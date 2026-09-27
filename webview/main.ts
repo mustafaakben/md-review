@@ -10,7 +10,7 @@ import { passes, authorsOf, filterBar, FilterState, StatusFilter, isAgentDraft }
 import { Round, ReviewRun, roundBanner, reviewBanner, isWorking, nextExpiry, reviewLeft } from './round';
 import { createReviewMenu } from './review';
 import { Suggestion, suggestionBlock, suggestionEdit } from './suggest';
-import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet } from './keys';
+import { isMac, hasMod, keyLabel, tip, altName, createShortcutSheet, NEXT_CHANGE } from './keys';
 import { blockAtY, reveal, settle, viewTop } from './reveal';
 import { createRedlines, Changes } from './redlines';
 import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, toggleSeverity, metaBadges, severityRank, snapToWords, sectionLines } from './commentMeta';
@@ -94,7 +94,7 @@ app.innerHTML = `
     <div class="mdr-tools">
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
       <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-controls="mdr-reading" aria-expanded="false"></button>
-      <button id="mdr-changes-btn" class="mdr-icon-btn" title="${tip('Changes since you sent to Claude', ']')}" aria-label="Show changes" aria-pressed="false" aria-controls="mdr-changes"></button>
+      <button id="mdr-changes-btn" class="mdr-icon-btn" title="${tip('Changes since you sent to Claude', NEXT_CHANGE[0])}" aria-label="Show changes" aria-pressed="false" aria-controls="mdr-changes"></button>
       <details class="mdr-more" id="mdr-more"><summary aria-label="More tools" title="More tools"><span class="mdr-more-icon" aria-hidden="true"></span></summary>
         <div class="mdr-more-panel">
           <span class="mdr-menu-label">Document tools</span>
@@ -1234,6 +1234,23 @@ function isTyping(t: EventTarget | null): boolean {
   return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
 }
 
+/** Typing in a comment box, a field or a block editor, but not in the writing canvas. */
+function typingOutsideCanvas(): boolean {
+  const el = document.activeElement;
+  return (isTyping(el) && !el!.closest('#mdr-canvas')) || !!editing || !!inline;
+}
+
+/** Open the reply box on the current thread (the one reached with next/previous comment). */
+function replyToActive() {
+  if (!activeId) return toast('Go to a comment first (' + keyLabel('Mod+Alt+J') + '), then reply to it.');
+  // Claude's untriaged drafts have no thread yet: Keep, Do it or Discard comes first.
+  if (comments.some((c) => c.id === activeId && isAgentDraft(c))) return toast('Keep this comment first, then reply to it.');
+  setSidebarOpen(true);
+  openReplies.add(activeId);
+  renderSidebar();
+  (sidebar.querySelector(`.mdr-card[data-id="${activeId}"] textarea`) as HTMLTextAreaElement)?.focus();
+}
+
 /** Undo/redo: native inside a text field, otherwise the last file edit. */
 function undoRedo(which: 'undo' | 'redo') {
   if (!redlines.isOn()) { live[which](); return; }
@@ -1273,9 +1290,16 @@ function runCommand(cmd: string) {
       return redlines.isOn() ? search.open() : live.find();
     case 'next':
     case 'prev':
-      // Alt+Up/Down reach here even while typing a comment or editing text.
-      if (isTyping(document.activeElement)) return;
+      // Moving on from a half-typed comment or edit would leave it behind; the writing canvas is fine.
+      if (typingOutsideCanvas()) return;
       return navigate(cmd === 'next' ? 1 : -1);
+    case 'nextChange':
+    case 'prevChange':
+      if (typingOutsideCanvas()) return;
+      return redlines.step(cmd === 'nextChange' ? 1 : -1);
+    case 'reply':
+      if (typingOutsideCanvas()) return;
+      return replyToActive();
     case 'outline':
       // Never pull focus out of a text box or editor: that would commit a half-typed edit.
       return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
@@ -1315,15 +1339,23 @@ function runCommand(cmd: string) {
 }
 
 document.addEventListener('keydown', (e) => {
-  if ((e.target as Element).closest('#mdr-canvas')) return;
+  const inCanvas = !!(e.target as Element).closest('#mdr-canvas');
   const mod = hasMod(e);
   const k = e.key.toLowerCase();
-  const code = e.code; // Option on macOS changes e.key (⌥M types µ), so match letters by key position
+  const code = e.code; // Option on macOS changes e.key (⌥M types µ), so match Mod+Alt letters by key position
   if (standalone) {
     // In VS Code these arrive as commands via package.json keybindings.
+    const chord = mod && e.altKey && !e.shiftKey && !e.getModifierState('AltGraph'); // AltGr is Ctrl+Alt: leave typed characters alone
     const cmd =
-      mod && e.altKey && code === 'KeyM' && !e.getModifierState('AltGraph') ? 'comment'
-      : mod && e.altKey && code === 'KeyP' && !e.getModifierState('AltGraph') ? 'comments'
+      chord && code === 'KeyM' ? 'comment'
+      : chord && code === 'KeyP' ? 'comments'
+      : chord && code === 'KeyY' ? 'reply'
+      : chord && code === 'KeyJ' ? 'next'
+      : chord && code === 'KeyK' ? 'prev'
+      : chord && code === 'Comma' ? 'shortcuts'
+      : isMac && chord && code === 'BracketRight' ? 'nextChange'
+      : isMac && chord && code === 'BracketLeft' ? 'prevChange'
+      : !isMac && e.altKey && !mod && e.key === 'F5' ? (e.shiftKey ? 'prevChange' : 'nextChange')
       : mod && e.altKey && e.key === 'Enter' ? 'send'
       : mod && e.shiftKey && e.key === 'Enter' ? 'submit'
       : mod && !e.shiftKey && k === 'z' ? 'undo'
@@ -1333,45 +1365,21 @@ document.addEventListener('keydown', (e) => {
       : mod && (e.key === '=' || e.key === '+') ? 'zoomIn'
       : mod && (e.key === '-' || e.key === '_') ? 'zoomOut'
       : mod && e.key === '0' ? 'zoomReset'
-      : e.altKey && !mod && e.key === 'ArrowDown' ? 'next'
-      : e.altKey && !mod && e.key === 'ArrowUp' ? 'prev'
       : '';
-    if (cmd) {
+    // The writing canvas has its own comment, undo, redo and find keys.
+    if (cmd && !(inCanvas && /^(comment|undo|redo|find)$/.test(cmd))) {
       e.preventDefault();
       return runCommand(cmd);
     }
   }
+  if (inCanvas) return;
   // Escape inside an editor or a comment box belongs to that box, not the find bar.
   if (e.key === 'Escape' && search.isOpen() && !editing && !inline && !isTyping(e.target)) return search.close();
-  // `]` and `[` are typed with AltGr (or Option on a Mac) on many layouts.
-  const composed = (e.key === ']' || e.key === '[') && (e.getModifierState('AltGraph') || (isMac && e.altKey && !e.ctrlKey && !e.metaKey));
-  if (((e.ctrlKey || e.metaKey || e.altKey) && !composed) || isTyping(e.target) || editing || inline) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || editing || inline) return;
+  // `?` is the one plain key: every other shortcut has a modifier, so none can type over the document.
   if (e.key === '?') {
     e.preventDefault();
     keySheet.toggle();
-  } else if (keySheet.isOpen()) return;
-  else if (k === 'c' && !e.shiftKey) {
-    const sel = window.getSelection();
-    const onHeading = /^H[1-6]$/.test((e.target as Element).tagName) && doc.contains(e.target as Node);
-    if (onHeading || (sel && !sel.isCollapsed && sel.rangeCount && doc.contains(sel.getRangeAt(0).commonAncestorContainer))) {
-      e.preventDefault();
-      commentOnSelection();
-    }
-
-  } else if (e.key === ']' || e.key === '[') redlines.step(e.key === ']' ? 1 : -1);
-  else if (k === 'j' || k === 'n') navigate(1);
-  else if (k === 'k' || k === 'p') navigate(-1);
-  else if (e.key === '/') {
-    e.preventDefault();
-    search.open();
-  } else if (k === 'r' && activeId) {
-    e.preventDefault();
-    // Claude's untriaged drafts have no thread yet: Keep, Do it or Discard comes first.
-    if (comments.some((c) => c.id === activeId && isAgentDraft(c))) return toast('Keep this comment first, then reply to it.');
-    setSidebarOpen(true);
-    openReplies.add(activeId);
-    renderSidebar();
-    (sidebar.querySelector(`.mdr-card[data-id="${activeId}"] textarea`) as HTMLTextAreaElement)?.focus();
   }
 });
 showResolvedBox.addEventListener('change', () => {
