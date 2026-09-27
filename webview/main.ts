@@ -87,18 +87,21 @@ const standalone = !!(window as any).__mdrStandalone;
 const app = document.getElementById('app')!;
 app.innerHTML = `
   <header class="mdr-toolbar mdr-ui">
-    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="${tip('Outline', 'Mod+Shift+O')}" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span class="mdr-counts"></span><span class="mdr-words" hidden></span></div>
+    <div class="mdr-brand"><span class="mdr-brand-icon" aria-hidden="true"></span>MD Review</div>
+    <div class="mdr-title"><button id="mdr-outline-toggle" class="mdr-icon-btn" title="${tip('Outline', 'Mod+Shift+O')}" aria-label="Toggle outline" aria-controls="mdr-outline" aria-expanded="false"></button><span class="mdr-file"></span><span id="mdr-save-status" class="mdr-save-status" role="status" aria-live="polite"></span></div>
     <div class="mdr-tools">
-      <span class="mdr-history"><button id="mdr-undo" class="mdr-icon-btn" title="${tip('Undo edit', 'Mod+Z')}" aria-label="Undo edit" disabled></button><button id="mdr-redo" class="mdr-icon-btn" title="${tip('Redo edit', isMac ? 'Mod+Shift+Z' : 'Mod+Y')}" aria-label="Redo edit" disabled></button></span>
-      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-expanded="false"></button>
-      <button id="mdr-health-btn" class="mdr-icon-btn" title="Document health" aria-label="Document health" aria-haspopup="dialog" aria-controls="mdr-health" aria-expanded="false"></button>
       <button id="mdr-find-btn" class="mdr-icon-btn" title="${tip('Find in document', 'Mod+F')}" aria-label="Find in document"></button>
+      <button id="mdr-reading-btn" class="mdr-icon-btn mdr-reading-btn" title="Reading view: theme, font, and zoom" aria-label="Reading view: theme, font, and zoom" aria-haspopup="dialog" aria-controls="mdr-reading" aria-expanded="false"></button>
       <button id="mdr-changes-btn" class="mdr-icon-btn" title="${tip('Changes since you sent to Claude', ']')}" aria-label="Show changes" aria-pressed="false" aria-controls="mdr-changes"></button>
-      <button id="mdr-keys-btn" class="mdr-icon-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false"></button>
-      <span class="mdr-hint">Click to edit · select text to comment</span>
-      <button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button>
-      <label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label>
-      <button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button>
+      <details class="mdr-more" id="mdr-more"><summary aria-label="More tools" title="More tools"><span class="mdr-more-icon" aria-hidden="true"></span></summary>
+        <div class="mdr-more-panel">
+          <span class="mdr-menu-label">Document tools</span>
+          <button id="mdr-undo" title="${tip('Undo edit', 'Mod+Z')}" aria-label="Undo edit" disabled>Undo<span>${keyLabel('Mod+Z')}</span></button>
+          <button id="mdr-redo" title="${tip('Redo edit', isMac ? 'Mod+Shift+Z' : 'Mod+Y')}" aria-label="Redo edit" disabled>Redo<span>${keyLabel(isMac ? 'Mod+Shift+Z' : 'Mod+Y')}</span></button>
+          <button id="mdr-health-btn" title="Document health" aria-label="Document health" aria-haspopup="dialog" aria-controls="mdr-health" aria-expanded="false">Document health</button>
+          <button id="mdr-keys-btn" title="${tip('Keyboard shortcuts', '?')}" aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-controls="mdr-keys" aria-expanded="false">Keyboard shortcuts</button>
+        </div>
+      </details>
       <button id="mdr-side-toggle" class="mdr-side-toggle" title="Hide the comments pane"></button>
     </div>
   </header>
@@ -109,12 +112,14 @@ app.innerHTML = `
   <div id="mdr-health" class="mdr-reading-panel mdr-health-panel mdr-ui" role="dialog" aria-label="Document health" hidden></div>
   <div class="mdr-layout">
     <nav id="mdr-outline" class="mdr-outline mdr-ui" aria-label="Outline"></nav>
-    <main class="mdr-writing"><div id="mdr-save-status" class="mdr-save-status mdr-ui" role="status" aria-live="polite"></div><div id="mdr-conflict" class="mdr-conflict mdr-ui" hidden><span>Your writing is preserved. Copy it before loading the updated file.</span><button id="mdr-copy-draft">Copy my writing</button><button id="mdr-load-disk">Load updated file</button></div><div id="mdr-canvas" class="mdr-doc"></div><div id="mdr-doc" class="mdr-doc" hidden></div></main>
+    <main class="mdr-writing"><div id="mdr-conflict" class="mdr-conflict mdr-ui" hidden><span>Your writing is preserved. Copy it before loading the updated file.</span><button id="mdr-copy-draft">Copy my writing</button><button id="mdr-load-disk">Load updated file</button></div><div id="mdr-canvas" class="mdr-doc"></div><div id="mdr-doc" class="mdr-doc" hidden></div><footer class="mdr-document-footer"><span>Markdown</span><span class="mdr-words" hidden></span></footer></main>
     <aside class="mdr-sidebar mdr-ui">
       <div class="mdr-side-head">
+        <div class="mdr-review-heading"><h2>Review</h2><button id="mdr-doc-comment" class="mdr-doc-comment" title="A comment about the whole document, not a passage" aria-label="Comment on document">Add note</button></div>
         <div class="mdr-filters"></div>
-        <button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button>
-        <button id="mdr-doc-comment" class="mdr-doc-comment" title="A comment about the whole document, not a passage">Comment on document</button>
+        <span class="mdr-counts mdr-sr"></span>
+        <div class="mdr-review-actions"><button id="mdr-submit" class="mdr-primary" title="${tip('Submit every draft', 'Mod+Shift+Enter')}" disabled>Submit review</button><button id="mdr-send" class="mdr-send" title="${tip('Submit drafts and hand the open threads to Claude Code', 'Mod+Alt+Enter')}">Send to Claude</button></div>
+        <div class="mdr-review-options"><button id="mdr-review-btn" class="mdr-review-btn" title="Review with Claude: Claude reads the document and leaves draft comments for you" aria-haspopup="menu" aria-expanded="false" aria-controls="mdr-review-menu"><span>Review with Claude</span></button><label class="mdr-toggle" title="Show resolved threads"><input type="checkbox" id="mdr-show-resolved"> Resolved</label></div>
       </div>
       <div id="mdr-round" class="mdr-round" role="status" aria-live="polite" hidden></div>
       <div id="mdr-threads"></div>
@@ -210,6 +215,17 @@ function toast(msg: string, isError = false) {
   clearTimeout((toastEl as any)._t);
   (toastEl as any)._t = setTimeout(() => (toastEl.hidden = true), isError ? 7000 : 2500);
 }
+
+const moreTools = document.getElementById('mdr-more') as HTMLDetailsElement;
+document.addEventListener('pointerdown', event => {
+  if (!moreTools.contains(event.target as Node)) moreTools.open = false;
+});
+moreTools.addEventListener('click', event => {
+  if ((event.target as Element).closest('button')) moreTools.open = false;
+});
+moreTools.addEventListener('keydown', event => {
+  if (event.key === 'Escape') { moreTools.open = false; moreTools.querySelector('summary')!.focus(); event.stopPropagation(); }
+});
 
 // ---------------------------------------------------------------- painting
 function paint() {
@@ -567,7 +583,7 @@ function renderSidebar() {
   if (!visible.length && comments.length) {
     add('e:filter', `<div class="mdr-empty">No threads match this filter. <button data-act="clear-filter">Show all</button></div>`);
   } else if (!visible.length) {
-    add('e:none', `<div class="mdr-empty">Select text in the document to add a comment.<br><br>Write naturally. Use # for headings, **bold** for emphasis, and Enter to keep going. Your changes save automatically.</div>`);
+    add('e:none', `<div class="mdr-empty"><strong>A little room for feedback.</strong><p>Select a passage to leave a comment, or add a note about the whole document.</p><span>Your writing saves automatically.</span></div>`);
   }
   const now = Date.now(); // one clock for every card's working state
   const cards = (cs: Comment[]) => cs.forEach((c) => add('c:' + c.id, card(c, now)));
@@ -1150,7 +1166,7 @@ redoBtn.addEventListener('click', () => post({ type: 'redo' }));
 document.getElementById('mdr-find-btn')!.addEventListener('click', () => redlines.isOn() ? search.open() : live.find());
 // A keyboard press (detail 0) moves focus into the outline; a mouse click leaves it alone.
 outlineBtn.addEventListener('click', (e) => outline.setOpen(!outline.isOpen(), e.detail === 0));
-outline.setOpen((vscode.getState() || {}).outlineOpen ?? false);
+outline.setOpen((vscode.getState() || {}).outlineOpen ?? window.innerWidth > 1100);
 
 // ---------------------------------------------------------------- filters & navigation
 function setFilter(f: Partial<FilterState>, repaint = true) {
@@ -1680,6 +1696,7 @@ const live = createLiveEditor(canvas, {
   status: (message, conflict = false) => {
     const status = document.getElementById('mdr-save-status')!;
     status.textContent = message;
+    status.title = message;
     status.classList.toggle('error', conflict);
     document.getElementById('mdr-conflict')!.hidden = !conflict;
   },

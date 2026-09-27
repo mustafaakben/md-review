@@ -327,7 +327,7 @@ export function createHealth(o: Options): Health {
     const inside = panel.contains(document.activeElement);
     panel.hidden = true;
     button.setAttribute('aria-expanded', 'false');
-    if (returnFocus || inside) button.focus();
+    if (returnFocus || inside) ((button.closest('details:not([open])')?.querySelector('summary') as HTMLElement | null) || button).focus();
   }
 
   panel.tabIndex = -1; // focusable when it has no buttons

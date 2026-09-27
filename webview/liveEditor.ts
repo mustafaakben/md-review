@@ -160,6 +160,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
   const view = new EditorView({ parent, state: EditorState.create({ extensions: [
     focusState, preview, markdown({ base: markdownLanguage, addKeymap: false }), historySlot.of(history()), drawSelection(), EditorView.lineWrapping,
     search({ top: true }),
+    EditorState.phrases.of({ next: 'Next', previous: 'Previous', all: 'Select all', 'match case': 'Match case', regexp: 'Regex', 'by word': 'Whole word', replace: 'Replace', 'replace all': 'Replace all', close: 'Close search' }),
     keymap.of([
       { key: 'Enter', run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
       { key: 'Backspace', run: deleteMarkupBackward },

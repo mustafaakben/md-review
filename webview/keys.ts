@@ -101,7 +101,7 @@ export function createShortcutSheet(el: HTMLElement): ShortcutSheet {
   function close() {
     el.hidden = true;
     setExpanded(false);
-    returnFocus?.focus();
+    ((returnFocus?.closest('details:not([open])')?.querySelector('summary') as HTMLElement | null) || returnFocus)?.focus();
     returnFocus = null;
   }
   el.addEventListener('click', (e) => {

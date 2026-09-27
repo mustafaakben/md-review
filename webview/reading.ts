@@ -16,7 +16,7 @@ export interface ReadingPrefs {
 
 export const DEFAULT_PREFS: ReadingPrefs = { zoom: 1, theme: 'auto', font: 'sans' };
 const THEMES: [ReadingTheme, string][] = [
-  ['auto', 'Match VS Code'],
+  ['auto', 'MD Review'],
   ['paper', 'Paper'],
   ['sepia', 'Sepia'],
   ['dusk', 'Dusk'],
