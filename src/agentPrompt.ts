@@ -49,7 +49,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const ANCHOR_NOTE =
   'Each comment has an anchor whose "quote" is the RENDERED text (Markdown markup stripped); lineStart-lineEnd are 1-based source lines to start looking from.';
 
-function steps(where: string, suggest = false, cli = 'node mdreview.mjs', fix = false): string[] {
+function steps(where: string, suggest = false, cli = 'node mdreview.mjs'): string[] {
   const act = suggest
     ? [
         'For each comment:',
@@ -57,9 +57,7 @@ function steps(where: string, suggest = false, cli = 'node mdreview.mjs', fix = 
         `2. Propose it with \`${cli} suggest <file.md> <id> "<replacement>" "<one line on why>"\`. It adds your reply with the suggestion; the reviewer applies it with one click. Leave the thread "submitted".`,
         '3. If the comment needs no text change, or can\'t be done by replacing the quote, reply instead (and resolve it if nothing is left to do).',
       ]
-    : fix
-      ? []
-      : [
+    : [
           'For each comment:',
           `1. Find the quoted text in ${where} and make a minimal, targeted edit that addresses the comment. Don't reformat anything else.`,
           '2. Add a reply to the thread with author "Claude" saying what you changed.',
@@ -144,7 +142,7 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     '  reply <id> "<text>"                 an answer, or your question if the request is unclear (stays open)',
     '  resolve <id> "<note>"               nothing to change',
     ...rules,
-    "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again. Then stop: no summary.",
+    "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again, or edit the file yourself and run resolve. Then stop: no summary.",
     '',
   ];
   for (const c of cs) {

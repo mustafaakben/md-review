@@ -251,6 +251,9 @@ function readText(p: string): string | undefined {
   }
 }
 
+/** The CLI that ships with the extension, read once to compare workspace copies against. */
+let shippedCli: { path: string; bytes: Buffer } | undefined;
+
 /** Comments saved this close together in live mode go to the agent as one message. */
 const LIVE_COALESCE_MS = 400;
 
@@ -351,6 +354,7 @@ export class ReviewSession {
   /** Threads saved in live mode, sent together after a moment. */
   private live = new Set<string>();
   private liveTimer = false;
+  private staleCliTold = false;
 
   constructor(private ctx: HostContext) {}
 
@@ -1305,12 +1309,31 @@ export class ReviewSession {
     return this.ctx.agentCwd?.() ?? path.dirname(this.ctx.mdPath);
   }
 
-  /** The helper CLI for prompts: the workspace's copy (installed by Connect) when there is one, so no prompt is needed to run it. */
+  /**
+   * The helper CLI for prompts: the workspace's copy (installed by Connect)
+   * when it's the same version as ours, so no prompt is needed to run it. An
+   * older copy may not know the commands the prompt asks for (apply), so ours
+   * is used then, and the user is told once to connect again.
+   */
   private cliPath(): string | undefined {
     const local = path.join(this.agentCwd(), '.claude', 'skills', 'md-review', 'mdreview.mjs');
+    let mine: Buffer | undefined;
     try {
-      if (fs.statSync(local).isFile()) return local;
+      mine = local !== this.ctx.cliPath ? fs.readFileSync(local) : undefined;
     } catch {}
+    if (!mine) return this.ctx.cliPath;
+    if (!this.ctx.cliPath) return local;
+    try {
+      shippedCli ??= { path: this.ctx.cliPath, bytes: fs.readFileSync(this.ctx.cliPath) };
+      if (shippedCli.path !== this.ctx.cliPath) shippedCli = { path: this.ctx.cliPath, bytes: fs.readFileSync(this.ctx.cliPath) };
+    } catch {
+      return local;
+    }
+    if (mine.equals(shippedCli.bytes)) return local;
+    if (!this.staleCliTold) {
+      this.staleCliTold = true;
+      this.ctx.post({ type: 'toast', message: "This folder's MD Review CLI is older than the extension's. Run Connect this folder again to update it." });
+    }
     return this.ctx.cliPath;
   }
 

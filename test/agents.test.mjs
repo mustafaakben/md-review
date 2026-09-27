@@ -329,3 +329,32 @@ test('fix and apply: byte-exact edits, one write, nothing written when any part 
   assert.notEqual(cli1('apply', md, 'fix', a).status, 0, 'too few arguments');
   assert.notEqual(cli1('apply', md, 'resolve', 'c_nope', 'x').status, 0, 'unknown id');
 });
+
+test("a folder's older copy of the CLI isn't put in the prompt; the user is told once to connect again", () => {
+  const dir = mk('stale');
+  const md = path.join(dir, 'a.md');
+  fs.writeFileSync(md, 'Alpha beta.\n');
+  const skill = path.join(dir, '.claude', 'skills', 'md-review');
+  fs.mkdirSync(skill, { recursive: true });
+  fs.writeFileSync(path.join(skill, 'mdreview.mjs'), '// an older CLI\n');
+  const posted = [];
+  const sent = [];
+  const s = new lib.ReviewSession({
+    mdPath: md, author: () => 'R', showResolved: () => true, post: (m) => posted.push(m), resolveImage: (x) => x,
+    getText: () => fs.readFileSync(md, 'utf8'), isDirty: () => false, openLink: () => {}, agentCwd: () => dir, cliPath: cli,
+    runAgent: (p) => (sent.push(p), ''),
+  });
+  s.handle({ type: 'ready' });
+  const anchor = { quote: 'beta', prefix: '', suffix: '', lineStart: 1, lineEnd: 1 };
+  s.handle({ type: 'addComment', anchor, body: 'One.' });
+  s.handle({ type: 'sendToAgent' });
+  s.handle({ type: 'addComment', anchor, body: 'Two.' });
+  s.handle({ type: 'sendToAgent' });
+  assert.ok(sent[0].includes(`node "${cli}" apply`), 'the extension\'s own CLI');
+  assert.equal(posted.filter((m) => m.type === 'toast' && /older than the extension/.test(m.message)).length, 1);
+  // Connected again: the same bytes, so the folder's copy (a bare relative path the permission rule matches).
+  fs.copyFileSync(cli, path.join(skill, 'mdreview.mjs'));
+  s.handle({ type: 'addComment', anchor, body: 'Three.' });
+  s.handle({ type: 'sendToAgent' });
+  assert.ok(sent.at(-1).includes('node .claude/skills/md-review/mdreview.mjs apply "a.md"'));
+});
