@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Sending to a Claude session works on Windows
+
+- On Windows, a Claude Code session's inbox is a named pipe that drops any message not preceded by the session's token, so Send reported success while nothing arrived. MD Review now picks the route by OS: on Windows it reads the token from the session's key file in `~/.claude/sessions` and sends it first; on macOS and Linux it posts to the socket as before. If the key can't be found, Send says so instead of failing silently. Tested end to end on Windows 11 with Claude Code 2.1.283.
+
 ### Agent rounds about 3–4× faster
 
 Measured end to end with a real Claude Code session (Haiku, 3 comments, median of 3–5 runs, permission prompts approved instantly): **38.8 s → 11.6 s** in manual mode and **47.1 s → 11.8 s** with accept-edits; Claude's steps 9 → 1, tool calls 11 → 1, permission prompts 4 → 0. Slow baseline runs (up to 197 s) came from Claude hunting for the file; that's gone.

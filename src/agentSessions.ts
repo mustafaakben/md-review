@@ -5,6 +5,9 @@
 // Claude Code: every running session writes ~/.claude/sessions/<pid>.json with
 // its id, folder, status and an inbox socket; a JSON line posted there starts
 // a turn when the session is idle and is read between tool calls when busy.
+// How the inbox is reached depends on the OS (see inboxRoute): a Unix socket on
+// macOS and Linux; on Windows a named pipe that first wants an auth line with
+// the token from the session's key file, ~/.claude/sessions/<pid>.<hash>.key.
 // Codex: `codex queue --thread <id> --message <text>` hands the message to the
 // shared app-server, which runs it at once in an idle session or after the
 // current turn.
@@ -31,6 +34,8 @@ export interface AgentSession {
   updatedAt: number;
   /** Claude: the inbox socket to post into. */
   socket?: string;
+  /** Claude: the session's process, which names its inbox key on Windows. */
+  pid?: number;
   /** Registered by MD Review's SessionStart hook. */
   connected?: boolean;
 }
@@ -115,6 +120,7 @@ export function liveClaudeSessions(folder: string, home = os.homedir()): AgentSe
       status: typeof s.status === 'string' ? s.status : undefined,
       updatedAt: Number(s.updatedAt) || 0,
       socket: typeof s.messagingSocketPath === 'string' ? s.messagingSocketPath : undefined,
+      pid: s.pid,
       connected: reg.has(`claude-${s.sessionId}`),
     });
   }
@@ -296,18 +302,68 @@ export function findSession(folder: string, b: Binding, home = os.homedir()): Ag
 export class DeliveryError extends Error {}
 
 /**
- * Post `text` into a running Claude Code session's inbox. Resolves once the
- * line is written; the session reads it on its next turn boundary.
+ * How a Claude session's inbox is reached on each OS. Claude Code asks for an
+ * auth line only on Windows, where a named pipe is open to other local users;
+ * macOS and Linux sockets sit in a folder only the user can read.
  */
-export function deliverClaude(socket: string, text: string, from = 'md-review', timeoutMs = 5000): Promise<void> {
+export type InboxRoute = 'windows' | 'unix';
+
+export function inboxRoute(platform: NodeJS.Platform = process.platform): InboxRoute {
+  return platform === 'win32' ? 'windows' : 'unix';
+}
+
+/** Where Claude Code keeps a Windows session's inbox token: <pid>.<sha256 of the lowercased pipe path>.key. */
+export function inboxKeyFile(pid: number, socket: string, home = os.homedir()): string {
+  const hash = crypto.createHash('sha256').update(socket.toLowerCase()).digest('hex');
+  return path.join(home, '.claude', 'sessions', `${pid}.${hash}.key`);
+}
+
+function readToken(file: string): string | undefined {
+  try {
+    if (fs.statSync(file).size > 4096) return undefined;
+    const t = JSON.parse(fs.readFileSync(file, 'utf8'))?.peerToken;
+    return typeof t === 'string' && /^[0-9a-f]{32}$/.test(t) ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The token a Windows session wants before any message. Falls back to the newest key file for its process. */
+export function inboxToken(pid: number, socket: string, home = os.homedir()): string | undefined {
+  const exact = readToken(inboxKeyFile(pid, socket, home));
+  if (exact) return exact;
+  const dir = path.join(home, '.claude', 'sessions');
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((n) => new RegExp(`^${pid}\\.[0-9a-f]{64}\\.key$`).test(n));
+  } catch {
+    return undefined;
+  }
+  return names
+    .map((n) => path.join(dir, n))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+    .map(readToken)
+    .find(Boolean);
+}
+
+/**
+ * Post `text` into a running Claude Code session's inbox. Resolves once the
+ * line is written; the session reads it on its next turn boundary. With a
+ * `token` (Windows), an auth line goes first.
+ */
+export function deliverClaude(socket: string, text: string, o: { token?: string; from?: string; timeoutMs?: number } = {}): Promise<void> {
+  const from = o.from ?? 'md-review';
+  const auth = o.token ? JSON.stringify({ type: 'auth', token: o.token }) + '\n' : '';
   const line =
-    JSON.stringify({ type: 'user', message: { content: text }, from, msg_id: `mdr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, priority: 'next' }) + '\n';
+    auth +
+    JSON.stringify({ type: 'user', message: { content: text }, from, msg_id: `mdr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, priority: 'next' }) +
+    '\n';
   return new Promise((resolve, reject) => {
     const s = net.connect(socket);
     const timer = setTimeout(() => {
       s.destroy();
       reject(new DeliveryError("Claude's inbox didn't answer."));
-    }, timeoutMs);
+    }, o.timeoutMs ?? 5000);
     s.on('connect', () => {
       s.end(line, () => {
         clearTimeout(timer);
@@ -333,11 +389,17 @@ export function deliverCodex(codex: string, threadId: string, text: string, cwd?
 }
 
 /** Deliver to a bound session, whatever its agent. */
-export async function deliver(b: Binding, text: string, o: { folder: string; codex?: string; home?: string }): Promise<AgentSession> {
+export async function deliver(b: Binding, text: string, o: { folder: string; codex?: string; home?: string; platform?: NodeJS.Platform }): Promise<AgentSession> {
   const s = findSession(o.folder, b, o.home);
   if (b.agent === 'claude') {
     if (!s?.live || !s.socket) throw new DeliveryError('That Claude session isn\'t running. Resume it or pick another session.');
-    await deliverClaude(s.socket, text);
+    let token: string | undefined;
+    if (inboxRoute(o.platform) === 'windows') {
+      token = typeof s.pid === 'number' ? inboxToken(s.pid, s.socket, o.home) : undefined;
+      // Without it the session drops the message without a word; say so instead.
+      if (!token) throw new DeliveryError("Couldn't find that Claude session's inbox key. Restart the session, or use Copy prompt instead.");
+    }
+    await deliverClaude(s.socket, text, { token });
     return s;
   }
   await deliverCodex(o.codex || 'codex', b.id, text, o.folder);

@@ -4,6 +4,7 @@
 // the review session's binding, session menu and live delivery.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -96,8 +97,9 @@ test('Codex sessions come from rollout files whose first line is too long to rea
   assert.equal(lib.codexMeta('{"type":"session_meta","payload":{"id":"' + id + '","cwd":"C:\\\\x\\\\y","instructions":"…').cwd, 'C:\\x\\y');
 });
 
-test("delivery writes one JSON line into the session's inbox", { skip: process.platform === 'win32' }, async () => {
-  const sock = path.join(mk('sock'), 'in.sock');
+/** An inbox that records each line it gets: a named pipe on Windows, a socket elsewhere. */
+async function inbox() {
+  const sock = process.platform === 'win32' ? `\\\\.\\pipe\\mdr-agents-${process.pid}-${Math.random().toString(16).slice(2)}` : path.join(mk('sock'), 'in.sock');
   const lines = [];
   const server = net.createServer((c) => {
     let buf = '';
@@ -105,6 +107,46 @@ test("delivery writes one JSON line into the session's inbox", { skip: process.p
     c.on('end', () => lines.push(...buf.split('\n').filter(Boolean)));
   });
   await new Promise((r) => server.listen(sock, r));
+  return { sock, lines, server };
+}
+
+test('the inbox route follows the OS: an auth line on Windows, none on macOS or Linux', async () => {
+  assert.equal(lib.inboxRoute('win32'), 'windows');
+  assert.equal(lib.inboxRoute('darwin'), 'unix');
+  assert.equal(lib.inboxRoute('linux'), 'unix');
+  const home = mk('home');
+  const proj = mk('proj');
+  const { sock, lines, server } = await inbox();
+  claudeFile(home, 1, { pid: process.pid, sessionId: 'w', cwd: proj, messagingSocketPath: sock });
+  const b = { agent: 'claude', id: 'w' };
+  const settle = async (n) => {
+    for (let i = 0; i < 50 && lines.length < n; i++) await new Promise((r) => setTimeout(r, 10));
+  };
+  // No key file: an error, not a message the session would drop without a word.
+  await assert.rejects(lib.deliver(b, 'hi', { folder: proj, home, platform: 'win32' }), /inbox key/);
+  // Claude names the key after the lowercased pipe path.
+  const token = 'ab'.repeat(16);
+  const key = lib.inboxKeyFile(process.pid, sock, home);
+  assert.equal(path.basename(key), `${process.pid}.${crypto.createHash('sha256').update(sock.toLowerCase()).digest('hex')}.key`);
+  fs.writeFileSync(key, JSON.stringify({ peerToken: token, pidDomain: 'x' }));
+  await lib.deliver(b, 'hi', { folder: proj, home, platform: 'win32' });
+  await settle(2);
+  assert.deepEqual(JSON.parse(lines[0]), { type: 'auth', token });
+  assert.equal(JSON.parse(lines[1]).message.content, 'hi');
+  await lib.deliver(b, 'again', { folder: proj, home, platform: 'darwin' });
+  await settle(3);
+  server.close();
+  assert.equal(lines.length, 3);
+  assert.equal(JSON.parse(lines[2]).message.content, 'again');
+  // A key under another name for the same process still works; a malformed one doesn't count.
+  fs.renameSync(key, path.join(path.dirname(key), `${process.pid}.${'0'.repeat(64)}.key`));
+  assert.equal(lib.inboxToken(process.pid, sock, home), token);
+  fs.writeFileSync(path.join(path.dirname(key), `${process.pid}.${'0'.repeat(64)}.key`), JSON.stringify({ peerToken: 'nope' }));
+  assert.equal(lib.inboxToken(process.pid, sock, home), undefined);
+});
+
+test("delivery writes one JSON line into the session's inbox", async () => {
+  const { sock, lines, server } = await inbox();
   await lib.deliverClaude(sock, 'Please address c_1');
   await lib.deliverClaude(sock, 'Please address c_1');
   for (let i = 0; i < 50 && lines.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
@@ -114,7 +156,7 @@ test("delivery writes one JSON line into the session's inbox", { skip: process.p
   assert.equal(a.message.content, 'Please address c_1');
   assert.equal(a.from, 'md-review');
   assert.notEqual(a.msg_id, b.msg_id, 'a repeat is not dropped as a duplicate');
-  await assert.rejects(lib.deliverClaude(path.join(path.dirname(sock), 'gone.sock'), 'x'), /Couldn't reach the Claude session/);
+  await assert.rejects(lib.deliverClaude(process.platform === 'win32' ? `${sock}-gone` : path.join(path.dirname(sock), 'gone.sock'), 'x'), /Couldn't reach the Claude session/);
 });
 
 test('Connect merges into the settings and keeps what is there; running it again changes nothing', () => {

@@ -4,6 +4,7 @@
 // in a file that won't open leaves nothing queued for a later panel.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -128,15 +129,22 @@ const inboxes = [];
 async function claudeSession(cwd, id, { hooked = false } = {}) {
   const sock = process.platform === 'win32' ? `\\\\.\\pipe\\mdr-test-${id}` : path.join(home, `${id.slice(-12)}.sock`);
   const got = [];
+  // On Windows, Claude drops a connection whose first line isn't its token.
+  const token = process.platform === 'win32' ? crypto.randomBytes(16).toString('hex') : undefined;
   const server = net.createServer((c) => {
     let buf = '';
     c.on('data', (d) => (buf += d));
-    c.on('end', () => buf.split('\n').filter(Boolean).forEach((l) => got.push(JSON.parse(l))));
+    c.on('end', () => {
+      const lines = buf.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      if (token && !(lines[0]?.type === 'auth' && lines[0].token === token)) return;
+      lines.filter((m) => m.type !== 'auth').forEach((m) => got.push(m));
+    });
   });
   await new Promise((r) => server.listen(sock, r));
   inboxes.push(server);
   const dir = path.join(home, '.claude', 'sessions');
   fs.mkdirSync(dir, { recursive: true });
+  if (token) fs.writeFileSync(lib.inboxKeyFile(process.pid, sock, home), JSON.stringify({ peerToken: token }));
   // Our own pid: a process that is certainly alive. One file per session, so a fake pid suffix keeps them apart.
   fs.writeFileSync(path.join(dir, `${process.pid}${inboxes.length}.json`), JSON.stringify({ pid: process.pid, sessionId: id, cwd, kind: 'interactive', status: 'idle', messagingSocketPath: sock, name: `s-${id.slice(0, 4)}`, updatedAt: Date.now() }));
   if (hooked) {
