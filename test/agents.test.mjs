@@ -67,7 +67,9 @@ test('a folder reached through a link matches the session that names its real pa
 test('past Claude sessions are titled from their transcript', () => {
   const home = mk('home');
   const proj = mk('proj');
-  const dir = lib.claudeProjectDir(proj, home);
+  // pastClaudeSessions resolves the folder with realpathSync.native, which on
+  // Windows also expands 8.3 short names (RUNNER~1) that mk's realpathSync keeps.
+  const dir = lib.claudeProjectDir(fs.realpathSync.native(proj), home);
   fs.mkdirSync(dir, { recursive: true });
   const id = '0f0f0f0f-1111-4222-8333-444444444444';
   fs.writeFileSync(path.join(dir, `${id}.jsonl`), [JSON.stringify({ type: 'user', message: { content: 'fix the abstract please' } }), JSON.stringify({ type: 'ai-title', aiTitle: 'Tighten "abstract"', sessionId: id })].join('\n'));
