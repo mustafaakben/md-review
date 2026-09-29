@@ -8,6 +8,8 @@
 // How the inbox is reached depends on the OS (see inboxRoute): a Unix socket on
 // macOS and Linux; on Windows a named pipe that first wants an auth line with
 // the token from the session's key file, ~/.claude/sessions/<pid>.<hash>.key.
+// A WSL session seen from Windows is read through \\wsl.localhost and reached
+// by running WSL's node, since its socket is inside the Linux VM (see WslHome).
 // Codex: `codex queue --thread <id> --message <text>` hands the message to the
 // shared app-server, which runs it at once in an idle session or after the
 // current turn.
