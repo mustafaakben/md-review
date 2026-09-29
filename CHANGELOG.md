@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-29
 
 ### Send to Claude reaches Claude Code in WSL
 

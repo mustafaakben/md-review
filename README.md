@@ -31,7 +31,7 @@ It was built for academic manuscripts, but works for any Markdown: docs, specs, 
 **From a release (easiest).** Download `md-review-<version>.vsix` from the [Releases page](https://github.com/mustafaakben/md-review/releases), then either run
 
 ```bash
-code --install-extension md-review-0.1.0.vsix
+code --install-extension md-review-0.2.0.vsix
 ```
 
 or, in VS Code, open the Extensions view, click **⋯** → **Install from VSIX…**, and pick the file. Reload the window afterwards. The same file works on Windows, macOS, and Linux, and in VS Code forks that accept `.vsix` files (Cursor, Windsurf, VSCodium).
