@@ -97,6 +97,23 @@ test('Codex sessions come from rollout files whose first line is too long to rea
   assert.equal(lib.codexMeta('{"type":"session_meta","payload":{"id":"' + id + '","cwd":"C:\\\\x\\\\y","instructions":"…').cwd, 'C:\\x\\y');
 });
 
+test('WSL paths as Windows names them: drives under /mnt, the rest through \\\\wsl.localhost', () => {
+  assert.equal(lib.wslToWindows('Ubuntu', '/mnt/c/Users/me/Proj'), 'C:\\Users\\me\\Proj');
+  assert.equal(lib.wslToWindows('Ubuntu', '/mnt/d'), 'D:\\');
+  assert.equal(lib.wslToWindows('Ubuntu', '/home/me/proj'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\proj');
+  assert.equal(lib.wslUnc('Debian', '/proc/12/stat'), '\\\\wsl.localhost\\Debian\\proc\\12\\stat');
+});
+
+test('the SessionStart hook outside WSL writes one plain registration', () => {
+  const home = mk('home');
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.WSL_DISTRO_NAME;
+  spawnSync(process.execPath, [cli, 'hook', 'session-start', '--agent', 'claude'], { input: JSON.stringify({ session_id: 'plain-0001', cwd: home }), env });
+  const r = JSON.parse(fs.readFileSync(path.join(home, '.mdreview', 'sessions', 'claude-plain-0001.json'), 'utf8'));
+  assert.equal(r.host, undefined);
+  assert.equal(r.cwd, home);
+});
+
 /** An inbox that records each line it gets: a named pipe on Windows, a socket elsewhere. */
 async function inbox() {
   const sock = process.platform === 'win32' ? `\\\\.\\pipe\\mdr-agents-${process.pid}-${Math.random().toString(16).slice(2)}` : path.join(mk('sock'), 'in.sock');

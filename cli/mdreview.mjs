@@ -34,6 +34,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const flag = (name, def) => {
@@ -781,26 +782,49 @@ function readStdin() {
   }
 }
 
+// Under WSL, MD Review runs on the Windows side and reads the Windows home, so
+// a WSL session registers there too, with its folder as Windows names it and
+// what the extension needs to reach its inbox (the distro, the Linux home and
+// this node, since WSL's node is rarely on a non-login PATH).
+function wslHost(cwd) {
+  const distro = process.env.WSL_DISTRO_NAME;
+  if (process.platform !== 'linux' || !distro) return undefined;
+  const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try {
+    const profile = run('cmd.exe', ['/d', '/c', 'echo %USERPROFILE%']).split(/\r?\n/).pop();
+    return {
+      winHome: run('wslpath', ['-u', profile]),
+      entry: { host: 'wsl', distro, home: os.homedir(), node: process.execPath, wslCwd: cwd, cwd: run('wslpath', ['-w', cwd]) },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function hook(event) {
   const input = readStdin();
   const agent = agentArg === 'codex' ? 'codex' : 'claude';
   const id = typeof input.session_id === 'string' && /^[\w-]{8,64}$/.test(input.session_id) ? input.session_id : '';
-  const dir = path.join(os.homedir(), '.mdreview', 'sessions');
-  const file = id && path.join(dir, `${agent}-${id}.json`);
+  const cwd = input.cwd || process.cwd();
+  const wsl = id ? wslHost(cwd) : undefined;
+  const dirs = [path.join(os.homedir(), '.mdreview', 'sessions'), ...(wsl ? [path.join(wsl.winHome, '.mdreview', 'sessions')] : [])];
   try {
     if (event === 'session-end') {
-      if (file) fs.rmSync(file, { force: true });
+      if (id) for (const dir of dirs) fs.rmSync(path.join(dir, `${agent}-${id}.json`), { force: true });
       return;
     }
     if (event !== 'session-start') usage();
-    if (file) {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(file, JSON.stringify({ agent, sessionId: id, cwd: input.cwd || process.cwd(), source: input.source, startedAt: now() }) + '\n');
-      // Forget registrations nobody ended (crashes), after a month.
-      for (const n of fs.readdirSync(dir)) {
-        const f = path.join(dir, n);
-        if (Date.now() - fs.statSync(f).mtimeMs > 30 * 86400000) fs.rmSync(f, { force: true });
-      }
+    if (id) {
+      const entry = { agent, sessionId: id, cwd, source: input.source, startedAt: now() };
+      dirs.forEach((dir, i) => {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `${agent}-${id}.json`), JSON.stringify(i ? { ...entry, ...wsl.entry } : entry) + '\n');
+        // Forget registrations nobody ended (crashes), after a month.
+        for (const n of fs.readdirSync(dir)) {
+          const f = path.join(dir, n);
+          if (Date.now() - fs.statSync(f).mtimeMs > 30 * 86400000) fs.rmSync(f, { force: true });
+        }
+      });
     }
   } catch {
     // registration is a convenience; the session works without it

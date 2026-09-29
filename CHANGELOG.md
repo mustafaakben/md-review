@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Send to Claude reaches Claude Code in WSL
+
+- With VS Code on Windows, a Claude Code session running in WSL on the same folder didn't appear in the session menu. MD Review read running sessions only from the Windows `~/.claude/sessions`, while the WSL session's file, hook registration and inbox socket all live inside the Linux VM, where a Windows process can't open the Unix socket. Now the SessionStart hook, when it runs under WSL, also registers the session in the Windows home, with its folder as Windows names it, the distro, and WSL's `node`. MD Review reads the session through `\\wsl.localhost` (checking `/proc` to confirm it is alive) and delivers by running that `node` inside WSL to write into the socket. The inbox is the process's own socket, so it works whichever Claude account each side is signed in to. Tested end to end on Windows 11 and Ubuntu (WSL2) with Claude Code 2.1.284, with the WSL side signed in to a different account.
+
 ### Sending to a Claude session works on Windows
 
 - On Windows, a Claude Code session's inbox is a named pipe that drops any message not preceded by the session's token, so Send reported success while nothing arrived. MD Review now picks the route by OS: on Windows it reads the token from the session's key file in `~/.claude/sessions` and sends it first; on macOS and Linux it posts to the socket as before. If the key can't be found, Send says so instead of failing silently. Tested end to end on Windows 11 with Claude Code 2.1.283.

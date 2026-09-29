@@ -38,6 +38,8 @@ export interface AgentSession {
   pid?: number;
   /** Registered by MD Review's SessionStart hook. */
   connected?: boolean;
+  /** Claude: the session runs in WSL, seen from Windows. */
+  wsl?: WslHome;
 }
 
 /** The session a document's messages go to. */
@@ -95,36 +97,103 @@ function registered(home: string): Set<string> {
   }
 }
 
-/** Running Claude Code sessions whose folder is `folder` or inside it. */
-export function liveClaudeSessions(folder: string, home = os.homedir()): AgentSession[] {
-  const dir = path.join(home, '.claude', 'sessions');
+/** Running Claude Code sessions whose folder is `folder` or inside it, here and in WSL. */
+export function liveClaudeSessions(folder: string, home = os.homedir(), platform: NodeJS.Platform = process.platform): AgentSession[] {
+  const reg = registered(home);
+  const out = claudeSessionsIn(path.join(home, '.claude', 'sessions'), folder, reg, { alive: (s) => alive(s.pid), cwd: (c) => c });
+  if (platform === 'win32') for (const w of wslHomes(folder, home)) out.push(...wslClaudeSessions(folder, w, reg));
+  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function claudeSessionsIn(dir: string, folder: string, reg: Set<string>, o: { alive(s: any): boolean; cwd(c: string): string; wsl?: WslHome }): AgentSession[] {
   let names: string[];
   try {
     names = fs.readdirSync(dir).filter((n) => /^\d+\.json$/.test(n));
   } catch {
     return [];
   }
-  const reg = registered(home);
   const out: AgentSession[] = [];
   for (const n of names) {
     const s = readJson(path.join(dir, n));
     if (!s || typeof s.sessionId !== 'string' || typeof s.cwd !== 'string') continue;
     if (s.kind && s.kind !== 'interactive') continue; // headless -p runs and SDK children
-    if (!alive(s.pid) || !within(folder, s.cwd)) continue;
+    const cwd = o.cwd(s.cwd);
+    if (!o.alive(s) || !within(folder, cwd)) continue;
     out.push({
       agent: 'claude',
       id: s.sessionId,
       name: typeof s.name === 'string' && s.name ? s.name : undefined,
-      cwd: s.cwd,
+      cwd,
       live: true,
       status: typeof s.status === 'string' ? s.status : undefined,
       updatedAt: Number(s.updatedAt) || 0,
       socket: typeof s.messagingSocketPath === 'string' ? s.messagingSocketPath : undefined,
       pid: s.pid,
       connected: reg.has(`claude-${s.sessionId}`),
+      wsl: o.wsl,
     });
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return out;
+}
+
+/**
+ * A WSL install MD Review has seen a session from. Its hook registers WSL
+ * sessions in the Windows home (see the CLI's wslHost) with these fields;
+ * Windows reads the session files through \\wsl.localhost, but the inbox
+ * socket lives inside the Linux VM, so delivery runs `node` there.
+ */
+export interface WslHome {
+  distro: string;
+  /** The Linux home, e.g. /home/mustafa. */
+  home: string;
+  /** A node inside WSL, for the relay. */
+  node: string;
+}
+
+/** The Linux side of the \\wsl.localhost share: `/home/x` → `\\wsl.localhost\Ubuntu\home\x`. */
+export function wslUnc(distro: string, p: string): string {
+  return `\\\\wsl.localhost\\${distro}${p.replace(/\//g, '\\')}`;
+}
+
+/** A WSL path as Windows names it: /mnt/c/x → C:\x, anything else through the share. */
+export function wslToWindows(distro: string, p: string): string {
+  const m = /^\/mnt\/([a-z])(\/.*)?$/i.exec(p);
+  return m ? `${m[1].toUpperCase()}:${(m[2] || '/').replace(/\//g, '\\')}` : wslUnc(distro, p);
+}
+
+/** WSL installs with a registered session in `folder`, one each. */
+function wslHomes(folder: string, home: string): WslHome[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(registryDir(home)).filter((n) => n.startsWith('claude-') && n.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const seen = new Map<string, WslHome>();
+  for (const n of names) {
+    const r = readJson(path.join(registryDir(home), n));
+    if (r?.host !== 'wsl' || typeof r.cwd !== 'string' || !within(folder, r.cwd)) continue;
+    if (![r.distro, r.home, r.node].every((x) => typeof x === 'string' && x)) continue;
+    if (!/^[\w.-]+$/.test(r.distro) || !r.home.startsWith('/')) continue;
+    seen.set(`${r.distro}\0${r.home}`, { distro: r.distro, home: r.home, node: r.node });
+  }
+  return [...seen.values()];
+}
+
+/** A WSL process is alive when /proc still has it, started when the session file says. */
+function wslAlive(distro: string, s: any): boolean {
+  if (typeof s.pid !== 'number' || s.pid <= 0) return false;
+  try {
+    const stat = fs.readFileSync(wslUnc(distro, `/proc/${s.pid}/stat`), 'utf8');
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return s.procStart === undefined || String(s.procStart) === start;
+  } catch {
+    return false;
+  }
+}
+
+function wslClaudeSessions(folder: string, w: WslHome, reg: Set<string>): AgentSession[] {
+  return claudeSessionsIn(wslUnc(w.distro, `${w.home}/.claude/sessions`), folder, reg, { alive: (s) => wslAlive(w.distro, s), cwd: (c) => wslToWindows(w.distro, c), wsl: w });
 }
 
 /** How Claude Code names a project folder under ~/.claude/projects. */
@@ -351,13 +420,39 @@ export function inboxToken(pid: number, socket: string, home = os.homedir()): st
  * line is written; the session reads it on its next turn boundary. With a
  * `token` (Windows), an auth line goes first.
  */
-export function deliverClaude(socket: string, text: string, o: { token?: string; from?: string; timeoutMs?: number } = {}): Promise<void> {
-  const from = o.from ?? 'md-review';
+function inboxLines(text: string, o: { token?: string; from?: string }): string {
   const auth = o.token ? JSON.stringify({ type: 'auth', token: o.token }) + '\n' : '';
-  const line =
+  return (
     auth +
-    JSON.stringify({ type: 'user', message: { content: text }, from, msg_id: `mdr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, priority: 'next' }) +
-    '\n';
+    JSON.stringify({ type: 'user', message: { content: text }, from: o.from ?? 'md-review', msg_id: `mdr-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`, priority: 'next' }) +
+    '\n'
+  );
+}
+
+/**
+ * Post into a WSL session's inbox. Its Unix socket is inside the Linux VM,
+ * out of Windows' reach, so WSL's own node writes the lines; the script and
+ * the message go on stdin, clear of wsl.exe's argument quoting. The inbox is
+ * the running process's own socket, so whichever Claude account either side
+ * is signed in to plays no part.
+ */
+export function deliverWsl(w: WslHome, socket: string, text: string, o: { token?: string; timeoutMs?: number } = {}): Promise<void> {
+  const script =
+    `const s=require('net').connect(${JSON.stringify(socket)});` +
+    `s.on('error',e=>{console.error(e.code||e.message);process.exit(1)});` +
+    `s.on('connect',()=>s.end(${JSON.stringify(inboxLines(text, o))},()=>process.exit(0)));`;
+  return new Promise((resolve, reject) => {
+    const child = execFile('wsl.exe', ['-d', w.distro, '--exec', w.node, '-'], { timeout: o.timeoutMs ?? 20000, windowsHide: true }, (err, _out, stderr) => {
+      if (!err) return resolve();
+      const why = String(stderr || err.message).replace(/\0/g, '').trim().split('\n').pop() || err.message;
+      reject(new DeliveryError(`Couldn't reach the Claude session in WSL (${why}).`));
+    });
+    child.stdin?.end(script);
+  });
+}
+
+export function deliverClaude(socket: string, text: string, o: { token?: string; from?: string; timeoutMs?: number } = {}): Promise<void> {
+  const line = inboxLines(text, o);
   return new Promise((resolve, reject) => {
     const s = net.connect(socket);
     const timer = setTimeout(() => {
@@ -393,6 +488,12 @@ export async function deliver(b: Binding, text: string, o: { folder: string; cod
   const s = findSession(o.folder, b, o.home);
   if (b.agent === 'claude') {
     if (!s?.live || !s.socket) throw new DeliveryError('That Claude session isn\'t running. Resume it or pick another session.');
+    if (s.wsl) {
+      // Linux inboxes take messages without a token; one goes along when the session has a key.
+      const token = typeof s.pid === 'number' ? inboxToken(s.pid, s.socket, wslUnc(s.wsl.distro, s.wsl.home)) : undefined;
+      await deliverWsl(s.wsl, s.socket, text, { token });
+      return s;
+    }
     let token: string | undefined;
     if (inboxRoute(o.platform) === 'windows') {
       token = typeof s.pid === 'number' ? inboxToken(s.pid, s.socket, o.home) : undefined;
