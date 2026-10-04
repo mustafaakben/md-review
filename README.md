@@ -88,6 +88,7 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 **Undo.** Ctrl+Z / ⌘Z and Ctrl+Shift+Z / ⇧⌘Z undo and redo writing continuously, including new paragraphs and formatting. **More tools → Undo / Redo** does the same. In the Changes view, undo and redo use the host's byte-exact history for review actions. External revisions are checked before writes, so stale writing cannot silently replace another editor's changes.
 
 **Getting around.**
+- **Resize the panes** by dragging the right edge of the Outline pane or the left edge of the Comments pane. Release to keep the width; collapsing and reopening a pane preserves your choice. VS Code remembers the widths for that editor. Tab to a divider and use Left/Right to resize with the keyboard (Shift for larger steps, Home/End for the limits). Width limits keep room for the document; in narrow windows the outline remains a resizable drawer and comments still stack below the document.
 - **Outline** (the list icon at the left of the toolbar, or Ctrl+Shift+O / ⇧⌘O) lists the headings, follows your reading position, and shows how many open threads each section has. In narrow windows it slides over the document and closes after a jump.
 - **Find** (Ctrl+F / ⌘F) highlights every match in the document. Enter and Shift+Enter step through them; Esc closes.
 - **Jump between comments** with Ctrl+Alt+J / Ctrl+Alt+K (⌥⌘J / ⌥⌘K on macOS). Ctrl+Alt+Y (⌥⌘Y) opens a reply on the current thread.

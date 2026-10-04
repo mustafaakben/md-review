@@ -3,6 +3,7 @@ import { createLiveEditor, LiveSelection } from './liveEditor';
 import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
 import { createOutline } from './outline';
+import { createPaneResize } from './paneResize';
 import { createDiagrams } from './diagrams';
 import { createReading, ReadingPrefs } from './reading';
 import { createHealth, orphanRows, WordTargets } from './health';
@@ -1416,6 +1417,11 @@ function setSidebarOpen(open: boolean, preserve = true) {
 }
 sideToggle.addEventListener('click', () => setSidebarOpen(document.body.classList.contains('mdr-side-collapsed')));
 setSidebarOpen((vscode.getState() || {}).sidebarOpen ?? true);
+createPaneResize({
+  saved: saved.paneWidths,
+  save: paneWidths => vscode.setState({ ...(vscode.getState() || {}), paneWidths }),
+  keepReadingPlace: () => liveReady ? live.keepReadingPlace(activeId) : null,
+});
 
 // ---------------------------------------------------------------- editing
 // Seamless editing: the rendered block itself becomes editable (no box). On

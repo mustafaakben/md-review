@@ -651,7 +651,7 @@ body[data-reading-theme='paper'] .mdr-layout { --doc-accent: #b64f59; }
   .mdr-brand { display: none; }
   body:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: minmax(0, 1fr) var(--sidebar-w); }
   body.mdr-side-collapsed:not(.mdr-outline-closed) .mdr-layout { grid-template-columns: minmax(0, 1fr); }
-  .mdr-outline { width: 240px; background: var(--rail-bg); }
+  .mdr-outline { width: var(--outline-drawer-w, 240px); background: var(--rail-bg); }
   #mdr-canvas, .mdr-writing > #mdr-doc { padding: 36px 30px 80px; }
 }
 @media (max-width: 680px) {
@@ -680,6 +680,16 @@ button.mdr-chip { font-size: 10.5px; padding: 4px 5px; border-radius: 5px; gap: 
 button.mdr-chip.on { color: var(--fg); border-color: transparent; background: var(--soft); box-shadow: none; }
 .mdr-chips { gap: 2px; }
 .mdr-side-head { margin-left: 0; margin-right: 0; }
+/* Pane edges live outside the scrolling panes, so their hit areas stay reachable. */
+.mdr-pane-resize { position: fixed; top: var(--bar-h); bottom: 0; width: 8px; transform: translateX(-50%); z-index: 26; cursor: col-resize; touch-action: none; }
+.mdr-pane-resize::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: transparent; }
+.mdr-pane-resize:hover::after, .mdr-pane-resize:focus-visible::after, .mdr-resize-active::after { background: var(--focus); }
+.mdr-pane-resize:focus-visible { outline: none; }
+.mdr-resizing, .mdr-resizing * { cursor: col-resize !important; user-select: none !important; }
+.mdr-outline-closed .mdr-resize-outline, .mdr-side-collapsed .mdr-resize-sidebar { display: none; }
+@media (max-width: 680px) { .mdr-resize-sidebar { display: none; } }
+@media (forced-colors: active) { .mdr-pane-resize:focus-visible::after, .mdr-resize-active::after { background: Highlight; } }
+
 .mdr-review-options button.mdr-review-btn span { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
 .mdr-toc-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
 .mdr-save-status { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
