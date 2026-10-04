@@ -108,6 +108,8 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 
 **Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (MD Review, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0 (⌘ instead of Ctrl on macOS). Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
 
+Dusk uses a slate-indigo background and Night a charcoal-blue background, with soft light text and darker blue selections that stay readable while selecting or writing a comment. Search matches use amber, and the in-document find controls follow the dark reading theme. Paper and Sepia retain their light palettes.
+
 **Send to Claude (or Codex).**
 - Comments go into an agent session that is already running: [Claude Code](https://claude.com/claude-code) or Codex, in this folder, with everything it already knows. Nothing new starts for each Send. Claude Code sessions receive the message through their session inbox and Codex sessions through `codex queue`. An idle session starts on it at once, and a busy one reads it between steps (Claude) or after its current turn (Codex).
 - The chip under **Send to Claude** shows where comments go: `● Claude · fix abstract`, with a green dot when the session is idle, amber when it's busy, and a hollow one when it isn't running. Click it for the session menu:

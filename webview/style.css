@@ -71,7 +71,10 @@
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
 body { font-family: var(--font); font-size: 15px; line-height: 1.7; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 :focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
-.mdr-doc ::selection { background: var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--doc-accent) 28%, transparent)); }
+.mdr-doc ::selection {
+  background: var(--doc-native-selection-bg, var(--vscode-editor-selectionBackground, color-mix(in srgb, var(--doc-accent) 28%, transparent)));
+  color: var(--doc-selection-fg, inherit);
+}
 
 /* ---------- icons ---------- */
 .mdr-file::before, .mdr-empty::before, #mdr-edit-btn::before, .mdr-toggle::before,
@@ -161,6 +164,13 @@ button.mdr-side-toggle { padding: 5px; }
 
 /* ---------- layout ---------- */
 .mdr-layout {
+  /* Resolve these here: body may override the application palette in VS Code dark mode. */
+  --doc-bg: var(--bg); --doc-fg: var(--fg); --doc-muted: var(--muted); --doc-accent: var(--accent);
+  --doc-selection-bg: #d7d4f0;
+  --doc-selection-inactive-bg: color-mix(in srgb, var(--doc-accent) 20%, transparent);
+  --doc-match-bg: color-mix(in srgb, var(--accent) 13%, transparent);
+  --doc-match-selected-bg: color-mix(in srgb, var(--accent) 25%, transparent);
+  --doc-match-border: var(--accent);
   --doc-rule: color-mix(in srgb, var(--doc-fg) 10%, transparent);
   --doc-soft: color-mix(in srgb, var(--doc-fg) 5%, var(--doc-bg));
   --doc-softer: color-mix(in srgb, var(--doc-fg) 2.5%, var(--doc-bg));
@@ -471,13 +481,16 @@ mark.mdr-hl.active { background: color-mix(in srgb, var(--c) 34%, transparent); 
 
 /* Continuous writing canvas. The editor owns text and selection; its preview
    decorations never add an editing frame, active-line fill, or gutter. */
-.mdr-writing { min-width: 0; position: relative; }
+.mdr-writing { min-width: 0; position: relative; color-scheme: var(--doc-color-scheme, light); }
 .mdr-writing [hidden] { display: none !important; }
 #mdr-canvas { padding-top: 54px; }
 .mdr-save-status { position: absolute; top: 17px; right: 24px; font-size: 11px; color: var(--muted); }
 .mdr-save-status.error { color: var(--vscode-errorForeground, #b44); }
 .mdr-conflict { margin: 12px 24px; padding: 12px; border: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 8px; }
 #mdr-canvas .cm-editor { outline: none; }
+/* The ID wins over CodeMirror's more-specific focused light-theme default. */
+#mdr-canvas .cm-selectionBackground { background: var(--doc-selection-inactive-bg); }
+#mdr-canvas .cm-focused .cm-selectionBackground { background: var(--doc-selection-bg); }
 #mdr-canvas .cm-line { background: none; }
 #mdr-canvas .mdr-live-h1 { font-size: 1.85em; font-weight: 650; letter-spacing: -.025em; line-height: 1.35; }
 #mdr-canvas .mdr-live-h2 { font-size: 1.4em; font-weight: 650; letter-spacing: -.015em; line-height: 1.4; }

@@ -133,8 +133,8 @@ button.mdr-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--
 .t-auto { --sw-bg: var(--vscode-editor-background, #fff); --sw-fg: var(--vscode-editor-foreground, #222); }
 .t-paper { --sw-bg: #fdfcf9; --sw-fg: #1f2328; }
 .t-sepia { --sw-bg: #f4ecd8; --sw-fg: #5b4636; }
-.t-dusk { --sw-bg: #2a2c38; --sw-fg: #d9dae4; }
-.t-night { --sw-bg: #0f1013; --sw-fg: #c4c7cc; }
+.t-dusk { --sw-bg: #24273a; --sw-fg: #e2e8f0; }
+.t-night { --sw-bg: #0d1117; --sw-fg: #e6edf3; }
 .mdr-rp-seg { display: flex; gap: 0; }
 .mdr-rp-seg button { flex: 1; border-radius: 0; margin-left: -1px; background: transparent; }
 .mdr-rp-seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
@@ -146,11 +146,31 @@ button.mdr-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--
 /* Themes recolour only the reading column (style.css draws it from --doc-*); panels keep following VS Code. */
 body[data-reading-theme='paper'] .mdr-layout { --doc-bg: #fdfcf9; --doc-fg: #1f2328; --doc-muted: #646b75; --doc-accent: #1d4ed8; }
 body[data-reading-theme='sepia'] .mdr-layout { --doc-bg: #f4ecd8; --doc-fg: #433422; --doc-muted: #7a6752; --doc-accent: #9a4f14; }
-body[data-reading-theme='dusk'] .mdr-layout { --doc-bg: #2a2c38; --doc-fg: #d9dae4; --doc-muted: #9a9cb0; --doc-accent: #9db4ff; }
-body[data-reading-theme='night'] .mdr-layout { --doc-bg: #0f1013; --doc-fg: #c4c7cc; --doc-muted: #858a93; --doc-accent: #7fb0ff; }
+body[data-reading-theme='dusk'] .mdr-layout {
+  --doc-bg: #24273a; --doc-fg: #e2e8f0; --doc-muted: #b0bad0; --doc-accent: #b7c5ff;
+  --doc-selection-bg: #354568; --doc-selection-inactive-bg: #303b53;
+}
+body[data-reading-theme='night'] .mdr-layout {
+  --doc-bg: #0d1117; --doc-fg: #e6edf3; --doc-muted: #a6b3c2; --doc-accent: #91c4ff;
+  --doc-selection-bg: #233f5d; --doc-selection-inactive-bg: #202f42;
+}
+body.vscode-dark:is([data-reading-theme='auto'], :not([data-reading-theme])) .mdr-layout {
+  --doc-selection-bg: #303e50; --doc-selection-inactive-bg: #343a43;
+}
 body:not([data-reading-theme='auto']) .mdr-layout { --doc-code-bg: var(--doc-softer); transition: background-color 0.2s; }
-body[data-reading-theme='dusk'] .mdr-layout, body[data-reading-theme='night'] .mdr-layout {
+body:is([data-reading-theme='dusk'], [data-reading-theme='night']) .mdr-layout,
+body.vscode-dark:is([data-reading-theme='auto'], :not([data-reading-theme])) .mdr-layout {
+  --doc-color-scheme: dark;
+  --doc-native-selection-bg: var(--doc-selection-bg); --doc-selection-fg: #f4f7ff;
+  --doc-match-bg: #493b24; --doc-match-selected-bg: #654d25; --doc-match-border: #e5c07b;
   --hl-draft: rgba(245, 158, 11, 0.3); --hl-submitted: rgba(96, 150, 255, 0.28); --hl-resolved: rgba(74, 222, 128, 0.16);
+}
+/* In-document controls follow the reading theme, even when VS Code itself is light. */
+body:is([data-reading-theme='dusk'], [data-reading-theme='night']) .mdr-writing,
+body.vscode-dark:is([data-reading-theme='auto'], :not([data-reading-theme])) .mdr-writing {
+  --bg: var(--doc-bg); --fg: var(--doc-fg); --muted: var(--doc-muted);
+  --widget: var(--doc-softer); --border: var(--doc-rule); --soft: var(--doc-soft);
+  --accent: var(--doc-accent); --focus: var(--doc-accent);
 }
 .mdr-reading-panel button.mdr-swatch { justify-content: flex-start; border: 1px solid var(--hairline, var(--border)); }
 .mdr-reading-panel .mdr-rp-seg button { border: 1px solid var(--hairline, var(--border)); }
@@ -756,8 +776,8 @@ button.mdr-chip.on { color: var(--fg); border-color: transparent; background: va
   mask: var(--i-close) center / contain no-repeat; -webkit-mask: var(--i-close) center / contain no-repeat;
 }
 #mdr-canvas .cm-search button[name='close']:hover { color: var(--fg); background: var(--soft); }
-#mdr-canvas .cm-searchMatch { background: color-mix(in srgb, var(--accent) 13%, transparent); }
-#mdr-canvas .cm-searchMatch-selected { background: color-mix(in srgb, var(--accent) 25%, transparent); outline: 1px solid var(--accent); }
+#mdr-canvas .cm-searchMatch { background: var(--doc-match-bg); }
+#mdr-canvas .cm-searchMatch-selected { background: var(--doc-match-selected-bg); outline: 1px solid var(--doc-match-border); }
 @media (max-width: 680px) {
   #mdr-canvas .cm-panel.cm-search { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 40px 12px 12px; }
   #mdr-canvas .cm-search input[name='search'] { grid-column: 1 / -1; grid-row: 1; }

@@ -255,7 +255,6 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       '.cm-content': { padding: '0', caretColor: 'var(--doc-accent)', minHeight: '65vh' },
       '.cm-line': { padding: '0', minHeight: '1.7em' },
       '.cm-cursor': { borderLeftColor: 'var(--doc-accent)' },
-      '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': { backgroundColor: 'color-mix(in srgb, var(--doc-accent) 20%, transparent)' },
       '.cm-panels': { backgroundColor: 'var(--doc-bg)', color: 'var(--doc-fg)', border: '1px solid var(--doc-rule)' },
     }),
   ] }) });
