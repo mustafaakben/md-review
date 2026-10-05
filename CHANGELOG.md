@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Writing themes
+
+- Five new reading themes, each with a font of its own: Typewriter (off-white page, monospaced face, blue links), Manuscript (ivory paper, dark ink, oxblood accent, book serif), Sage (soft green-grey, humanist sans), Espresso (warm dark brown, cream text, amber accent, book serif) and Ocean (deep blue-green, sea-glass accent, humanist sans). Picking one sets Font to the theme's own, shown as a third choice next to Sans and Serif; going back to a theme without one returns to Sans. Text and accents meet WCAG AA contrast on every new page. Typewriter uses the bundled iA Writer Duo and Manuscript and Espresso the bundled Literata, so they look the same on Windows and macOS; the humanist sans comes from the system (Segoe UI Variable, Avenir Next).
+
+### More fonts
+
+- Under Sans and Serif, **More fonts…** opens a list of 14 bundled writing fonts, each shown in its own face with a word on its character. Sans: Albert Sans (the closest to Bear Sans), Figtree, DM Sans, Plus Jakarta Sans, Manrope, Instrument Sans and Atkinson Hyperlegible. Serif: Newsreader, Literata, EB Garamond and Fraunces. Mono: iA Writer Mono, iA Writer Duo and IBM Plex Mono. A font picked here stays when you change theme, and Sans or Serif goes back to the simple choice. Mono faces get 15px text and roomier lines; Newsreader and EB Garamond, whose letters run small, are set a little larger. Arrow keys, Home and End move through the list, Enter picks, Esc closes it.
+- All 14 are SIL Open Font License fonts that ship with the extension (Fontsource packages, and iA's own webfonts in `fonts/ia-writer`), with their licences in `media/fonts/licenses`. Only the Latin and Latin Extended files are included, which covers Turkish and most European languages; a file loads only when its font is on screen. The package grows by 1.9 MB.
+
 ## 0.2.0 — 2026-09-29
 
 ### Send to Claude reaches Claude Code in WSL

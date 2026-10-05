@@ -181,6 +181,27 @@ test('reading prefs are sent on ready and saved on change', () => {
   assert.deepEqual(stored, { theme: 'night', zoom: 1.5, font: 'serif' });
 });
 
+test('the writing themes and their own font survive reopening; unknown values fall back', () => {
+  for (const theme of ['typewriter', 'manuscript', 'sage', 'espresso', 'ocean']) {
+    assert.deepEqual([lib.readingPrefs({ theme, font: 'theme' }).theme, lib.readingPrefs({ theme, font: 'theme' }).font], [theme, 'theme']);
+  }
+  const p = lib.readingPrefs({ theme: 'neon', font: 'comic' });
+  assert.deepEqual([p.theme, p.font], ['auto', 'sans']);
+  assert.equal(lib.readingPrefs({ font: 'albert-sans' }).font, 'albert-sans');
+});
+
+test('every bundled font has its files, licence, and a rule in fonts.css', () => {
+  const css = fs.readFileSync(path.join(here, '..', 'media', 'fonts', 'fonts.css'), 'utf8');
+  for (const f of lib.EXTRA_FONTS) {
+    assert.ok(css.includes(`font-family: '${f.family}'`), `${f.id}: @font-face`);
+    assert.ok(css.includes(`body[data-reading-font='${f.id}']`), `${f.id}: the reading rule`);
+    assert.ok(fs.readdirSync(path.join(here, '..', 'media', 'fonts', 'licenses')).some((n) => n.startsWith(f.id + '.')), `${f.id}: licence`);
+  }
+  for (const [, name] of css.matchAll(/url\(([^)]+)\)/g)) assert.ok(fs.existsSync(path.join(here, '..', 'media', 'fonts', name)), name);
+  // Latin and Latin Extended only: no Cyrillic, Greek or Vietnamese files.
+  assert.doesNotMatch(css, /cyrillic|greek|vietnamese/);
+});
+
 test('a file change reaching the host several ways renders once', () => {
   const md = fresh('once.md', 'First paragraph.\n\nSecond paragraph.\n');
   const { s, posted } = session(md);

@@ -4,9 +4,14 @@
 
 import { isMac, keyLabel } from './keys';
 import { blockAtY, settle } from './reveal';
+import { EXTRA_FONTS, FONT_GROUPS } from '../src/readingFonts';
 
-export type ReadingTheme = 'auto' | 'paper' | 'sepia' | 'dusk' | 'night';
-export type ReadingFont = 'sans' | 'serif';
+export type ReadingTheme = 'auto' | 'paper' | 'sepia' | 'dusk' | 'night' | 'typewriter' | 'manuscript' | 'sage' | 'espresso' | 'ocean';
+/**
+ * 'theme': the font the theme comes with (see THEME_FONTS); sans for a theme
+ * without one. Any other value is the id of a bundled font (EXTRA_FONTS).
+ */
+export type ReadingFont = 'sans' | 'serif' | 'theme' | (string & {});
 
 export interface ReadingPrefs {
   zoom: number; // 1 = 100%
@@ -24,7 +29,21 @@ const THEMES: [ReadingTheme, string][] = [
   ['sepia', 'Sepia'],
   ['dusk', 'Dusk'],
   ['night', 'Night'],
+  ['typewriter', 'Typewriter'],
+  ['manuscript', 'Manuscript'],
+  ['sage', 'Sage'],
+  ['espresso', 'Espresso'],
+  ['ocean', 'Ocean'],
 ];
+// Writing themes that come with a font of their own (features.css sets the
+// face); the Font row offers it as a third choice, named here.
+const THEME_FONTS: Partial<Record<ReadingTheme, [cls: string, label: string]>> = {
+  typewriter: ['mono', 'Mono'],
+  manuscript: ['book', 'Book'],
+  sage: ['humanist', 'Humanist'],
+  espresso: ['book', 'Book'],
+  ocean: ['humanist', 'Humanist'],
+};
 const STEPS = [0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.35, 1.5, 1.75, 2, 2.5];
 const MIN = STEPS[0];
 const MAX = STEPS[STEPS.length - 1];
@@ -47,6 +66,7 @@ export function createReading(
 ): Reading {
   const prefs: ReadingPrefs = { ...DEFAULT_PREFS };
   let saveT: any;
+  let fontsOpen = false; // the "More fonts" list, which survives re-rendering the panel
 
   function widthLabel() { return prefs.width === 'full' ? 'Uses available space' : `Approx. ${prefs.width} characters`; }
   function applyWidth() {
@@ -74,6 +94,18 @@ export function createReading(
     applyWidth();
     const pct = `${Math.round(prefs.zoom * 100)}%`;
     button.title = `Reading view: theme, font, writing width, and zoom (${pct})`;
+    const paired = THEME_FONTS[prefs.theme];
+    // Without a theme font, 'theme' shows (and renders) as Sans.
+    const font = prefs.font === 'theme' && !paired ? 'sans' : prefs.font;
+    const extra = EXTRA_FONTS.find((f) => f.id === font);
+    // A font from the list leaves the Sans / Serif row with nothing checked;
+    // Tab then reaches its first button.
+    const fontBtn = (k: ReadingFont, label: string, cls = '') =>
+      `<button data-font="${k}" class="${cls}${font === k ? ' on' : ''}" aria-checked="${font === k}" role="radio">${label}</button>`;
+    const fontList = FONT_GROUPS.map(([g, name]) => `
+        <div class="mdr-font-group" role="group" aria-label="${name}"><div class="mdr-font-gl" aria-hidden="true">${name}</div>${EXTRA_FONTS.filter((f) => f.group === g).map(
+          (f) => `<button data-font="${f.id}" class="mdr-font-opt ff-${f.id}${font === f.id ? ' on' : ''}" role="option" aria-selected="${font === f.id}" tabindex="-1"><span>${f.label}</span><small>${f.note}</small></button>`,
+        ).join('')}</div>`).join('');
     panel.innerHTML = `
       <div class="mdr-rp-label">Theme</div>
       <div class="mdr-rp-themes" role="radiogroup" aria-label="Reading theme">${THEMES.map(
@@ -82,8 +114,12 @@ export function createReading(
       ).join('')}</div>
       <div class="mdr-rp-label">Font</div>
       <div class="mdr-rp-seg" role="radiogroup" aria-label="Font">
-        <button data-font="sans" class="${prefs.font === 'sans' ? 'on' : ''}" aria-checked="${prefs.font === 'sans'}" role="radio">Sans</button>
-        <button data-font="serif" class="serif${prefs.font === 'serif' ? ' on' : ''}" aria-checked="${prefs.font === 'serif'}" role="radio">Serif</button>
+        ${fontBtn('sans', 'Sans')}${fontBtn('serif', 'Serif', 'serif')}${paired ? fontBtn('theme', paired[1], `tf-${paired[0]}`) : ''}
+      </div>
+      <button class="mdr-font-pick${extra ? ' on' : ''}" data-fontlist="" aria-haspopup="listbox" aria-expanded="${fontsOpen}" aria-controls="mdr-font-list">
+        <span class="${extra ? `ff-${extra.id}` : ''}">${extra ? extra.label : 'More fonts…'}</span><i aria-hidden="true"></i>
+      </button>
+      <div id="mdr-font-list" class="mdr-font-list" role="listbox" aria-label="More fonts"${fontsOpen ? '' : ' hidden'}>${fontList}
       </div>
       <div class="mdr-rp-label">Review spacing</div>
       <div class="mdr-rp-seg" role="radiogroup" aria-label="Review spacing">
@@ -102,6 +138,10 @@ export function createReading(
       </div>`;
     // Roving tabindex inside each radio group: Tab reaches the checked option.
     panel.querySelectorAll('[role="radio"]').forEach((b) => b.setAttribute('tabindex', b.getAttribute('aria-checked') === 'true' ? '0' : '-1'));
+    panel.querySelectorAll('[role="radiogroup"]').forEach((g) => {
+      if (!g.querySelector('[aria-checked="true"]')) g.querySelector('[role="radio"]')?.setAttribute('tabindex', '0');
+    });
+    (panel.querySelector('.mdr-font-opt[aria-selected="true"]') ?? panel.querySelector('.mdr-font-opt'))?.setAttribute('tabindex', '0');
     widthControls();
     if (had) {
       const again = panel.querySelector(had) as HTMLButtonElement | null;
@@ -113,7 +153,7 @@ export function createReading(
     if (el.id === 'mdr-width-slider') return '#mdr-width-slider';
     const b = el.closest('button');
     if (!b) return '';
-    for (const k of ['theme', 'font', 'density', 'width', 'zoom']) if (b.dataset[k] !== undefined) return `[data-${k}="${b.dataset[k]}"]`;
+    for (const k of ['theme', 'font', 'fontlist', 'density', 'width', 'zoom']) if (b.dataset[k] !== undefined) return `[data-${k}="${b.dataset[k]}"]`;
     return '';
   }
 
@@ -204,6 +244,26 @@ export function createReading(
   });
   // Arrow keys move and select within a radio group, as native radios do.
   panel.addEventListener('keydown', (e) => {
+    // The font list: arrows, Home and End move through it; Escape closes just the list.
+    const inList = (e.target as HTMLElement).closest('.mdr-font-list');
+    if (inList) {
+      const opts = Array.from(inList.querySelectorAll<HTMLButtonElement>('.mdr-font-opt'));
+      const at = opts.indexOf(e.target as HTMLButtonElement);
+      const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: opts.length - 1 }[e.key];
+      if (to !== undefined) {
+        e.preventDefault();
+        opts[Math.max(0, Math.min(opts.length - 1, to))]?.focus({ preventScroll: false });
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        fontsOpen = false;
+        render();
+        (panel.querySelector('[data-fontlist]') as HTMLElement | null)?.focus({ preventScroll: true });
+        return;
+      }
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
@@ -228,8 +288,27 @@ export function createReading(
     e.stopPropagation();
     const t = (e.target as Element).closest('button');
     if (!t) return;
-    if (t.dataset.theme) set({ theme: t.dataset.theme as ReadingTheme }, true);
-    else if (t.dataset.font) set({ font: t.dataset.font as ReadingFont }, true);
+    if (t.dataset.theme) {
+      // A writing theme switches to its own font; Sans or Serif is one click away.
+      // Leaving one for a theme without a font goes back to Sans. Sending the
+      // font along keeps the reading place while the text reflows.
+      // A font picked from the list stays whatever the theme.
+      const theme = t.dataset.theme as ReadingTheme;
+      const chosen = EXTRA_FONTS.some((f) => f.id === prefs.font);
+      if (THEME_FONTS[theme] && !chosen) set({ theme, font: 'theme' }, true);
+      else set(prefs.font === 'theme' && !THEME_FONTS[theme] ? { theme, font: 'sans' } : { theme }, true);
+    } else if (t.dataset.fontlist !== undefined) {
+      fontsOpen = !fontsOpen;
+      render();
+      const sel = panel.querySelector<HTMLElement>('.mdr-font-opt[aria-selected="true"]') ?? panel.querySelector<HTMLElement>('.mdr-font-opt');
+      (fontsOpen ? sel : (panel.querySelector('[data-fontlist]') as HTMLElement | null))?.focus({ preventScroll: true });
+      if (fontsOpen) sel?.scrollIntoView({ block: 'nearest' });
+    } else if (t.dataset.font) {
+      const fromList = t.classList.contains('mdr-font-opt');
+      if (fromList) fontsOpen = false;
+      set({ font: t.dataset.font as ReadingFont }, true);
+      if (fromList) (panel.querySelector('[data-fontlist]') as HTMLElement | null)?.focus({ preventScroll: true });
+    }
     else if (t.dataset.density === 'compact' || t.dataset.density === 'comfortable') set({ density: t.dataset.density }, true);
     else if (t.dataset.width) set({ width: t.dataset.width === 'full' ? 'full' : Number(t.dataset.width) }, true);
     else if (t.dataset.zoom === '0') api.resetZoom();

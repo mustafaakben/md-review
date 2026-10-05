@@ -73,7 +73,7 @@ fs.watch(dir, (_ev, name) => {
 });
 
 const shell = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>MD Review harness</title>
-<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"><link rel="stylesheet" href="/media/features.css"></head>
+<link rel="stylesheet" href="/media/katex/katex.min.css"><link rel="stylesheet" href="/media/style.css"><link rel="stylesheet" href="/media/features.css"><link rel="stylesheet" href="/media/fonts/fonts.css"></head>
 <body><div id="app"></div>
 <script>
   window.__mdrStandalone = true;

@@ -16,6 +16,7 @@ import { buildAgentPrompt } from './agentPrompt';
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 import { insideRealRoots, isNetworkPath, realRoots } from './bibliography';
 import * as redlines from './redlines';
+import { isExtraFont } from './readingFonts';
 import { BaselineHook, memoryBaselines } from './baselineStore';
 import { diffSeq } from './wordDiff';
 import { SIDECAR_RETRY_MS } from './fileWatch';
@@ -221,6 +222,19 @@ const lineCount = (s: string) => {
  * and who it belonged to when it was an agent's untriaged draft (applying keeps it).
  */
 interface Applied { id: string; from?: string; status: store.Status; agent?: { author: string; suggestedBy?: string } }
+
+/** The reading themes webview/reading.ts offers. */
+const READING_THEMES = ['auto', 'paper', 'sepia', 'dusk', 'night', 'typewriter', 'manuscript', 'sage', 'espresso', 'ocean'];
+
+/** Stored reading preferences, with anything unexpected replaced by the default. */
+export function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string; density: string; width: number | 'full' } {
+  const p = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
+  const zoom = typeof p.zoom === 'number' && p.zoom >= 0.5 && p.zoom <= 3 ? p.zoom : 1;
+  const theme = typeof p.theme === 'string' && READING_THEMES.includes(p.theme) ? p.theme : 'auto';
+  const font = p.font === 'serif' || p.font === 'theme' || isExtraFont(p.font) ? p.font : 'sans';
+  const width = p.width === 'full' ? 'full' : typeof p.width === 'number' && Number.isFinite(p.width) ? Math.max(40, Math.min(120, Math.round(p.width))) : 68;
+  return { zoom, theme, font, density: p.density === 'compact' ? 'compact' : 'comfortable', width };
+}
 
 /**
  * The file a link points at, relative to the document's folder, as written

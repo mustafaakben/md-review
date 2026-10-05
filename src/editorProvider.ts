@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ReviewSession, FromWebview, linkPath } from './core';
+import { ReviewSession, FromWebview, linkPath, readingPrefs } from './core';
 import { BaselineStore } from './baselineStore';
 import { saveSendBaseline } from './redlines';
 import { awaitsAgent, readSidecar, Comment } from './commentStore';
@@ -298,6 +298,7 @@ export class MdReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <link rel="stylesheet" href="${media('katex/katex.min.css')}">
 <link rel="stylesheet" href="${media('style.css')}">
 <link rel="stylesheet" href="${media('features.css')}">
+<link rel="stylesheet" href="${media('fonts/fonts.css')}">
 <title>MD Review</title></head>
 <body data-reading-theme="${prefs.theme}" data-reading-font="${prefs.font}" data-prefs="${attr(JSON.stringify(prefs))}"><div id="app"></div><script nonce="${nonce}" src="${media('webview.js')}"></script></body></html>`;
   }
@@ -359,16 +360,6 @@ function systemUser(): string {
     // fall through
   }
   return process.env.USER || process.env.USERNAME || 'Reviewer';
-}
-
-/** Stored reading preferences, with anything unexpected replaced by the default. */
-function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string; density: string; width: number | 'full' } {
-  const p = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
-  const zoom = typeof p.zoom === 'number' && p.zoom >= 0.5 && p.zoom <= 3 ? p.zoom : 1;
-  const theme = typeof p.theme === 'string' && ['auto', 'paper', 'sepia', 'dusk', 'night'].includes(p.theme) ? p.theme : 'auto';
-  const font = p.font === 'serif' ? 'serif' : 'sans';
-  const width = p.width === 'full' ? 'full' : typeof p.width === 'number' && Number.isFinite(p.width) ? Math.max(40, Math.min(120, Math.round(p.width))) : 68;
-  return { zoom, theme, font, density: p.density === 'compact' ? 'compact' : 'comfortable', width };
 }
 
 function openLink(href: string, dir: string) {

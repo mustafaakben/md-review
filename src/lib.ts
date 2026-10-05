@@ -1,5 +1,6 @@
 // Node-side library entry (tests, harness server, CLI). No vscode dependency.
 export * from './core';
+export { EXTRA_FONTS } from './readingFonts';
 export * as store from './commentStore';
 export * from './blockEdit';
 export * from './render';
