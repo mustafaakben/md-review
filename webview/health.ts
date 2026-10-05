@@ -1,3 +1,4 @@
+import type { FromWebview } from '../src/protocol';
 // Document health: word counts against the front matter's targets, and a
 // panel listing what needs fixing (broken links and images, unknown citation
 // keys and cross-refs, orphaned comments, duplicate headings).
@@ -37,7 +38,7 @@ interface Options {
   panel: HTMLElement;
   /** Toolbar text: total words and reading time. */
   wordsEl: HTMLElement;
-  post(m: unknown): void;
+  post(m: FromWebview): void;
   /** Counts changed (the outline shows them). */
   onCounted(): void;
   /** Move an orphaned thread to the current selection. */

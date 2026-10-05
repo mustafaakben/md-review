@@ -1,0 +1,82 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildSync } from 'esbuild';
+import { createRequire } from 'node:module';
+import { execFileSync, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import vm from 'node:vm';
+const require = createRequire(import.meta.url);
+const { store, buildAgentPrompt } = require('../dist/lib.cjs');
+const load = file => { const module = { exports: {} }; vm.runInNewContext(buildSync({ entryPoints: [file], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text, { module, exports: module.exports }); return module.exports; };
+const { orderedReplies, renderMessageMarkdown, replyComposer } = load('webview/messageContent.ts');
+const { clampPopup, resizePopup } = load('webview/popupGeometry.ts');
+const root = () => ({ id: 'c_root', author: 'Reviewer', body: '**Original**', anchor: { quote: 'Passage', lineStart: 1, lineEnd: 1, prefix: '', suffix: '' }, createdAt: '2026-10-04', status: 'submitted', replies: [], custom: { preserve: true } });
+test('nested replies preserve arrival order, metadata and exact message identity when edited', () => {
+  const c = root(), data = { schemaVersion: 1, comments: [c] };
+  const a = store.addReply(data, c.id, 'Claude', '*First*', c.id);
+  const b = store.addReply(data, c.id, 'Reviewer', 'Followup', a.id);
+  const d = store.addReply(data, c.id, 'Claude', 'Other branch', c.id);
+  const e = store.addReply(data, c.id, 'Claude', 'Nested answer', b.id);
+  store.editBody(data, c.id, '**Revised followup**', b.id);
+  assert.deepEqual(c.replies.map(r => r.id), [a.id,b.id,d.id,e.id]);
+  assert.equal(b.parentId,a.id); assert.equal(b.body,'**Revised followup**'); assert.equal(c.custom.preserve,true);
+  assert.deepEqual(Array.from(orderedReplies(c.id,c.replies), r=>r.message.id), [a.id,b.id,e.id,d.id]);
+  assert.throws(()=>store.addReply(data,c.id,'Reviewer','lost','missing'), /no longer exists/);
+  assert.throws(()=>store.editBody(data,c.id,'lost','missing'), /no longer exists/);
+  assert.equal(c.replies.length,4);
+});
+test('legacy flat replies, missing parents and cycles remain visible without recursion', () => {
+  const replies = [{id:'a'}, {id:'b',parentId:'absent'}, {id:'c',parentId:'d'}, {id:'d',parentId:'c'}, {id:'e',parentId:'e'}];
+  const rows=orderedReplies('root',replies);
+  assert.equal(rows.length,5); assert.equal(new Set(rows.map(r=>r.message.id)).size,5);
+  assert.equal(rows.find(r=>r.message.id==='a').depth,1);
+  const deep=Array.from({length:5000},(_,i)=>({id:String(i),parentId:i?String(i-1):'root'}));
+  assert.equal(orderedReplies('root',deep).length,5000);
+});
+test('saved Markdown renders while HTML, script URLs and tracking images stay inert', () => {
+  const html=renderMessageMarkdown('*italic* **bold** `code`\n\n- First\n- Second\n\n> quote\n\n```js\nconst x = 1;\n```\n\n[link](https://example.com)');
+  for (const tag of ['<em>italic</em>','<strong>bold</strong>','<code>code</code>','<ul>','<blockquote>','<pre>','href="https://example.com"']) assert.ok(html.includes(tag),tag);
+  const malicious=renderMessageMarkdown('<script>alert(1)</script>\n\n[x](javascript:alert(1))\n\n![track](https://example.com/pixel)');
+  assert.ok(!malicious.includes('<script>')); assert.ok(!malicious.includes('href="javascript:')); assert.ok(!malicious.includes('<img'));
+  const c={...root(),replies:[{id:'r_first',author:'Claude',body:'**bold**'}]};
+  assert.match(replyComposer(c,'r_first','data-act','*draft*'), /data-parent="r_first"/);
+  assert.match(replyComposer(c,'r_first','data-act','*draft*'), />\*draft\*<\/textarea>/);
+});
+test('CLI parent links survive disk round trips and later flat replies', t => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mdreview-nested-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const md=path.join(dir,'paper.md'), side=md+'.comments.json', c=root();
+  c.replies.push({id:'r_agent',author:'Claude',body:'Option A',createdAt:'now',custom:'keep'});
+  fs.writeFileSync(md,'Passage');fs.writeFileSync(side,JSON.stringify({schemaVersion:1,file:'paper.md',comments:[c]}));
+  const cli=path.resolve('cli/mdreview.mjs');
+  const run=(...args)=>execFileSync(process.execPath,[cli,...args],{encoding:'utf8'});
+  run('reply',md,c.id,'Nested **answer**','--parent','r_agent');
+  const reply=JSON.parse(fs.readFileSync(side)).comments[0].replies.at(-1);
+  assert.equal(reply.parentId,'r_agent');
+  run('apply',md,'reply-to',c.id,reply.id,'Deeper reply','reply',c.id,'Flat response');
+  const updated=JSON.parse(fs.readFileSync(side)).comments[0];
+  assert.equal(updated.replies[2].parentId,reply.id);assert.equal(updated.replies[3].parentId,undefined);assert.equal(updated.replies[0].custom,'keep');
+  const before=fs.readFileSync(side,'utf8');
+  const bad=spawnSync(process.execPath,[cli,'apply',md,'fix',c.id,'Passage','Changed','note','reply-to',c.id,'missing','Bad'],{encoding:'utf8'});
+  assert.notEqual(bad.status,0);assert.equal(fs.readFileSync(side,'utf8'),before);assert.equal(fs.readFileSync(md,'utf8'),'Passage');
+  assert.match(run('list',md), /reply to r_agent/);
+});
+test('dragging and resizing stay within the viewport and retain minimum readable dimensions', () => {
+  const b={left:100,top:100,width:380,height:400};
+  let r=resizePopup(b,'se',200,100,1200,900);assert.equal(r.width,580);assert.equal(r.height,500);
+  r=resizePopup(b,'nw',-50,-20,1200,900);assert.equal(r.left,50);assert.equal(r.top,80);assert.equal(r.width,430);assert.equal(r.height,420);
+  r=resizePopup(b,'se',-1000,-1000,1200,900);assert.equal(r.width,260);assert.equal(r.height,180);
+  r=clampPopup({...b,left:2000,top:-100},360,640);assert.ok(r.left>=12);assert.ok(r.left+r.width<=348);assert.ok(r.top>=64);assert.ok(r.top+r.height<=628);
+});
+
+test('both agent prompt routes identify nested messages and explain targeted replies', () => {
+  const c=root(); c.replies=[{id:'r_agent',author:'Claude',body:'First response',createdAt:'now'}, {id:'r_user',author:'Reviewer',body:'Followup',parentId:'r_agent',createdAt:'later'}];
+  const options={mdPath:'/work/paper.md',cwd:'/work',cliPath:'/work/cli/mdreview.mjs',comments:[c]};
+  const fast=buildAgentPrompt({...options,source:'Passage'});
+  assert.match(fast,/reply-to <thread-id> <message-id>/);
+  assert.match(fast,/\[r_user reply to r_agent\] Reviewer: Followup/);
+  const full=buildAgentPrompt(options);
+  assert.match(full,/--parent <message-id>/);
+  assert.match(full,/\[r_user reply to r_agent\] Reviewer: Followup/);
+});

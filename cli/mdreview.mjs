@@ -6,7 +6,7 @@
 //   node mdreview.mjs next    [paths…] [--all] [--json]
 //   node mdreview.mjs context <file.md> <id> [--lines 2] [--json]
 //   node mdreview.mjs show    <file.md> <id>
-//   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude]
+//   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude] [--parent <message-id>]
 //   node mdreview.mjs resolve <file.md> <id> ["<closing reply>"] [--author Claude]
 //   node mdreview.mjs fix     <file.md> <id> "<old source text>" "<new source text>" ["<note>"]
 //   node mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "<note>" reply <id> "<text>" resolve <id> "<note>" …
@@ -27,14 +27,14 @@
 // marked origin "agent", for the reviewer to keep, act on, or dismiss;
 // `review-done` then tells the viewer the review is finished.
 //
-// Every write re-reads the sidecar, applies the change, and writes it back, so
-// it never clobbers comments the viewer added in the meantime.
+// Writes coordinate with the viewer and check external revisions before atomic replacement.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { readText, mutateSidecar } from './sidecar-io.cjs';
 
 const args = process.argv.slice(2);
 const flag = (name, def) => {
@@ -53,6 +53,7 @@ const bool = (name) => {
 
 const status = flag('status');
 const author = flag('author', 'Claude');
+const parentArg = flag('parent');
 const around = Math.max(0, Number(flag('lines', 2)) || 0);
 const asJson = bool('json');
 const force = bool('force');
@@ -87,8 +88,7 @@ const shown = (md) => {
 function read(md) {
   const side = sideOf(md);
   const empty = { schemaVersion: 1, file: path.basename(md), comments: [] };
-  if (!fs.existsSync(side)) return empty;
-  const raw = fs.readFileSync(side, 'utf8').replace(/^﻿/, '');
+  const raw = (readText(side) ?? '').replace(/^﻿/, '');
   return raw.trim() ? JSON.parse(raw) : empty;
 }
 /** read() for commands that scan many files: a broken sidecar is reported and skipped. */
@@ -101,19 +101,12 @@ function readOrSkip(md) {
   }
 }
 function mutate(md, fn) {
-  const side = sideOf(md);
-  const data = read(md);
-  data.comments ||= [];
-  fn(data);
-  const tmp = `${side}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-  try {
-    fs.renameSync(tmp, side);
-  } catch {
-    fs.writeFileSync(side, JSON.stringify(data, null, 2) + '\n', 'utf8');
-    fs.rmSync(tmp, { force: true });
-  }
-  return data;
+  return mutateSidecar(sideOf(md), raw => {
+    const data = raw === null ? { schemaVersion: 1, file: path.basename(md), comments: [] } : JSON.parse(raw.replace(/^﻿/, ''));
+    data.comments ||= [];
+    fn(data);
+    return data;
+  }).data;
 }
 // Mark the thread an agent is on, so the viewer can show "Claude is working"
 // there; reply and resolve clear it. Moving on clears our older marks.
@@ -665,7 +658,7 @@ function describe(c) {
   const tags = tagsOf(c);
   let s = `[${c.id}] ${String(c.status).toUpperCase()} ${c.scope === 'document' ? 'document' : lines} ${c.author} ${c.createdAt}${tags.length ? ` (${tags.join(', ')})` : ''}${c.scope === 'document' ? '' : `\n  quote: "${c.anchor?.quote}"`}\n  body:  ${c.body}`;
   if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
-  for (const r of c.replies || []) s += `\n    ↳ ${r.author} (${r.createdAt}): ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
+  for (const r of c.replies || []) s += `\n    ↳ [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author} (${r.createdAt}): ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   return s;
 }
 function describeWithContext(c, ctx) {
@@ -678,7 +671,7 @@ function describeWithContext(c, ctx) {
   else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
   if (Object.hasOwn(KIND_HINT, c.kind ?? '')) s += `\n  (${KIND_HINT[c.kind]})`;
   if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
-  for (const r of c.replies || []) s += `\n    ↳ ${r.author}: ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
+  for (const r of c.replies || []) s += `\n    ↳ [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
   if (ctx.source.length) {
     const w = String(ctx.source.at(-1).line).length;
@@ -743,6 +736,7 @@ function initClaude(dir) {
   const files = [
     [path.join(here, 'SKILL.md'), path.join(dest, 'SKILL.md')],
     [path.join(here, 'mdreview.mjs'), path.join(dest, 'mdreview.mjs')],
+    [path.join(here, 'sidecar-io.cjs'), path.join(dest, 'sidecar-io.cjs')],
   ];
   const skill = files[0][1];
   if (!force && fs.existsSync(skill) && fs.readFileSync(skill, 'utf8') !== fs.readFileSync(files[0][0], 'utf8')) {
@@ -854,7 +848,10 @@ function applyActions(mdArg, actions) {
     fail(`Not found: ${mdArg}`);
   }
   const data = read(md);
-  for (const a of actions) find(data, a.id); // unknown ids fail before anything is written
+  for (const a of actions) {
+    const c = find(data, a.id); // unknown ids/parents fail before anything is written
+    if (a.parentId && a.parentId !== c.id && !c.replies.some(r => r.id === a.parentId)) fail('Parent message not found in this thread.');
+  }
   // Keep the file's line endings: the agent writes \n.
   const crlf = raw.includes('\r\n');
   const eol = (t) => (crlf ? t.replace(/\r?\n/g, '\r\n') : t.replace(/\r\n/g, '\n'));
@@ -899,7 +896,7 @@ function applyActions(mdArg, actions) {
     for (const a of actions) {
       const c = find(d, a.id);
       const body = a.verb === 'fix' ? a.note || `Changed "${clip(a.oldText)}" to "${clip(a.newText)}".` : a.verb === 'reply' ? a.text : a.note;
-      if (body) c.replies.push({ id: newId('r'), author, createdAt: now(), body });
+      if (body) c.replies.push({ id: newId('r'), author, createdAt: now(), body, ...(a.parentId ? { parentId: a.parentId } : {}) });
       if (a.verb !== 'reply') {
         c.status = 'resolved';
         c.resolvedAt = now();
@@ -1016,7 +1013,8 @@ switch (cmd) {
     if (!mdArg || !id || !text) usage();
     mutate(mdOf(mdArg), (d) => {
       const c = find(d, id);
-      c.replies.push({ id: newId('r'), author, createdAt: now(), body: text });
+      if (parentArg && parentArg !== c.id && !c.replies.some(r => r.id === parentArg)) fail('Parent message not found in this thread.');
+      c.replies.push({ id: newId('r'), author, createdAt: now(), body: text, ...(parentArg ? { parentId: parentArg } : {}) });
       unclaim(c);
     });
     console.log(`Replied to ${id}`);
@@ -1067,11 +1065,12 @@ switch (cmd) {
     const actions = [];
     for (let i = 0; i < tokens.length; ) {
       const verb = tokens[i];
-      const n = { fix: 4, reply: 2, resolve: 2 }[verb];
+      const n = { fix: 4, reply: 2, 'reply-to': 3, resolve: 2 }[verb];
       if (!n || i + n >= tokens.length + (verb === 'resolve' ? 1 : 0)) fail(`apply: expected fix <id> <old> <new> <note>, reply <id> <text> or resolve <id> <note>, got "${verb}" at argument ${i + 2}.`);
       const [id, a, b, c] = tokens.slice(i + 1, i + 1 + n);
       if (verb === 'fix') actions.push({ verb, id, oldText: a, newText: b, note: c });
       else if (verb === 'reply') actions.push({ verb, id, text: a });
+      else if (verb === 'reply-to') actions.push({ verb: 'reply', id, parentId: a, text: b });
       else actions.push({ verb, id, note: a });
       i += 1 + n;
     }

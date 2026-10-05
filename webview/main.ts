@@ -1,4 +1,12 @@
+import { revealComposer } from './messageContent';
+import { createCommentComposer } from './commentComposer';
+import { renderThreadCard } from './threadCards';
+import { threadStatus } from './threadStatus';
+import type { Comment, Status } from './commentTypes';
+import type { FromWebview, ToWebview } from '../src/protocol';
 import { createThreadPopover } from './threadPopover';
+import { confirmThreadDelete } from './deleteThread';
+import { commandForKey, isSaveReply, nativeTextHistory, type ReviewCommand } from './commands';
 import { createLiveEditor, LiveSelection } from './liveEditor';
 import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
@@ -19,19 +27,6 @@ import { Meta, metaPicker, pickerClick, pickerKey, pickerValue, readPicker, togg
 
 declare function acquireVsCodeApi(): { postMessage(m: unknown): void; getState(): any; setState(s: any): void };
 const vscode = acquireVsCodeApi();
-
-type Status = 'draft' | 'submitted' | 'resolved';
-interface Reply { id: string; author: string; createdAt: string; body: string; suggestion?: Suggestion }
-interface Comment extends Meta {
-  id: string; author: string; createdAt: string; body: string; status: Status;
-  submittedAt: string | null; resolvedAt: string | null; replies: Reply[];
-  suggestion?: Suggestion;
-  /** Set by the CLI while an agent is on this thread. */
-  workingAt?: string; workingBy?: string;
-  /** "agent": Claude's draft from Review with Claude, not yet triaged. */
-  origin?: 'agent' | 'word'; suggestedBy?: string;
-  anchor: { quote: string; prefix: string; suffix: string; lineStart: number; lineEnd: number };
-}
 
 // ---------------------------------------------------------------- state
 let blocks: string[] = []; // the document's HTML, one string per top-level block (see renderBlocks)
@@ -77,7 +72,9 @@ let sidebarParts: string[] = [];
 const anchorCache = new Map<string, [number, number] | null>(); // valid for paintedText
 const positions = new Map<string, number>(); // comment id -> text offset (for ordering)
 const orphans = new Set<string>();
-const openReplies = new Set<string>();
+const openReplies = new Map<string, string>();
+const replyDrafts = new Map<string, string>();
+const editingReplies = new Map<string, string>();
 const editingBodies = new Set<string>();
 const saved = vscode.getState() || {};
 const filter: FilterState = { status: saved.filterStatus || 'all', author: saved.filterAuthor || '', severity: saved.filterSeverity || '' };
@@ -164,13 +161,14 @@ const reading = createReading(
   document.getElementById('mdr-reading-btn')!,
   document.getElementById('mdr-reading')!,
   (prefs: ReadingPrefs) => {
-    post({ type: 'setPrefs', prefs });
+    post({ type: 'setPrefs', prefs: { ...prefs } });
     void diagrams.refresh(); // a reading theme can switch light/dark
   },
   (msg) => toast(msg),
+  anchorY => liveReady && !redlines.isOn() ? live.keepReadingPlace(undefined, anchorY) : null,
 );
-const agentMenu = createAgentMenu(document.getElementById('mdr-agent-btn') as HTMLButtonElement, document.getElementById('mdr-agent')!, (m) => post(m), () => sendLabel());
-const reviewMenu = createReviewMenu(document.getElementById('mdr-review-btn')!, document.getElementById('mdr-review')!, (m) => post(m), () => setSidebarOpen(true));
+const agentMenu = createAgentMenu(document.getElementById('mdr-agent-btn') as HTMLButtonElement, document.getElementById('mdr-agent')!, (m) => post(m), () => { sendLabel(); renderSidebar(); });
+const reviewMenu = createReviewMenu(document.getElementById('mdr-review-btn')!, document.getElementById('mdr-review')!, (m) => post(m), () => setSidebarOpen(true), () => agentMenu.name());
 // The host puts the stored reading look into the page (see shell()).
 try {
   reading.apply(JSON.parse(document.body.dataset.prefs || '{}'));
@@ -208,9 +206,9 @@ const fmt = (iso: string | null) => {
   const d = new Date(iso);
   return isNaN(+d) ? iso : dateFmt.format(d);
 };
-const post = (m: unknown) => {
+const post = (m: FromWebview) => {
   const type = (m as { type: string }).type;
-  if (['sendToAgent', 'copyPrompt', 'startReview', 'submitReview', 'applySuggestion', 'revertChange'].includes(type) && live.dirty) {
+  if ((['sendToAgent', 'copyPrompt', 'startReview', 'submitReview', 'applySuggestion', 'revertChange'].includes(type) || (m.type === 'addComment' && m.send)) && live.dirty) {
     live.whenSaved(() => vscode.postMessage(m));
   } else vscode.postMessage(m);
 };
@@ -221,7 +219,11 @@ let agentPoll: ReturnType<typeof setInterval> | undefined;
 let sendable = 0;
 function sendLabel() {
   sendBtn.disabled = sendable === 0;
-  sendBtn.textContent = `Send to ${agentMenu.name()}${sendable ? ` (${sendable})` : ''}`;
+  sendBtn.textContent = `${agentMenu.bound() ? `Send to ${agentMenu.name()}` : 'Connect and send'}${sendable ? ` (${sendable})` : ''}`;
+  const reviewButton = document.getElementById('mdr-review-btn')!;
+  reviewButton.querySelector('span')!.textContent = `Review with ${agentMenu.name()}`;
+  reviewButton.title = `Ask ${agentMenu.name()} to leave review comments`;
+  sendBtn.title = tip(agentMenu.bound() ? `Send this review to ${agentMenu.name()}` : 'Choose an agent session and send this review', 'Mod+Alt+Enter');
 }
 
 function toast(msg: string, isError = false, ms = isError ? 7000 : 2500) {
@@ -607,7 +609,7 @@ function renderSidebar() {
   const now = Date.now(); // one clock for every card's working state
   const cards = (cs: Comment[]) => cs.forEach((c) => add('c:' + c.id, card(c, now)));
   if (fromClaude.length) {
-    add('s:agent', `<div class="mdr-section mdr-section-agent">From Claude · keep, do, or discard</div>`);
+    add('s:agent', `<div class="mdr-section mdr-section-agent">From ${esc(agentMenu.name())} · keep, do, or discard</div>`);
     cards(fromClaude);
   }
   if (whole.length) {
@@ -631,6 +633,8 @@ function renderSidebar() {
   const typed = (full ? [sidebar] : olds!).flatMap((root) => Array.from(root.querySelectorAll<HTMLTextAreaElement>('.mdr-card textarea'))).map((t) => ({
     id: t.closest<HTMLElement>('.mdr-card')!.dataset.id!,
     cls: t.className,
+    parent: t.dataset.parent,
+    message: t.dataset.message,
     value: t.value,
     focus: t === document.activeElement ? [t.selectionStart, t.selectionEnd] : null,
   }));
@@ -644,7 +648,7 @@ function renderSidebar() {
   }
   for (const d of typed) {
     const t = sidebar.querySelector<HTMLTextAreaElement>(`.mdr-card[data-id="${CSS.escape(d.id)}"] textarea${d.cls ? '.' + d.cls.split(' ')[0] : ':not([class])'}`);
-    if (!t) continue;
+    if (!t || t.dataset.parent !== d.parent || t.dataset.message !== d.message) continue;
     t.value = d.value;
     if (d.focus) {
       t.focus({ preventScroll: true });
@@ -661,7 +665,7 @@ function showWorking() {
   const now = Date.now();
   const on = new Set(comments.filter((c) => isWorking(c, now)).map((c) => c.id));
   const reviewing = review ? reviewLeft(review, comments, now) : null;
-  const banner = [reviewBanner(review, reviewing !== null), roundBanner(round, on.size > 0)]
+  const banner = [reviewBanner(review, reviewing !== null, agentMenu.name()), roundBanner(round, on.size > 0, agentMenu.name())]
     .filter(Boolean)
     .map((b) => `<div class="mdr-round-part">${b}</div>`)
     .join('');
@@ -704,45 +708,9 @@ function answered(c: Comment): boolean {
 }
 
 function card(c: Comment, now = Date.now()): string {
-  const open = orphans.has(c.id) ? null : openSuggestion(c); // no text to apply it to
-  const replies = c.replies
-    .map((r) => `<div class="mdr-reply"><div class="mdr-meta"><b>${esc(r.author)}</b> · ${fmt(r.createdAt)}</div><div class="mdr-body">${esc(r.body)}</div>${r.suggestion ? suggestionBlock(c.anchor.quote, r.suggestion, r.id, r.author, open === r.id) : ''}</div>`)
-    .join('');
-  const mine = c.author === author;
-  const agent = isAgentDraft(c);
-  const actions = agent
-    ? [
-        `<button data-act="keep" title="Make this your draft; it goes out with your review">Keep</button>`,
-        `<button data-act="do-it" title="Keep it and queue it for Claude; Send to Claude hands over everything queued" aria-label="Do it: keep and queue for Claude">Do it</button>`,
-        `<button data-act="dismiss-agent" class="danger" title="Delete this comment from ${esc(c.author)}" aria-label="Discard ${esc(c.author)}'s comment">Discard</button>`,
-      ].join('')
-    : [
-    `<button data-act="reply">Reply</button>`,
-    mine && c.status !== 'resolved' ? `<button data-act="edit-body">Edit</button>` : '',
-    c.status === 'resolved' ? `<button data-act="reopen">Reopen</button>` : `<button data-act="resolve">Resolve</button>`,
-    c.status !== 'resolved' ? `<button data-act="ask-claude" title="Send just this thread to Claude">Ask Claude</button>` : '',
-    answered(c) ? `<button data-act="show-change" title="Show what changed in this thread's text since you sent it">Show change</button>` : '',
-    `<button data-act="delete" class="danger" title="${c.status === 'draft' ? 'Delete this draft' : 'Delete this thread and its replies'}">Delete</button>`,
-  ].join('');
-  const replyBox = openReplies.has(c.id)
-    ? `<div class="mdr-replybox"><textarea placeholder="Reply…  (${keyLabel('Mod+Enter')} to send)"></textarea><div class="mdr-row"><button data-act="send" class="mdr-primary">Reply</button><button data-act="cancel-reply">Cancel</button></div></div>`
-    : '';
-  const lines = c.anchor.lineStart ? `L${c.anchor.lineStart}${c.anchor.lineEnd > c.anchor.lineStart ? '–' + c.anchor.lineEnd : ''}` : '';
-  const working = isWorking(c, now);
-  const by = c.suggestedBy ? ` <span class="mdr-by">· raised by ${esc(c.suggestedBy)}</span>` : '';
-  return `<div class="mdr-card ${c.status}${agent ? ' mdr-agent' : ''}${c.id === activeId ? ' active' : ''}${orphans.has(c.id) ? ' orphan' : ''}${working ? ' mdr-working' : ''}" data-id="${c.id}">
-    <div class="mdr-meta"><span class="mdr-badge ${agent ? 'agent' : c.status}">${agent ? 'suggested' : c.status}</span><b>${esc(c.author)}</b>${by} · ${fmt(c.createdAt)}<span class="mdr-lines">${c.scope === 'document' ? '' : lines}</span></div>
-    ${metaBadges(c) ? `<div class="mdr-tags">${metaBadges(c)}</div>` : ''}
-    ${c.scope === 'document' ? '' : `<blockquote class="mdr-quote" data-act="goto" title="Go to text">${esc(c.anchor.quote.length > 180 ? c.anchor.quote.slice(0, 180) + '…' : c.anchor.quote)}</blockquote>`}
-    ${editingBodies.has(c.id)
-      ? `<div class="mdr-replybox">${metaPicker(c, altDigit)}<textarea class="mdr-body-edit">${esc(c.body)}</textarea><div class="mdr-row"><button data-act="save-body" class="mdr-primary">Save</button><button data-act="cancel-body">Cancel</button></div></div>`
-      : `<div class="mdr-body">${esc(c.body)}</div>`}
-    ${c.suggestion ? suggestionBlock(c.anchor.quote, c.suggestion, '', c.suggestedBy || (c.author === author ? 'You' : c.author), open === '') : ''}
-    ${replies ? `<div class="mdr-replies">${replies}</div>` : ''}
-    ${working ? `<div class="mdr-working-line"><span class="mdr-round-dot live" aria-hidden="true"></span>${esc(c.workingBy || 'Claude')} is working on this…</div>` : ''}
-    <div class="mdr-actions">${actions}</div>
-    ${replyBox}
-  </div>`;
+  return renderThreadCard(c, { author, activeId, orphan: orphans.has(c.id), openSuggestion: openSuggestion(c),
+    answered: answered(c), replyTarget: openReplies.get(c.id), replyDraft: replyDrafts.get(c.id + ':' + openReplies.get(c.id)), editingReply: editingReplies.get(c.id), editing: editingBodies.has(c.id),
+    agentName: agentMenu.name(), statusLabel: threadStatus(c, now), fmt }, now);
 }
 
 function activate(id: string | null, scrollDoc: boolean, scrollCard: boolean) {
@@ -795,6 +763,7 @@ let returnFocus: HTMLElement | null = null;
 
 /** Close the comment box after Save, Cancel or Escape. */
 function closeBox() {
+  if (pendingCommentRequest) return;
   const back = returnFocus;
   hidePop();
   back?.focus({ preventScroll: true });
@@ -808,6 +777,7 @@ let popAnchor: { ref: BlockRef; el: Element; dy: number } | null = null;
 /** The compact selection action shares the composer, but has no outer card. */
 function showSelectionAction(action: 'live-comment' | 'new-comment', rect: { left: number; right: number; top: number; bottom: number }, beside = false) {
   pop.classList.add('mdr-selection-action');
+  pop.style.removeProperty('overflow-y'); pop.style.removeProperty('max-height'); pop.style.removeProperty('max-width');
   pop.innerHTML = `<button class="mdr-comment-action" data-act="${action}" aria-label="Add comment" aria-describedby="mdr-add-comment-tip" aria-haspopup="dialog"></button><span id="mdr-add-comment-tip" class="mdr-comment-tooltip" role="tooltip">Add comment</span>`;
   pop.hidden = false;
   const column = document.getElementById(doc.hidden ? 'mdr-canvas' : 'mdr-doc')!.getBoundingClientRect();
@@ -901,26 +871,9 @@ const trackComposing = () =>
 document.addEventListener('focusin', trackComposing);
 document.addEventListener('focusout', trackComposing);
 
-function openCommentBox(top: number) {
-  pop.classList.remove('mdr-selection-action');
-  pop.style.left = `${Math.max(12, Math.min(parseFloat(pop.style.left) || 12, window.innerWidth - 352))}px`;
-  const a = pendingAnchor!;
-  const what =
-    a.scope === 'document'
-      ? `<div class="mdr-quote small mdr-scope-note">The whole document</div>`
-      : `<div class="mdr-quote small">${a.scope === 'section' ? 'Section: ' : ''}${esc(a.quote.slice(0, 140))}${a.quote.length > 140 ? '…' : ''}</div>`;
-  // A passage can carry a suggested replacement; a section or the document can't.
-  const suggest = a.scope
-    ? ''
-    : `<div class="mdr-sugg-edit" hidden><label class="mdr-sugg-label" for="mdr-sugg-text">Replace with</label><textarea id="mdr-sugg-text" class="mdr-sugg-text" spellcheck="true">${esc(a.quote)}</textarea></div>`;
-  pop.innerHTML = `${what}
-      ${metaPicker({}, altDigit)}
-      <textarea class="mdr-comment-text" placeholder="Add a comment…  (${keyLabel('Mod+Enter')} to save)"></textarea>
-      ${suggest}
-      <div class="mdr-row"><button class="mdr-primary" data-act="save-comment">Save draft</button><button data-act="cancel">Cancel</button>${a.scope ? '' : `<button class="mdr-sugg-toggle" data-act="toggle-sugg" aria-pressed="false" title="Propose replacement text for the selection">Suggest edit</button>`}</div>`;
-  pop.style.top = `${top}px`;
-  (pop.querySelector('textarea') as HTMLTextAreaElement).focus();
-}
+const composer = createCommentComposer(pop, () => agentMenu.name());
+let pendingCommentRequest: string | null = null;
+function openCommentBox(top: number) { composer.open(pendingAnchor!, top); }
 
 /** Keyboard route to a new comment: open the comment box on the current selection. */
 function commentOnSelection() {
@@ -957,15 +910,9 @@ pop.addEventListener('click', (e) => {
   if (act === 'new-comment' && pendingAnchor) {
     openCommentBox(pop.getBoundingClientRect().top + window.scrollY);
   } else if (act === 'toggle-sugg') {
-    const box = pop.querySelector('.mdr-sugg-edit') as HTMLElement;
-    const btn = pop.querySelector('.mdr-sugg-toggle') as HTMLElement;
-    box.hidden = !box.hidden;
-    btn.setAttribute('aria-pressed', String(!box.hidden));
-    if (!box.hidden) {
-      const ta = box.querySelector('textarea') as HTMLTextAreaElement;
-      ta.focus();
-      ta.select();
-    }
+    composer.toggleSuggestion();
+  } else if (act === 'send-comment') {
+    saveComment(true);
   } else if (act === 'save-comment') {
     saveComment();
   } else if (act === 'cancel') {
@@ -974,8 +921,9 @@ pop.addEventListener('click', (e) => {
 });
 
 pop.addEventListener('keydown', (e) => {
-  if (standalone && pickerKey(e, pop)) return;
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) saveComment();
+  if (commandForKey(e, isMac) === 'submit' && pop.querySelector('.mdr-comment-text')) { e.preventDefault(); e.stopPropagation(); saveComment(true); return; }
+  if (pickerKey(e, pop)) { e.stopPropagation(); return; }
+  if (isSaveReply(e, isMac)) { e.preventDefault(); e.stopPropagation(); saveComment(); }
   if (e.key === 'Escape') closeBox();
 });
 
@@ -998,7 +946,8 @@ function reanchorTo(id: string) {
   window.getSelection()?.removeAllRanges();
 }
 
-function saveComment() {
+function saveComment(send = false) {
+  if (pendingCommentRequest) return;
   const ta = pop.querySelector('.mdr-comment-text') as HTMLTextAreaElement | null;
   if (!ta || !pendingAnchor) return;
   const { quote, prefix, suffix, lineStart, lineEnd, scope } = pendingAnchor;
@@ -1007,9 +956,9 @@ function saveComment() {
   const body = ta.value.trim() || (suggestion !== undefined ? (suggestion ? 'Suggested edit.' : 'Suggest deleting this.') : '');
   if (!body) return ta.focus();
   const { kind, severity } = readPicker(pop);
-  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope }, suggestion });
-  closeBox();
-  window.getSelection()?.removeAllRanges();
+  pendingCommentRequest = crypto.randomUUID();
+  composer.error(''); composer.busy(true);
+  post({ type: 'addComment', anchor: { quote, prefix, suffix, lineStart, lineEnd }, body, meta: { kind, severity, scope }, suggestion, requestId: pendingCommentRequest, send });
 }
 
 // ---------------------------------------------------------------- sidebar actions
@@ -1028,6 +977,8 @@ roundEl.addEventListener('click', (e) => {
 
 sidebar.addEventListener('click', (e) => {
   const t = e.target as Element;
+  const link = t.closest<HTMLAnchorElement>('.mdr-message-markdown a');
+  if (link) { e.preventDefault(); post({ type: 'openLink', href: link.getAttribute('href') || '' }); return; }
   if (pickerClick(t)) return;
   if (t.closest('[data-act="clear-filter"]')) return setFilter({ status: 'all', author: '', severity: '', ids: undefined });
   const cardEl = t.closest('.mdr-card') as HTMLElement | null;
@@ -1038,11 +989,14 @@ sidebar.addEventListener('click', (e) => {
     case 'goto':
       return activate(id, true, false);
     case 'reply':
-      openReplies.add(id);
+      rememberReplyDraft(cardEl);
+      openReplies.set(id, t.closest<HTMLElement>('[data-parent]')?.dataset.parent || id);
+      editingReplies.delete(id); editingBodies.delete(id);
       renderSidebar();
-      (sidebar.querySelector(`.mdr-card[data-id="${id}"] textarea`) as HTMLTextAreaElement)?.focus();
+      revealComposer(sidebar.querySelector(`.mdr-card[data-id="${id}"]`)!);
       return;
     case 'cancel-reply':
+      rememberReplyDraft(cardEl);
       openReplies.delete(id);
       return renderSidebar();
     case 'send':
@@ -1051,10 +1005,25 @@ sidebar.addEventListener('click', (e) => {
       return post({ type: 'setStatus', id, status: 'resolved' });
     case 'reopen':
       return post({ type: 'setStatus', id, status: 'submitted' });
+    case 'edit-reply':
+      rememberReplyDraft(cardEl); openReplies.delete(id); editingBodies.delete(id);
+      editingReplies.set(id, t.closest<HTMLElement>('[data-message]')!.dataset.message!);
+      renderSidebar(); revealComposer(sidebar.querySelector(`.mdr-card[data-id="${id}"]`)!, '.mdr-message-edit');
+      return;
+    case 'cancel-message':
+      editingReplies.delete(id); return renderSidebar();
+    case 'save-message': {
+      const ta = cardEl.querySelector<HTMLTextAreaElement>('.mdr-message-edit');
+      if (!ta?.value.trim()) return;
+      editingReplies.delete(id);
+      post({ type: 'editBody', id, messageId: ta.dataset.message, body: ta.value.trim() });
+      return;
+    }
     case 'edit-body':
+      rememberReplyDraft(cardEl); openReplies.delete(id); editingReplies.delete(id);
       editingBodies.add(id);
       renderSidebar();
-      (sidebar.querySelector(`.mdr-card[data-id="${id}"] .mdr-body-edit`) as HTMLTextAreaElement)?.focus();
+      revealComposer(sidebar.querySelector(`.mdr-card[data-id="${id}"]`)!, ".mdr-body-edit");
       return;
     case 'cancel-body':
       editingBodies.delete(id);
@@ -1066,7 +1035,7 @@ sidebar.addEventListener('click', (e) => {
       editingBodies.delete(id);
       // Send only what changed, so a kind or severity this version doesn't know survives a body edit.
       const was = pickerValue(c || {});
-      const meta: { kind?: string; severity?: string | null } = {};
+      const meta: Extract<FromWebview, { type: 'setMeta' }>['meta'] = {};
       if (kind !== was.kind) meta.kind = kind;
       if (severity !== was.severity) meta.severity = severity;
       if (c && Object.keys(meta).length) post({ type: 'setMeta', id, meta });
@@ -1077,16 +1046,7 @@ sidebar.addEventListener('click', (e) => {
     case 'delete': {
       // A draft goes at once; a sent thread (and its replies) takes a second click, since there's no undo.
       const btn = t.closest('[data-act="delete"]') as HTMLButtonElement;
-      if (comments.find((x) => x.id === id)?.status !== 'draft' && !btn.dataset.armed) {
-        btn.dataset.armed = '1';
-        btn.textContent = 'Delete thread?';
-        setTimeout(() => {
-          delete btn.dataset.armed;
-          btn.textContent = 'Delete';
-        }, 4000);
-        return;
-      }
-      return post({ type: 'deleteComment', id });
+      return deleteThread(id, btn);
     }
     case 'apply-sugg': {
       const c = comments.find((x) => x.id === id);
@@ -1153,20 +1113,32 @@ function applyTriageFocus() {
 
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
-  if (cardEl && standalone && pickerKey(e, cardEl)) return;
+  if (cardEl && pickerKey(e, cardEl)) { e.stopPropagation(); return; }
   // Shift or Alt with Ctrl/Cmd+Enter is Submit review / Send to Claude, not "save".
-  if (!cardEl || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+  if (!cardEl || !isSaveReply(e, isMac)) return;
+  e.preventDefault(); e.stopPropagation();
   if ((e.target as Element).classList.contains('mdr-body-edit')) {
     (cardEl.querySelector('[data-act="save-body"]') as HTMLButtonElement).click();
+  } else if ((e.target as Element).classList.contains('mdr-message-edit')) {
+    cardEl.querySelector<HTMLButtonElement>('[data-act="save-message"]')?.click();
   } else sendReply(cardEl.dataset.id!, cardEl);
 });
 
+function rememberReplyDraft(cardEl: HTMLElement) {
+  const ta = cardEl.querySelector<HTMLTextAreaElement>('textarea[data-parent]');
+  if (ta) replyDrafts.set(cardEl.dataset.id + ':' + ta.dataset.parent, ta.value);
+}
+sidebar.addEventListener('input', e => {
+  const cardEl = (e.target as Element).closest<HTMLElement>('.mdr-card');
+  if (cardEl) rememberReplyDraft(cardEl);
+});
 function sendReply(id: string, cardEl: HTMLElement) {
-  const ta = cardEl.querySelector('textarea') as HTMLTextAreaElement | null;
+  const ta = cardEl.querySelector('textarea[data-parent]') as HTMLTextAreaElement | null;
   const body = ta?.value.trim();
   if (!body) return;
   openReplies.delete(id);
-  post({ type: 'reply', id, body });
+  replyDrafts.delete(id + ':' + ta!.dataset.parent);
+  post({ type: 'reply', id, body, parentId: ta!.dataset.parent });
 }
 
 doc.addEventListener('click', (e) => {
@@ -1259,13 +1231,14 @@ function replyToActive() {
   // Claude's untriaged drafts have no thread yet: Keep, Do it or Discard comes first.
   if (comments.some((c) => c.id === activeId && isAgentDraft(c))) return toast('Keep this comment first, then reply to it.');
   setSidebarOpen(true);
-  openReplies.add(activeId);
+  openReplies.set(activeId, activeId);
   renderSidebar();
-  (sidebar.querySelector(`.mdr-card[data-id="${activeId}"] textarea`) as HTMLTextAreaElement)?.focus();
+  revealComposer(sidebar.querySelector(`.mdr-card[data-id="${activeId}"]`)!);
 }
 
 /** Undo/redo: native inside a text field, otherwise the last file edit. */
 function undoRedo(which: 'undo' | 'redo') {
+  if (nativeTextHistory(document.activeElement, which)) { document.execCommand(which); return; }
   if (!redlines.isOn()) { live[which](); return; }
   if (isTyping(document.activeElement)) document.execCommand(which);
   else post({ type: which });
@@ -1292,7 +1265,7 @@ function flushTyping() {
   }
 }
 
-function runCommand(cmd: string) {
+function runCommand(cmd: ReviewCommand) {
   // The shortcuts sheet is modal: any other command closes it first.
   if (cmd !== 'shortcuts' && keySheet.isOpen()) keySheet.toggle();
   switch (cmd) {
@@ -1317,6 +1290,7 @@ function runCommand(cmd: string) {
       // Never pull focus out of a text box or editor: that would commit a half-typed edit.
       return outline.setOpen(!outline.isOpen(), !isTyping(document.activeElement) && !editing && !inline);
     case 'send':
+      if (pop.querySelector('.mdr-comment-text')) return saveComment(true);
       flushTyping();
       return post({ type: 'sendToAgent' });
     case 'zoomIn':
@@ -1330,6 +1304,7 @@ function runCommand(cmd: string) {
     case 'comment':
       return commentOnSelection();
     case 'submit': {
+      if (pop.querySelector('.mdr-comment-text')) return saveComment(true);
       const typed = composing();
       flushTyping();
       if (submitBtn.disabled && !typed) return toast('No drafts to submit.');
@@ -1353,32 +1328,11 @@ function runCommand(cmd: string) {
 
 document.addEventListener('keydown', (e) => {
   const inCanvas = !!(e.target as Element).closest('#mdr-canvas');
-  const mod = hasMod(e);
-  const k = e.key.toLowerCase();
-  const code = e.code; // Option on macOS changes e.key (⌥M types µ), so match Mod+Alt letters by key position
+  const cmd = commandForKey(e, isMac);
+  // Electron delegates edit shortcuts to VS Code. Execute the focused field's
+  // native history ourselves before stopping the event, or Cmd+Z becomes a no-op.
+  if (nativeTextHistory(e.target, cmd)) { e.preventDefault(); e.stopPropagation(); document.execCommand(cmd!); return; }
   if (standalone) {
-    // In VS Code these arrive as commands via package.json keybindings.
-    const chord = mod && e.altKey && !e.shiftKey && !e.getModifierState('AltGraph'); // AltGr is Ctrl+Alt: leave typed characters alone
-    const cmd =
-      chord && code === 'KeyM' ? 'comment'
-      : chord && code === 'KeyP' ? 'comments'
-      : chord && code === 'KeyY' ? 'reply'
-      : chord && code === 'KeyJ' ? 'next'
-      : chord && code === 'KeyK' ? 'prev'
-      : chord && code === 'Comma' ? 'shortcuts'
-      : isMac && chord && code === 'BracketRight' ? 'nextChange'
-      : isMac && chord && code === 'BracketLeft' ? 'prevChange'
-      : !isMac && e.altKey && !mod && e.key === 'F5' ? (e.shiftKey ? 'prevChange' : 'nextChange')
-      : mod && e.altKey && e.key === 'Enter' ? 'send'
-      : mod && e.shiftKey && e.key === 'Enter' ? 'submit'
-      : mod && !e.shiftKey && k === 'z' ? 'undo'
-      : mod && ((k === 'y' && !isMac) || (e.shiftKey && k === 'z')) ? 'redo'
-      : mod && k === 'f' ? 'find'
-      : mod && e.shiftKey && k === 'o' ? 'outline'
-      : mod && (e.key === '=' || e.key === '+') ? 'zoomIn'
-      : mod && (e.key === '-' || e.key === '_') ? 'zoomOut'
-      : mod && e.key === '0' ? 'zoomReset'
-      : '';
     // The writing canvas has its own comment, undo, redo and find keys.
     if (cmd && !(inCanvas && /^(comment|undo|redo|find)$/.test(cmd))) {
       e.preventDefault();
@@ -1428,9 +1382,9 @@ createPaneResize({
 // commit the host maps the text change back onto the Markdown source and
 // verifies it before writing. Raw-source editing (a textarea) is only used
 // when a block can't be edited inline (math, images, code) or on Alt+double-click.
-const INLINE_KIND: Record<string, string> = { P: 'paragraph', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', LI: 'list_item', TR: 'tr' };
+const INLINE_KIND: Record<string, import('../src/inlineEdit').BlockKind> = { P: 'paragraph', H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', LI: 'list_item', TR: 'tr' };
 const EDITABLE = 'p[data-ls], h1[data-ls], h2[data-ls], h3[data-ls], h4[data-ls], h5[data-ls], h6[data-ls], li[data-ls], tr[data-ls], .mdr-wrap[data-ls], pre[data-ls], hr[data-ls]';
-let inline: { el: HTMLElement; ls: number; le: number; kind: string; oldText: string; oldHtml: string; saving: boolean } | null = null;
+let inline: { el: HTMLElement; ls: number; le: number; kind: import('../src/inlineEdit').BlockKind; oldText: string; oldHtml: string; saving: boolean } | null = null;
 let nextInline: { ls: string; tag: string; offset: number } | null = null;
 let nextSelection: { ls: string; tag: string; start: number; end: number } | null = null;
 
@@ -1780,11 +1734,22 @@ const live = createLiveEditor(canvas, {
 const threadPopover = createThreadPopover({
   get: id => comments.find(c => c.id === id),
   rect: id => live.threadRect(id) || doc.querySelector<HTMLElement>(`.mdr-hl[data-cid="${CSS.escape(id)}"]`)?.getBoundingClientRect() || null,
-  reply: (id, body) => post({ type: 'reply', id, body }),
+  reply: (id, body, parentId) => post({ type: 'reply', id, body, parentId }),
+  editMessage: (id, messageId, body) => post({ type: 'editBody', id, messageId, body }),
+  author: () => author,
+  openLink: href => post({ type: 'openLink', href }),
   resolve: (id, status) => post({ type: 'setStatus', id, status }),
   sidebar: id => activate(id, false, true),
   edit: id => live.editThread(id),
+  delete: (id, button) => deleteThread(id, button, 'Delete thread'),
+  status: id => { const c = comments.find(c => c.id === id); return c ? threadStatus(c) : ''; },
+  agentName: () => agentMenu.name(),
+  sendThread: id => post({ type: 'sendToAgent', id }),
 });
+function deleteThread(id: string, button: HTMLButtonElement, label = 'Delete') {
+  const thread = comments.find(c => c.id === id);
+  if (thread && confirmThreadDelete(button, id, thread.status, label)) post({ type: 'deleteComment', id });
+}
 liveReady = true;
 function openThread(id: string, keyboard = false) {
   hidePop();
@@ -1844,7 +1809,7 @@ doc.addEventListener('mdr-reveal', (event) => {
 });
 
 window.addEventListener('message', (ev) => {
-  const m = ev.data;
+  const m = ev.data as ToWebview;
   switch (m?.type) {
     case 'render':
       live.receive(m.source ?? '', m.blocks);
@@ -1898,6 +1863,20 @@ window.addEventListener('message', (ev) => {
       break;
     case 'sourceConflict':
       live.failed(m.seq, m.message);
+      break;
+    case 'commentSaved':
+      if (pendingCommentRequest === m.requestId) { pendingCommentRequest = null; composer.busy(false); closeBox(); window.getSelection()?.removeAllRanges(); }
+      break;
+    case 'commentSaveFailed':
+      if (pendingCommentRequest === m.requestId) { pendingCommentRequest = null; composer.busy(false); composer.error(`Could not save. Your comment is still here. ${m.message}`); }
+      break;
+    case 'deliveryFailed':
+      toast(`Comment saved. Sending failed: ${m.message}`, true, 15000);
+      for (const id of m.ids) {
+        const retry = document.createElement('button'); retry.textContent = 'Retry send';
+        retry.addEventListener('click', () => { retry.disabled = true; post({ type: 'sendToAgent', id }); });
+        toastEl.append(' ', retry);
+      }
       break;
     case 'comments':
       comments = m.data.comments || [];
@@ -1968,10 +1947,14 @@ window.addEventListener('message', (ev) => {
     case 'reviewers':
       reviewMenu.setReviewers(m.presets || []);
       break;
-    case 'agent':
+    case 'agent': {
+      const previousAgent = agentMenu.name();
       agentMenu.set(m.agent);
+      composer.updateAgent();
+      if (previousAgent !== agentMenu.name()) threadPopover.refresh();
       if (!agentPoll) agentPoll = setInterval(() => document.hidden || post({ type: 'agentState' }), 5000);
       break;
+    }
     case 'handOver':
       // Browser mode can't open a terminal: the user runs the command.
       copyText(m.command).then((ok) => toast(`${ok ? 'Copied. ' : ''}Run this in a terminal: ${m.command}`, false, 20000));

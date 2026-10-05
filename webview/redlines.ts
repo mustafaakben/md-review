@@ -1,3 +1,4 @@
+import type { FromWebview } from '../src/protocol';
 // The Changes view: paints the hunks the host found against the baseline over
 // the rendered document. In a changed block, inserted words are underlined and
 // deleted ones struck through; blocks with math, code, diagrams or tables get
@@ -157,7 +158,7 @@ export function createRedlines(
   doc: HTMLElement,
   bar: HTMLElement,
   btn: HTMLElement,
-  opts: { post(m: unknown): void; canPaint(): boolean; painted(): void; toast(msg: string): void },
+  opts: { post(m: FromWebview): void; canPaint(): boolean; painted(): void; toast(msg: string): void },
 ): Redlines {
   let on = false;
   let data: Changes | null | undefined; // undefined: not loaded yet

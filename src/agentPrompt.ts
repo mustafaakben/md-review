@@ -68,6 +68,7 @@ function steps(where: string, suggest = false, cli = 'node mdreview.mjs'): strin
     'A comment with a "suggestion" already says what the quote should become: use that text unless the comment says otherwise.',
     '',
     'Re-read the sidecar right before each write, change only the comments you touch, and never change ids.',
+    `Replies may have parentId pointing to the original comment or another reply. Preserve these relationships; use ${cli} reply <file.md> <thread-id> "answer" --parent <message-id> when answering a particular message.`,
     '',
     'Some comments carry a "kind", "severity" or "scope":',
     '- kind "question": answer it in a reply and leave the document alone; resolve it only if the answer needs no change.',
@@ -141,6 +142,7 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     '  fix <id> "<old>" "<new>" "<note>"   edit and resolve. old: the exact source text to replace, from the lines below (markup included, just enough to be unique). new: its replacement. Keep it minimal.',
     '  reply <id> "<text>"                 an answer, or your question if the request is unclear (stays open)',
     '  resolve <id> "<note>"               nothing to change',
+    ...(has(c => c.replies.some(r => r.parentId)) ? ['  reply-to <thread-id> <message-id> "<text>"  answer a specific message; preserve the parent relationships shown below.'] : []),
     ...rules,
     "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again, or edit the file yourself and run resolve. Then stop: no summary.",
     '',
@@ -151,7 +153,7 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     out.push(`${c.id}${tags(c)}:${what} -> ${c.body.replace(/\s+/g, ' ')}`);
     if (c.suggestion && !c.suggestion.appliedAt) out.push(`    suggestion: "${c.suggestion.text.replace(/\s+/g, ' ')}"`);
     out.push(...quoteLines(o.source!, c));
-    for (const r of c.replies) out.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}`);
+    for (const r of c.replies) out.push(`    [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${r.body.replace(/\s+/g, ' ')}`);
   }
   return out.join('\n');
 }
@@ -190,7 +192,7 @@ export function buildAgentPrompt(o: PromptOptions): string {
     lines.push(`- ${c.id}${tags(c)}${c.scope === 'document' ? '' : where}: ${what} -> ${c.body.replace(/\s+/g, ' ')}`);
     if (c.suggestion && !c.suggestion.appliedAt) lines.push(`    suggestion: replace the quote with "${c.suggestion.text.replace(/\s+/g, ' ')}"`);
     if (o.source !== undefined) lines.push(...quoteLines(o.source, c));
-    for (const r of c.replies) lines.push(`    ${r.author}: ${r.body.replace(/\s+/g, ' ')}${r.suggestion ? ` [suggested: "${r.suggestion.text.replace(/\s+/g, ' ')}"${r.suggestion.appliedAt ? ', applied' : r.suggestion.dismissedAt ? ', dismissed' : ''}]` : ''}`);
+    for (const r of c.replies) lines.push(`    [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${r.body.replace(/\s+/g, ' ')}${r.suggestion ? ` [suggested: "${r.suggestion.text.replace(/\s+/g, ' ')}"${r.suggestion.appliedAt ? ', applied' : r.suggestion.dismissedAt ? ', dismissed' : ''}]` : ''}`);
   }
   return lines.join('\n');
 }

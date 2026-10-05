@@ -10,9 +10,7 @@ The reviewer leaves comments on Markdown files in the MD Review editor. Each
 with status `submitted` are waiting for you; `draft` ones are not sent yet, so
 leave them alone.
 
-The helper CLI next to this file does the sidecar reads and writes safely
-(it re-reads before every write, so it never clobbers the reviewer's edits).
-Run it from the project root (the folder that contains `.claude/`):
+The helper CLI next to this file uses the adjacent `sidecar-io.cjs` helper to coordinate local writers, retry temporary file locks, and check for external revisions before atomically replacing a sidecar. Keep both files together. Cross-machine Dropbox conflicts still require review. Run it from the project root (the folder that contains `.claude/`):
 
 ```bash
 node .claude/skills/md-review/mdreview.mjs summary              # open/draft/resolved counts per file
@@ -78,3 +76,7 @@ you to; if a comment asks for that, reply and let the reviewer decide.
 Never change comment ids, delete comments, or touch threads you weren't asked
 about. If your edit rewrites the quoted text, the comment may show as orphaned
 in the viewer; that's fine once it's resolved.
+
+### Replies to individual messages
+
+A reply can carry `parentId`, pointing to the original comment ID or another reply ID in the same thread. Keep the flat `replies` array in arrival order and preserve these parent links and all IDs. To answer a particular message, run `node mdreview.mjs reply <file.md> <thread-id> "answer" --parent <message-id>`, or use `reply-to <thread-id> <message-id> "answer"` within `apply`. Saved comment and reply bodies render Markdown; keep the Markdown source in `body`.

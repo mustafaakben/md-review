@@ -96,7 +96,7 @@ export function planConnect(folder: string, o: ConnectOptions): ConnectPlan {
 export function connectFolder(folder: string, o: ConnectOptions): string[] {
   const dest = path.join(folder, SKILL_DIR);
   fs.mkdirSync(dest, { recursive: true });
-  for (const f of ['SKILL.md', 'mdreview.mjs']) fs.copyFileSync(path.join(o.cliDir, f), path.join(dest, f));
+  for (const f of ['SKILL.md', 'mdreview.mjs', 'sidecar-io.cjs']) fs.copyFileSync(path.join(o.cliDir, f), path.join(dest, f));
   const file = path.join(folder, '.claude', 'settings.local.json');
   const { settings, changes } = mergeSettings(readSettings(file), o.acceptInbound);
   if (changes.length) {

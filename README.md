@@ -64,14 +64,17 @@ To make MD Review the default for one project, add this to that folder's `.vscod
 **Commenting.**
 - Select text, click the **Add comment** icon beside the selection, type, and press **Save draft** (Ctrl+Enter, ⌘↩ on macOS). Or select text and press Ctrl+Alt+M (⌥⌘M) to go straight to the comment box.
 - In the comment box, pick a kind: **Comment** (asks for a change), **Question** (asks for an answer, not an edit) or **Praise** (no action). Optionally mark it **Major**, **Minor** or **Nit** (Alt+1/2/3, ⌥1/2/3 on macOS). Plain comments look exactly as before.
+- **Send this comment immediately.** In the comment box, **Send to Claude/Codex** saves and sends only the comment you are writing. ⇧⌘Enter on macOS or Ctrl+Shift+Enter on Windows does the same while the composer is focused. **Save draft** (⌘Enter / Ctrl+Enter) keeps it for later. If no agent is connected, pick a session and that comment continues to it. Failed saves preserve your text; a delivery failure retains the saved thread and offers **Retry send**.
 - Comments are anchored with quoted text and source-line hints, so agents can locate the passage after edits.
 - **Suggest edit.** In the comment box, **Suggest edit** opens a "Replace with" box holding the selection. Rewrite it (or clear it to suggest deleting it) and save. The card shows the change as a small redline with **Apply**, which rewrites just that text in the file through the checked rendered-text edit path, then resolves the thread. Undo reverts it. If the quote spans blocks or sits next to math or citations, Apply opens the source instead.
 - **Whole-document notes.** **Add note** at the top of the review pane creates a comment about the whole file. Section-scoped threads use a heading as their anchor and apply to the section below it.
 - The sidebar lists threads in document order, with whole-document threads first. Click a quote to jump to its text. Once some thread has a severity, Major/Minor/Nit chips filter by it.
-- Each thread has Reply, Resolve/Reopen, and Delete. A draft is deleted at once; a submitted or resolved thread asks "Delete thread?" first, since deleting it removes its replies too and can't be undone.
+- Each message has **Reply**, which opens a composer directly beneath it. Replies can have replies, with indentation capped to keep narrow windows readable; the parent remains labeled. Your own messages also have **Edit**, which shows the original Markdown. Saved comments and replies render emphasis, bold, lists, links, tables, quotes, and code. Each thread has Resolve/Reopen and Delete. A draft is deleted at once; a submitted or resolved thread asks "Delete thread?" first, since deleting it removes its replies too and can't be undone.
 - **Submit review (n)** flips every draft to `submitted` and stamps them all with one `submittedAt` time.
-- The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. With the pane closed, clicking a highlighted passage opens a compact thread popup beside it. Reply, resolve/reopen, or explicitly **Open in review pane** from the popup. Holding ⌘ while hovering a highlight (Ctrl on Windows/Linux) shows a brief preview; releasing the modifier dismisses the preview. Escape or clicking outside dismisses it. **Edit passage** places the cursor in the text, and dragging across a highlight still selects text. Alt+Enter (Option+Return on macOS) opens the comment at the cursor.
+- The panel icon at the right end of the toolbar hides the comments pane, and **Comments** in the same spot brings it back. With the pane closed, clicking a highlighted passage opens a compact thread popup beside it. Reply, resolve/reopen, **Delete thread**, or explicitly **Open in review pane** from the popup. **Send to Claude/Codex** sends only that thread: a normal click shows its destination, and Shift-click sends immediately. Drafts delete immediately; deleting a submitted or resolved thread asks for confirmation. Holding ⌘ while hovering a highlight (Ctrl on Windows/Linux) shows a brief preview; releasing the modifier dismisses the preview. Escape or clicking outside dismisses it. **Edit passage** places the cursor in the text, and dragging across a highlight still selects text. Alt+Enter (Option+Return on macOS) opens the comment at the cursor.
 - With the pane open, clicking a highlighted passage reveals and activates its thread. Clicking a thread’s quote scrolls to and highlights the passage without moving the writing cursor. Toggling the pane preserves the current reading position through the change in text wrapping.
+
+Drag the floating comment window by its header to move it. Drag an edge or corner to resize it, or focus a resize handle and use the arrow keys. Its position and size survive message updates and reopening during the current view session; **Reset window** restores its placement beside the passage.
 
 [See the contextual comment popup](docs/comment-popup.png).
 
@@ -106,7 +109,11 @@ To make MD Review the default for one project, add this to that folder's `.vscod
   The flat form `mdreview: { total: 8000, abstract: 250 }` works too.
 - **More tools → Document health** opens: relative links and images whose file is missing (checked only while the panel is open; in Restricted Mode only inside the document's folder and the workspace), unknown citation keys, an unreadable bibliography, unresolved cross-references, duplicate headings, sections over target, targets that name no heading, and orphaned comments (open ones; not resolved threads or ones whose suggested edit was applied). Click an item to jump to it. For an orphaned comment, select the passage it's about and press **Re-anchor to selection**. The badge on the icon counts the problems found so far.
 
-**Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (MD Review, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0 (⌘ instead of Ctrl on macOS). Zoom scales only the document, not the panels. Your choices are remembered across files and sessions.
+**Reading view.** The **Aa** icon in the toolbar picks a theme for the document column (MD Review, which is the default, plus Paper, Sepia, Dusk, and Night), a Sans or Serif font, and the zoom. Zoom with Ctrl+mouse wheel (or a trackpad pinch), Ctrl+= and Ctrl+−, and reset with Ctrl+0 (⌘ instead of Ctrl on macOS). Zoom scales only the document, not the panels, and keeps the visible writing cursor or reading position in place. Your choices are remembered across files and sessions. **Review spacing** offers Comfortable (larger text and controls) and Compact independently of document zoom.
+
+**Writing width.** In **Aa → Writing width**, choose **Narrow**, **Standard**, **Wide**, or **Full width**. Use the **Custom width** slider for finer adjustment. Width changes keep the font size and zoom unchanged, stay within the available space between the panes, and are remembered across files and sessions.
+
+**Keep your place.** External revisions map the caret and selection through the changed text, so adding material above your writing position does not move it to an unrelated passage. Closing Find restores the caret and reading position from before the search, including when the file changed while search was open. Clicking a new position in the document while searching intentionally chooses that new position. If the original passage is deleted, the caret moves to a surviving boundary near that edit.
 
 Dusk uses a slate-indigo background and Night a charcoal-blue background, with soft light text and darker blue selections that stay readable while selecting or writing a comment. Search matches use amber, and the in-document find controls follow the dark reading theme. Paper and Sepia retain their light palettes.
 
@@ -118,6 +125,7 @@ Dusk uses a slate-indigo background and Night a charcoal-blue background, with s
   - **Resume**: recent past sessions from this folder, reopened with `claude --resume` or `codex resume`.
   - **Send comments**: **When I press Send** (the default) or **Live, as I save each one**. Live sends each comment when you save it, and each reply you write on an open thread, so a question from Claude gets your answer straight away. Comments saved within a moment of each other go as one message; praise stays a draft. The chip shows **Live** while it's on. Also `mdReview.agent.delivery`.
   - **Connect this folder…** (see below), **Copy prompt instead** (submits drafts and copies the prompt, for any other agent), and **Disconnect**.
+- Thread labels distinguish **Ready to send**, **Waiting on Claude/Codex**, and **Needs your reply**. A successful send records its time and agent separately from submission; choosing a different agent does not rewrite a thread’s recorded destination.
 - Each workspace folder remembers its session. **Send to Claude** with nothing chosen opens the menu and sends once you pick; if exactly one running session was started with MD Review's hook, it is picked without asking. **Ask Claude** on a card sends just that thread. The button says **Send to Codex** when a Codex session is chosen.
 - **Connect this folder** (in the session menu, or **MD Review: Connect Agents to Workspace**) adds to the folder's `.claude/`: the md-review skill and CLI, and in `settings.local.json` (merged, never replaced) a **SessionStart** hook that registers each Claude session started here with MD Review and tells it how review comments arrive, a **SessionEnd** hook that forgets it, and permission rules that let it run the CLI and edit Markdown files without asking (never `CLAUDE.md`, `AGENTS.md` or anything in `.claude/`, which deny rules keep behind a prompt). **Connect, and accept messages** also sets `crossSessionInbound` to `accept`: a Claude session that skips permission prompts otherwise holds messages from other sessions, MD Review's included, for your approval. From a terminal: `node cli/mdreview.mjs init-claude <folder> [--accept-inbound]`.
 - While Claude works, the comments pane shows **Claude is working · 2 of 5** with a progress bar, and the thread Claude is on right now pulses in the document and the list. When every sent thread has an answer you get a summary, "Claude finished: 4 resolved, 1 question for you", with **Show questions** to jump to the threads that need you. If the panel is in the background, VS Code shows the summary as a notification.
@@ -148,7 +156,7 @@ Dusk uses a slate-indigo background and Night a charcoal-blue background, with s
 | Open the comment at the writing cursor | Alt+Enter | ⌥↩ |
 | Preview a comment while hovering | Hold Ctrl | Hold ⌘ |
 | Reply to the current thread | Ctrl+Alt+Y | ⌥⌘Y |
-| Submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
+| Send the current comment while composing; otherwise submit review | Ctrl+Shift+Enter | ⇧⌘↩ |
 | Send to Claude | Ctrl+Alt+Enter | ⌥⌘↩ |
 | Next / previous comment | Ctrl+Alt+J / Ctrl+Alt+K | ⌥⌘J / ⌥⌘K |
 | Next / previous change | Alt+F5 / Shift+Alt+F5 | ⌥⌘] / ⌥⌘[ |
@@ -222,7 +230,7 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
       "reviewRun": "3f9a1c07",               // optional: the review run that left it (comment --run)
       "suggestedBy": "Claude",               // optional: who raised a thread the reviewer kept
       "replies": [
-        { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52." }  // a reply can carry a "suggestion" too
+        { "id": "r_…", "author": "Claude", "createdAt": "…", "body": "Added p. 52.", "parentId": "c_mf3k2x9a1b2c3" }  // a reply can carry a "suggestion" too
       ]
     }
   ],
@@ -252,6 +260,8 @@ File: `<name>.md.comments.json`, UTF-8, 2-space JSON.
 5. **Extra fields are kept.** MD Review and the CLI keep any field they don't know, on the file, on each comment, its anchor, and each reply. A tool can add its own data (for example `"x-tool": {…}`) without it being erased by the viewer's next write.
 6. **Anchoring.** If your edit changes the quoted text itself, the comment may show as *orphaned* in the viewer. That's fine once it's resolved; the thread is kept.
 
+Replies may include `parentId`, the original comment ID or another reply ID in the same thread. Replies without it remain direct replies to the original comment. Keep the array in arrival order; the viewer displays the relationships as a nested conversation. The CLI also accepts `reply-to <thread-id> <message-id> "text"` as an action inside `apply`.
+
 ### CLI (zero dependencies)
 
 Paths can be `.md` files or folders; folders are searched recursively (skipping `node_modules` and hidden folders), and the default is the current folder.
@@ -262,7 +272,7 @@ node cli/mdreview.mjs next    [paths…] [--all] [--json]      # the next open c
 node cli/mdreview.mjs context path/to/file.md <id> [--lines 2] [--json]
 node cli/mdreview.mjs list    [paths…] [--status submitted] [--json]
 node cli/mdreview.mjs show    path/to/file.md <id>
-node cli/mdreview.mjs reply   path/to/file.md <id> "text" [--author Claude]
+node cli/mdreview.mjs reply   path/to/file.md <id> "text" [--author Claude] [--parent <message-id>]
 node cli/mdreview.mjs resolve path/to/file.md <id> ["closing reply"] [--author Claude]
 node cli/mdreview.mjs fix     path/to/file.md <id> "<old source text>" "<new source text>" ["note"]
 node cli/mdreview.mjs apply   path/to/file.md fix <id> "<old>" "<new>" "<note>" reply <id> "<text>" resolve <id> "<note>" …
@@ -281,6 +291,8 @@ node cli/mdreview.mjs init-claude [folder] [--force]         # install the Claud
 - `review-done` stamps the sidecar's `reviewDoneAt`, which ends the viewer's "Claude is reviewing" banner. The review prompt passes `--run <id>` to `comment` and `review-done` (stored as the draft's `reviewRun` and the sidecar's `reviewDoneRun`), so an earlier review that is still running can't add to or end a newer one.
 - `fix` edits and resolves in one command: it replaces the exact source text (markup included), keeps the file's line endings and BOM, and resolves the thread with the note. When the text appears more than once, the one on the comment's lines is used; otherwise it asks for more context. `apply` does the same for many threads at once (`fix`, `reply` and `resolve`, repeated): the file and the sidecar are each written once, and if any part fails nothing is written. The prompt MD Review sends includes each comment's source lines and asks for a single `apply`, so an agent answers a whole review in one step.
 - `list --json` adds a `file` field to each comment, and `list` shows threads in document order. With no path, `list` now scans the current folder, and a path that doesn't exist is an error.
+
+The bundled CLI and extension coordinate local sidecar writes, retry temporary locks, and detect external revisions before an atomic replacement. Read errors are reported instead of treated as an empty file. Existing connected folders should run **Connect this folder** again to refresh the bundled CLI and its adjacent `sidecar-io.cjs` helper. Concurrent offline edits synced from different machines can still require Dropbox conflict resolution.
 
 ## Rendering
 

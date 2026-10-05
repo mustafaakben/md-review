@@ -341,7 +341,9 @@ test('a delivery that fails says why and starts no round', async () => {
   });
   s.handle({ type: 'sendToAgent' });
   await new Promise((r) => setImmediate(r));
-  assert.match(t.posted.filter((m) => m.type === 'error').at(-1).message, /isn't running/);
+  const failure = t.posted.filter((m) => m.type === 'deliveryFailed').at(-1);
+  assert.match(failure.message, /isn't running/);
+  assert.deepEqual(failure.ids, lib.store.readSidecar(t.md).comments.map(c => c.id));
   assert.equal(t.posted.filter((m) => m.type === 'round' && m.round).length, 0);
 });
 

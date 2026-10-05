@@ -1,3 +1,4 @@
+import type { FromWebview } from '../src/protocol';
 // The agent chip in the review pane and its session menu: which Claude Code
 // or Codex session this document's comments go to, starting or resuming one,
 // and whether comments go on Send or live as each is saved. The host sends the
@@ -19,6 +20,7 @@ export interface AgentMenu {
   open(): void;
   /** "Claude" or "Codex": who Send goes to. */
   name(): string;
+  bound(): boolean;
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -35,7 +37,7 @@ function ago(ms: number): string {
 
 const short = (s: { id: string; name?: string }) => s.name || s.id.slice(0, 8);
 
-export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, post: (m: unknown) => void, changed: () => void): AgentMenu {
+export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, post: (m: FromWebview) => void, changed: () => void): AgentMenu {
   let state: AgentState = { bound: null, delivery: 'onSend' };
   let focusFirst = false;
 
@@ -127,10 +129,10 @@ export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, p
     const b = (e.target as Element).closest<HTMLElement>('button');
     if (!b) return;
     const d = b.dataset;
-    if (d.bind) post({ type: 'bindSession', agent: d.agent, id: d.bind, name: d.name });
-    else if (d.resume) post({ type: 'startSession', agent: d.agent, resume: d.resume });
-    else if (d.start) post({ type: 'startSession', agent: d.start });
-    else if (d.delivery) {
+    if (d.bind && (d.agent === 'claude' || d.agent === 'codex')) post({ type: 'bindSession', agent: d.agent, id: d.bind, name: d.name });
+    else if (d.resume && (d.agent === 'claude' || d.agent === 'codex')) post({ type: 'startSession', agent: d.agent, resume: d.resume });
+    else if (d.start === 'claude' || d.start === 'codex') post({ type: 'startSession', agent: d.start });
+    else if (d.delivery === 'live' || d.delivery === 'onSend') {
       post({ type: 'setDelivery', delivery: d.delivery });
       return; // keep the menu open: it's a setting
     } else if (d.act === 'copy') post({ type: 'copyPrompt' });
@@ -180,6 +182,7 @@ export function createAgentMenu(button: HTMLButtonElement, panel: HTMLElement, p
       }
     },
     open: () => open(true),
-    name: () => agentLabel(state.bound?.agent ?? 'claude'),
+    name: () => state.bound ? agentLabel(state.bound.agent) : 'agent',
+    bound: () => !!state.bound,
   };
 }

@@ -3,7 +3,9 @@ import { Decoration, DecorationSet, EditorView, keymap, WidgetType, drawSelectio
 import { defaultKeymap, history, historyKeymap, undo, redo, undoDepth, redoDepth } from '@codemirror/commands';
 import { markdown, markdownLanguage, insertNewlineContinueMarkupCommand, deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
+import { search, searchKeymap, openSearchPanel, searchPanelOpen } from '@codemirror/search';
+import { externalChanges } from './textChanges';
+import { ThreadRangeCache, sameThreadDecorations, needsPreviewParse } from './threadRanges';
 import MarkdownIt from 'markdown-it';
 import { createDiagrams } from './diagrams';
 import { isMac } from './keys';
@@ -15,7 +17,7 @@ const focused = StateEffect.define<boolean>();
 const focusState = StateField.define({ create: () => false, update: (v, tr) => tr.effects.reduce((v, e) => e.is(focused) ? e.value : v, v) });
 const parser = new MarkdownIt({ html: false });
 interface Rich { from: number; to: number; html: string }
-interface Thread { id: string; anchor: { quote: string; lineStart: number; lineEnd: number }; status: string }
+interface Thread { id: string; anchor: { quote: string; lineStart: number; lineEnd: number }; status: string; scope?: string }
 export interface LiveSelection { quote: string; lineStart: number; lineEnd: number; rect: { left: number; right: number; top: number; bottom: number }; atLineEnd: boolean }
 export interface Draft { original: string; text: string; changes: SourceChange[] }
 export interface LiveOptions {
@@ -63,12 +65,64 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
   let rich: Rich[] = [];
   let threads: Thread[] = [];
   let activeThread: string | null = null;
-  const threadRanges = new Map<string, { from: number; to: number }>();
+  const rangeCache = new ThreadRangeCache();
+  let threadRanges: ReadonlyMap<string, { from: number; to: number }> = new Map();
   let commentGesture = false;
   let hoveredThread: string | null = null;
   let waiting: (() => void)[] = [];
   let recovery = options.recovery;
   const historySlot = new Compartment();
+  type ReadingPlace = { pos: number; top?: number; scrollY: number; selection: EditorSelection };
+  const reflowPlaces = new Set<ReadingPlace>();
+  let restoringPlace: ReadingPlace | null = null;
+  let restorationToken = 0;
+  function cancelRestoration() {
+    restorationToken++;
+    if (restoringPlace) reflowPlaces.delete(restoringPlace);
+    restoringPlace = null;
+  }
+  let searchReturn: ReadingPlace | null = null;
+  let restoreSearchToken = 0;
+  function readingPlace(anchorY?: number): ReadingPlace {
+    // Consecutive zoom/pinch events share the original anchor until layout settles.
+    if (restoringPlace) return { ...restoringPlace, selection: view.state.selection };
+    const box = view.contentDOM.getBoundingClientRect();
+    const head = view.state.selection.main.head;
+    const caret = view.coordsAtPos(head);
+    const y = anchorY === undefined ? Math.max(80, box.top + 8) : Math.max(64, Math.min(innerHeight - 16, anchorY));
+    // The Aa controls take focus, but a visible writing caret still anchors zoom.
+    const pos = anchorY === undefined && caret && caret.top >= 64 && caret.top < innerHeight ? head
+      : view.posAtCoords({ x: box.left + 12, y }, false) ?? view.viewport.from;
+    return { pos, top: view.coordsAtPos(pos)?.top, scrollY: window.scrollY, selection: view.state.selection };
+  }
+  function restorePlace(place: ReadingPlace) {
+    cancelRestoration();
+    restoringPlace = place;
+    reflowPlaces.add(place);
+    const token = restorationToken;
+    const pos = Math.min(place.pos, view.state.doc.length);
+    // Bring a virtualized line back before measuring it (a search result or an
+    // insertion above the viewport can leave the return point off screen).
+    if (!view.coordsAtPos(pos)) view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: 'start', yMargin: place.top ?? 80 }) });
+    let remaining = 12, stable = 0;
+    const measure = () => {
+      if (token !== restorationToken) return;
+      view.requestMeasure({
+        read: () => place.top === undefined ? place.scrollY - window.scrollY : (view.coordsAtPos(Math.min(place.pos, view.state.doc.length))?.top ?? place.top) - place.top,
+        write: delta => {
+          if (token !== restorationToken) return;
+          if (Math.abs(delta) > 0.5) { window.scrollBy(0, delta); stable = 0; } else stable++;
+          if (--remaining && stable < 3) requestAnimationFrame(measure);
+          else cancelRestoration();
+        },
+      });
+    };
+    requestAnimationFrame(measure);
+  }
+  function beginSearch(): boolean {
+    if (!searchPanelOpen(view.state)) { searchReturn = readingPlace(); restoreSearchToken++; }
+    return openSearchPanel(view);
+  }
 
   function decorations(state: EditorState): DecorationSet {
     const out: Range<Decoration>[] = [];
@@ -109,18 +163,11 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       }
       if (name === 'ListMark') mark(node.from, node.to, 'mdr-live-syntax');
     }});
-    threadRanges.clear();
+    threadRanges = rangeCache.resolve(state.doc, threads);
     for (const thread of threads) {
-      const start = state.doc.line(Math.max(1, Math.min(state.doc.lines, thread.anchor.lineStart || 1))).from;
-      const end = state.doc.line(Math.max(1, Math.min(state.doc.lines, thread.anchor.lineEnd || 1))).to;
-      const source = state.doc.toString();
-      const matches: number[] = [];
-      if (thread.anchor.quote) for (let at = source.indexOf(thread.anchor.quote); at >= 0; at = source.indexOf(thread.anchor.quote, at + 1)) matches.push(at);
-      const found = matches.sort((a, b) => Math.abs(a - start) - Math.abs(b - start))[0] ?? -1;
-      const from = found < 0 ? start : found;
-      const to = found < 0 ? end : from + thread.anchor.quote.length;
-      if (from >= to) continue;
-      threadRanges.set(thread.id, { from, to });
+      const range = threadRanges.get(thread.id);
+      if (!range) continue;
+      const { from, to } = range;
       if (thread.status === 'resolved' && thread.id !== activeThread) continue;
       if (!widgets.some(r => from < r.to && to > r.from)) out.push(Decoration.mark({ class: 'mdr-live-comment' + (activeThread === thread.id ? ' active' : ''), attributes: { 'data-thread': thread.id, role: 'button', 'aria-keyshortcuts': 'Alt+Enter', 'aria-label': 'Read comment on ' + thread.anchor.quote.slice(0, 80) } }).range(from, to));
     }
@@ -166,11 +213,12 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     options.status('Saving…');
     options.send({ type: 'saveSource', seq, original: baseline, changes });
   }
-  const view = new EditorView({ parent, state: EditorState.create({ extensions: [
+  const view: EditorView = new EditorView({ parent, state: EditorState.create({ extensions: [
     focusState, preview, markdown({ base: markdownLanguage, addKeymap: false }), historySlot.of(history()), drawSelection(), EditorView.lineWrapping,
     search({ top: true }),
     EditorState.phrases.of({ next: 'Next', previous: 'Previous', all: 'Select all', 'match case': 'Match case', regexp: 'Regex', 'by word': 'Whole word', replace: 'Replace', 'replace all': 'Replace all', close: 'Close search' }),
     keymap.of([
+      { key: 'Mod-f', run: beginSearch },
       { key: 'Enter', run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
       { key: 'Backspace', run: deleteMarkupBackward },
       { key: 'Alt-Enter', run: () => {
@@ -182,7 +230,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       { key: 'Mod-Alt-m', run: () => { options.comment(); return true; } },
       { key: 'Mod-s', run: () => { flush(); return true; } },
       ...historyKeymap, ...searchKeymap, ...defaultKeymap,
-    ]),
+    ].map(binding => ({ ...binding, stopPropagation: true }))),
     EditorView.contentAttributes.of({ 'aria-label': 'Markdown document', spellcheck: 'true' }),
     EditorView.domEventHandlers({
       focus: event => {
@@ -209,6 +257,9 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
         if (mark && !mark.contains(event.relatedTarget as Node)) { hoveredThread = null; options.hoverThread(null); }
       },
       mousedown: event => {
+        cancelRestoration();
+        // Clicking a new writing position deliberately leaves the search return point.
+        if (searchPanelOpen(view.state)) { searchReturn = null; restoreSearchToken++; }
         const id = (event.target as Element).closest('[data-thread]')?.getAttribute('data-thread');
         if (!id || event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
         event.preventDefault(); commentGesture = true; options.hoverThread(null);
@@ -237,6 +288,26 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
         if (id && !event.altKey) { event.preventDefault(); if (event.detail === 0) options.thread(id, true); return true; } },
     }),
     EditorView.updateListener.of(update => {
+      if (searchReturn && update.docChanged) {
+        searchReturn = { ...searchReturn, pos: update.changes.mapPos(searchReturn.pos), selection: searchReturn.selection.map(update.changes) };
+      }
+      if (update.docChanged) for (const place of reflowPlaces) {
+        place.pos = update.changes.mapPos(place.pos); place.selection = place.selection.map(update.changes);
+      }
+      const searching = searchPanelOpen(update.state);
+      const wasSearching = searchPanelOpen(update.startState);
+      if (searching && !wasSearching && !searchReturn) {
+        searchReturn = { pos: update.startState.selection.main.head, scrollY: window.scrollY, selection: update.startState.selection };
+      }
+      if (!searching && wasSearching && searchReturn) {
+        const place = searchReturn; searchReturn = null;
+        const token = ++restoreSearchToken;
+        queueMicrotask(() => {
+          if (token !== restoreSearchToken || searchPanelOpen(view.state)) return;
+          view.dispatch({ selection: place.selection });
+          view.focus(); restorePlace(place);
+        });
+      }
       if (update.docChanged) {
         if (!update.transactions.some(tr => tr.annotation(remote))) {
           pending = pending.compose(update.changes);
@@ -265,6 +336,9 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     if (!(isMac ? event.metaKey : event.ctrlKey)) options.hoverThread(null, true);
   });
   window.addEventListener('blur', () => options.hoverThread(null, true));
+  window.addEventListener('wheel', event => {
+    if (!event.ctrlKey && !event.metaKey) cancelRestoration();
+  }, { passive: true });
   const footer = document.createElement('div');
   footer.className = 'mdr-live-generated';
   parent.appendChild(footer);
@@ -275,13 +349,17 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
     get conflicted() { return conflict; },
     whenSaved(fn: () => void) { waiting.push(fn); flush(); },
     receive(source: string, blocks: string[]) {
+      let restore: ReadingPlace | null = null;
       newest = source;
       if (source === flight?.source) return; // watcher notification before the acknowledgement
       if (baseline === null || (source !== baseline && !flight && pending.empty && !conflict)) {
+        const initial = baseline === null && view.state.doc.length === 0;
+        const changes = ChangeSet.of(externalChanges(view.state.doc.toString(), source), view.state.doc.length);
+        if (!initial) { restore = readingPlace(); restore.pos = changes.mapPos(restore.pos); }
+        const selection = initial ? EditorSelection.cursor(0) : view.state.selection.map(changes);
         baseline = source; pending = ChangeSet.empty(source.length); rich = [];
-        const anchor = Math.min(view.state.selection.main.head, source.length);
         view.dispatch({ effects: historySlot.reconfigure([]) });
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: source }, selection: { anchor }, annotations: [remote.of(true), Transaction.addToHistory.of(false)] });
+        view.dispatch({ changes, selection, annotations: [remote.of(true), Transaction.addToHistory.of(false)] });
         view.dispatch({ effects: historySlot.reconfigure(history()) });
         options.status('Saved');
         if (recovery) {
@@ -307,6 +385,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       rich = [];
       const generated: string[] = [];
       for (const html of blocks) {
+        if (!needsPreviewParse(html)) continue;
         const holder = document.createElement('div'); holder.innerHTML = html;
         for (const extra of Array.from(holder.querySelectorAll('.mdr-refs, section.footnotes'))) generated.push(extra.outerHTML);
         const block = holder.firstElementChild as HTMLElement | null;
@@ -320,6 +399,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       const html = generated.join('');
       if (footer.innerHTML !== html) footer.innerHTML = html;
       view.dispatch({ effects: refresh.of(null) });
+      if (restore) restorePlace(restore);
     },
     saved(id: number, source: string) {
       if (flight?.seq !== id) return;
@@ -338,7 +418,7 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       options.draft(null);
     },
     text: () => view.state.doc.toString(),
-    undo: () => undo(view), redo: () => redo(view), find: () => openSearchPanel(view),
+    undo: () => undo(view), redo: () => redo(view), find: beginSearch,
     refreshTheme: drawDiagrams,
     activateThread(id: string | null, scroll = false) {
       activeThread = id; view.dispatch({ effects: refresh.of(null) });
@@ -354,24 +434,19 @@ export function createLiveEditor(parent: HTMLElement, options: LiveOptions) {
       const range = threadRanges.get(id);
       if (range) { view.dispatch({ selection: { anchor: range.from }, effects: EditorView.scrollIntoView(range.from, { y: 'center' }) }); view.focus(); }
     },
-    keepReadingPlace(id?: string | null) {
-      const box = view.contentDOM.getBoundingClientRect();
-      const y = Math.max(80, box.top + 8);
+    keepReadingPlace(id?: string | null, anchorY?: number) {
+      const place = readingPlace(anchorY);
       const passage = id ? threadRanges.get(id) : null;
       const passageTop = passage ? view.coordsAtPos(passage.from)?.top : undefined;
-      const pos = passage && passageTop !== undefined && passageTop >= 56 && passageTop < innerHeight ? passage.from : view.posAtCoords({ x: box.left + 12, y }, false) ?? view.viewport.from;
-      const top = view.coordsAtPos(pos)?.top;
-      const selection = view.state.selection;
-      return () => {
-        view.requestMeasure({
-          read: () => top === undefined ? 0 : (view.coordsAtPos(Math.min(pos, view.state.doc.length))?.top ?? top) - top,
-          write: delta => { if (delta) window.scrollBy(0, delta); },
-        });
-        // Width changes never move the caret or turn the passage into an edit.
-        if (!view.state.selection.eq(selection)) view.dispatch({ selection });
-      };
+      if (passage && passageTop !== undefined && passageTop >= 56 && passageTop < innerHeight) { place.pos = passage.from; place.top = passageTop; }
+      reflowPlaces.add(place);
+      return () => { reflowPlaces.delete(place); restorePlace(place); };
     },
-    setThreads(value: Thread[]) { threads = value; view.dispatch({ effects: refresh.of(null) }); },
+    setThreads(value: Thread[]) {
+      const changed = !sameThreadDecorations(threads, value);
+      threads = value;
+      if (changed) view.dispatch({ effects: refresh.of(null) });
+    },
     lineTop(line: number) {
       const pos = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines))).from;
       return view.coordsAtPos(pos)?.top ?? (pos < view.viewport.from ? -Infinity : Infinity);

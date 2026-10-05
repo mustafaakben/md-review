@@ -362,12 +362,13 @@ function systemUser(): string {
 }
 
 /** Stored reading preferences, with anything unexpected replaced by the default. */
-function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string } {
+function readingPrefs(stored: unknown): { zoom: number; theme: string; font: string; density: string; width: number | 'full' } {
   const p = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
   const zoom = typeof p.zoom === 'number' && p.zoom >= 0.5 && p.zoom <= 3 ? p.zoom : 1;
   const theme = typeof p.theme === 'string' && ['auto', 'paper', 'sepia', 'dusk', 'night'].includes(p.theme) ? p.theme : 'auto';
   const font = p.font === 'serif' ? 'serif' : 'sans';
-  return { zoom, theme, font };
+  const width = p.width === 'full' ? 'full' : typeof p.width === 'number' && Number.isFinite(p.width) ? Math.max(40, Math.min(120, Math.round(p.width))) : 68;
+  return { zoom, theme, font, density: p.density === 'compact' ? 'compact' : 'comfortable', width };
 }
 
 function openLink(href: string, dir: string) {

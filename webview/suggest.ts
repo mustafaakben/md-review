@@ -1,3 +1,4 @@
+import type { BlockKind } from '../src/inlineEdit';
 // Suggested edits: a replacement for a thread's quote, shown as a small
 // redline on the card and applied through the same verified inline-edit path
 // as typing in the view.
@@ -39,13 +40,13 @@ export function suggestionBlock(quote: string, s: Suggestion, from: string, who:
   return `<div class="mdr-sugg${open ? '' : ' done'}"><div class="mdr-sugg-head">${esc(who)} ${you ? 'suggest' : 'suggests'}${s.text ? '' : ' deleting'}${state}</div><div class="mdr-sugg-diff">${diff}</div>${acts}</div>`;
 }
 
-export interface ApplyEdit { ls: number; le: number; kind: string; oldText: string; newText: string }
+export interface ApplyEdit { ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
 
 /**
  * The block edit that replaces thread `id`'s highlighted text with `text`, or a
  * reason it can't be done in place (the quote spans blocks, sits in math, …).
  */
-export function suggestionEdit(doc: HTMLElement, id: string, text: string, kindOf: (el: HTMLElement) => string | null): ApplyEdit | string {
+export function suggestionEdit(doc: HTMLElement, id: string, text: string, kindOf: (el: HTMLElement) => BlockKind | null): ApplyEdit | string {
   text = text.replace(/\s*\n\s*/g, ' '); // a line break could change the block's structure
   const marks = Array.from(doc.querySelectorAll<HTMLElement>(`mark.mdr-hl[data-cid="${CSS.escape(id)}"]`));
   if (!marks.length) return "The quoted text isn't in the document any more.";

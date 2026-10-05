@@ -1,3 +1,4 @@
+import type { FromWebview } from '../src/protocol';
 // "Review with Claude": the toolbar menu of reviewers. The host sends the list
 // when the menu opens (built-ins plus .mdreview/reviewers/*.md), so nothing is
 // read until someone asks. Picking one starts Claude as first reviewer.
@@ -14,7 +15,7 @@ export interface ReviewMenu {
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: (m: unknown) => void, started: () => void): ReviewMenu {
+export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: (m: FromWebview) => void, started: () => void, agentName: () => string = () => 'Claude'): ReviewMenu {
   let focusFirst = false;
 
   function items(): HTMLButtonElement[] {
@@ -26,7 +27,7 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
     const mine = (list || []).filter((r) => r.id.startsWith('file:'));
     const item = (r: Reviewer) => `<button role="menuitem" tabindex="-1" data-reviewer="${esc(r.id)}"${r.path ? ` title="${esc(r.path)}"` : ''}>${esc(r.label)}</button>`;
     panel.innerHTML = `
-      <div class="mdr-rv-note">Claude reads the document and leaves draft comments. You keep, act on, or discard each one.</div>
+      <div class="mdr-rv-note">${esc(agentName())} reads the document and leaves draft comments. You keep, act on, or discard each one.</div>
       <div id="mdr-review-menu" class="mdr-rv-list" role="menu" aria-label="Reviewers">${
         list
           ? builtIn.map(item).join('') +
@@ -35,7 +36,7 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
           : '<div class="mdr-rv-label" role="presentation">Loading…</div>'
       }</div>
       <form id="mdr-review-custom" class="mdr-rv-custom" hidden>
-        <input type="text" maxlength="500" aria-label="What should Claude look for?" placeholder="What should Claude look for?">
+        <input type="text" maxlength="500" aria-label="What should ${esc(agentName())} look for?" placeholder="What should ${esc(agentName())} look for?">
         <button type="submit" class="mdr-primary">Start</button>
       </form>`;
     const first = items()[0];
@@ -98,7 +99,7 @@ export function createReviewMenu(button: HTMLElement, panel: HTMLElement, post: 
     const text = input.value.trim();
     if (text) return start('custom', text);
     // Say why nothing started; typing clears it.
-    input.setCustomValidity('Type what Claude should look for, for example "Check the units".');
+    input.setCustomValidity(`Type what ${agentName()} should look for, for example "Check the units".`);
     input.reportValidity();
     input.focus();
   });

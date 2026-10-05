@@ -1,9 +1,9 @@
 // Sidecar comment store: <file>.md.comments.json next to the Markdown file.
-// Every mutation re-reads the file from disk, applies the change, and writes
-// it back, so concurrent edits by agents (Claude) are never clobbered.
-import * as fs from 'fs';
+// Mutations coordinate local writers and check for external revisions before
+// atomically replacing the file. Dropbox conflicts between machines still need review.
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { readText, mutateSidecar } from '../cli/sidecar-io.cjs';
 
 export type Status = 'draft' | 'submitted' | 'resolved';
 /** What the reviewer wants: a change (the default), an answer only, or nothing. */
@@ -23,6 +23,7 @@ export interface Suggestion {
 }
 
 export interface Reply {
+  parentId?: string;
   id: string;
   author: string;
   createdAt: string;
@@ -39,6 +40,9 @@ export interface Anchor {
 }
 
 export interface Comment {
+  clientRequestId?: string;
+  /** Last successful delivery, separate from merely submitting a draft. */
+  delivery?: { at: string; agent?: 'claude' | 'codex' };
   id: string;
   author: string;
   createdAt: string;
@@ -127,13 +131,8 @@ const obj = (x: unknown): Record<string, any> => (x && typeof x === 'object' && 
  * MD Review) are kept as they are, on the file, comments, anchors and replies.
  */
 export function readSidecar(mdPath: string): Sidecar {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(sidecarPath(mdPath), 'utf8');
-  } catch {
-    return emptySidecar(mdPath);
-  }
-  return parseSidecar(raw, mdPath);
+  const raw = readText(sidecarPath(mdPath));
+  return raw === null ? emptySidecar(mdPath) : parseSidecar(raw, mdPath);
 }
 
 /** Parse sidecar text (see readSidecar); throws on invalid JSON. */
@@ -184,20 +183,11 @@ export function serialize(data: Sidecar): string {
  * it to ignore the watcher event caused by their own write).
  */
 export function mutate(mdPath: string, fn: (data: Sidecar) => void): { data: Sidecar; written: string } {
-  const data = readSidecar(mdPath);
-  fn(data);
-  const written = serialize(data);
-  const p = sidecarPath(mdPath);
-  const tmp = p + '.tmp-' + process.pid;
-  fs.writeFileSync(tmp, written, 'utf8');
-  try {
-    fs.renameSync(tmp, p);
-  } catch {
-    // Windows and file-sync tools can briefly lock the target; fall back to a direct write.
-    fs.writeFileSync(p, written, 'utf8');
-    fs.rmSync(tmp, { force: true });
-  }
-  return { data, written };
+  return mutateSidecar(sidecarPath(mdPath), raw => {
+    const data = raw === null ? emptySidecar(mdPath) : parseSidecar(raw, mdPath);
+    fn(data);
+    return data;
+  });
 }
 
 // ---- operations shared by the extension, the harness server, and the CLI ----
@@ -239,9 +229,12 @@ export function openSuggestion(c: Comment): { from?: string; s: Suggestion } | n
   return c.suggestion && !c.suggestion.appliedAt && !c.suggestion.dismissedAt ? { s: c.suggestion } : null;
 }
 
-export function addReply(data: Sidecar, id: string, author: string, body: string): Reply {
+export function addReply(data: Sidecar, id: string, author: string, body: string, parentId?: string): Reply {
+  const c = find(data, id);
+  if (parentId && parentId !== id && !c.replies.some(r => r.id === parentId)) throw new Error('The message you are replying to no longer exists.');
   const r: Reply = { id: newId('r'), author, createdAt: now(), body };
-  find(data, id).replies.push(r);
+  if (parentId) r.parentId = parentId;
+  c.replies.push(r);
   return r;
 }
 
@@ -296,8 +289,12 @@ export function awaitsAgent(c: Pick<Comment, 'status' | 'reopenedAt'> & { replie
   return !last || last.author !== agent || (!!c.reopenedAt && c.reopenedAt > last.createdAt);
 }
 
-export function editBody(data: Sidecar, id: string, body: string): void {
-  find(data, id).body = body;
+export function editBody(data: Sidecar, id: string, body: string, messageId?: string): void {
+  const c = find(data, id);
+  const message = !messageId || messageId === id ? c : c.replies.find(r => r.id === messageId);
+  if (!message) throw new Error('The message you are editing no longer exists.');
+  message.body = body;
+  delete c.delivery;
 }
 
 /** Longest quote, and prefix or suffix, a re-anchor accepts. */
@@ -325,5 +322,7 @@ export function reanchor(data: Sidecar, id: string, anchor: Anchor): void {
 }
 
 export function setMeta(data: Sidecar, id: string, meta: CommentMeta): void {
-  applyMeta(find(data, id), meta);
+  const c = find(data, id);
+  applyMeta(c, meta);
+  delete c.delivery;
 }

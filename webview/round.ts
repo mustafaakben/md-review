@@ -51,40 +51,40 @@ export function reviewLeft(r: ReviewRun, list: { origin?: string; createdAt: str
 }
 
 /** The Review with Claude row: live, then how much of what Claude left is still to triage. */
-export function reviewBanner(r: ReviewRun | null, live: boolean): string {
+export function reviewBanner(r: ReviewRun | null, live: boolean, agent = 'Claude'): string {
   if (!r) return '';
   if (live) {
     return `<div class="mdr-round-row"><span class="mdr-round-dot live" aria-hidden="true"></span>
-      <span class="mdr-round-text">Claude is reviewing · ${plural(r.total, 'comment')} so far</span>
+      <span class="mdr-round-text">${agent} is reviewing · ${plural(r.total, 'comment')} so far</span>
       <button class="mdr-round-x" data-round="dismiss-review" title="Hide" aria-label="Hide review progress"></button></div>`;
   }
   const text =
-    r.untriaged ? `Claude left ${plural(r.total, 'comment')} · ${r.untriaged} to triage`
-    : r.total === 1 ? "Claude's comment is triaged"
-    : r.total ? `All ${r.total} of Claude's comments triaged`
-    : r.finished ? 'Claude left no comments'
-    : 'No comments from Claude yet';
+    r.untriaged ? `${agent} left ${plural(r.total, 'comment')} · ${r.untriaged} to triage`
+    : r.total === 1 ? `${agent}'s comment is triaged`
+    : r.total ? `All ${r.total} of ${agent}'s comments triaged`
+    : r.finished ? `${agent} left no comments`
+    : `No comments from ${agent} yet`;
   const show = r.untriaged ? `<button data-round="from-claude">Show them</button>` : '';
   return `<div class="mdr-round-row"><span class="mdr-round-icon${r.total ? ' done' : ''}" aria-hidden="true"></span>
     <span class="mdr-round-text">${text}</span></div>
     <div class="mdr-round-row mdr-round-actions">${show}<button data-round="dismiss-review" aria-label="Dismiss the review summary">Dismiss</button></div>`;
 }
 
-/** The Send to Claude row: progress while Claude works, then the summary. */
-export function roundBanner(r: Round | null, working: boolean): string {
+/** Delivery progress and summary, labeled with the connected agent. */
+export function roundBanner(r: Round | null, working: boolean, agent = 'Claude'): string {
   if (!r) return '';
   if (r.finished) {
     const yours = [r.suggestions && plural(r.suggestions, 'suggested edit'), r.questions && plural(r.questions, 'question')].filter(Boolean);
     const q = yours.length ? `, ${yours.join(' and ')} for you` : '';
     const ch = r.changes ? `. ${plural(r.changes, 'block')} changed` : '';
     return `<div class="mdr-round-row"><span class="mdr-round-icon done" aria-hidden="true"></span>
-      <span class="mdr-round-text">Claude finished: ${r.resolved} resolved${q}${ch}</span></div>
+      <span class="mdr-round-text">${agent} finished: ${r.resolved} resolved${q}${ch}</span></div>
       <div class="mdr-round-row mdr-round-actions">${r.changes ? '<button data-round="changes">Review changes</button>' : ''}${r.questionIds.length ? `<button data-round="questions">${r.suggestions ? 'Show them' : 'Show questions'}</button>` : ''}<button data-round="dismiss-round" aria-label="Dismiss the round summary">Dismiss</button></div>`;
   }
   const pct = r.total ? Math.round((100 * r.done) / r.total) : 0;
-  const what = working ? 'Claude is working' : 'Waiting for Claude';
+  const what = working ? `${agent} is working` : `Waiting for ${agent}`;
   return `<div class="mdr-round-row"><span class="mdr-round-dot${working ? ' live' : ''}" aria-hidden="true"></span>
     <span class="mdr-round-text">${what} · ${r.done} of ${r.total}</span>
-    <button class="mdr-round-x" data-round="dismiss-round" title="Hide" aria-label="Hide the Send to Claude progress"></button></div>
+    <button class="mdr-round-x" data-round="dismiss-round" title="Hide" aria-label="Hide the Send to ${agent} progress"></button></div>
     <div class="mdr-round-bar" role="progressbar" aria-label="Threads answered" aria-valuemin="0" aria-valuemax="${r.total}" aria-valuenow="${r.done}"><span style="width:${pct}%"></span></div>`;
 }

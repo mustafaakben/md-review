@@ -45,7 +45,8 @@ const SHEET: { title: string; rows: Row[] }[] = [
       { label: 'Save a comment or reply', keys: [['Mod+Enter']] },
       { label: 'Open comment at cursor', keys: [['Alt+Enter']] },
       { label: 'Reply to the current thread', keys: [['Mod+Alt+Y']] },
-      { label: 'Submit review', keys: [['Mod+Shift+Enter']] },
+      { label: 'Save and send this comment (while composing)', keys: [['Mod+Shift+Enter']] },
+      { label: 'Submit review (outside the composer)', keys: [['Mod+Shift+Enter']] },
       { label: 'Send to Claude', keys: [['Mod+Alt+Enter']] },
     ],
   },
@@ -63,7 +64,8 @@ const SHEET: { title: string; rows: Row[] }[] = [
   {
     title: 'Edit',
     rows: [
-      { label: 'Save an edit / cancel it', keys: [['Enter', 'Escape']] },
+      { label: 'Save pending writing', keys: [['Mod+S']] },
+      { label: 'Cancel a comment / close a tool', keys: [['Escape']] },
       { label: 'Save raw Markdown (' + (isMac ? 'Option' : 'Alt') + '+double-click)', keys: [['Mod+Enter']] },
       { label: 'Undo edit', keys: [['Mod+Z']] },
       { label: 'Redo edit', keys: isMac ? [['Mod+Shift+Z']] : [['Mod+Y'], ['Mod+Shift+Z']] },

@@ -1,3 +1,5 @@
+import type { FromWebview, ToWebview } from './protocol';
+export type { FromWebview, ToWebview } from './protocol';
 // Host-side message handling, independent of the VS Code API so the same code
 // drives both the extension and the browser test harness.
 import * as crypto from 'crypto';
@@ -88,30 +90,6 @@ export interface BaselineInfo {
   touched?: string[];
 }
 
-export type ToWebview =
-  | { type: 'render'; source: string; blocks: string[]; fileName: string; targets?: WordTargets; changes?: Changes | null; changesFailed?: boolean }
-  | { type: 'sourceSaved'; seq: number; source: string }
-  | { type: 'sourceConflict'; seq: number; message: string }
-  | { type: 'linkCheck'; missing: string[]; seq?: number }
-  | { type: 'changes'; changes: Changes | null; failed?: boolean }
-  | { type: 'baseline'; info: BaselineInfo | null }
-  | { type: 'comments'; data: store.Sidecar; author: string; showResolved: boolean }
-  | { type: 'block'; ls: number; le: number; text: string }
-  | { type: 'blockSaved'; ls: number }
-  | { type: 'inlineFailed'; ls: number; le: number; text: string; message: string }
-  | { type: 'history'; canUndo: boolean; canRedo: boolean }
-  | { type: 'toast'; message: string }
-  | { type: 'agentPrompt'; prompt: string; count: number; review?: string }
-  | { type: 'agent'; agent: AgentState }
-  /** Browser mode: a command for the user to run in a terminal (the view copies it). */
-  | { type: 'handOver'; command: string }
-  | { type: 'reviewers'; presets: { id: string; label: string; path?: string }[] }
-  | { type: 'prefs'; prefs: Record<string, unknown> }
-  | { type: 'round'; round: Round | null }
-  | { type: 'review'; review: ReviewRun | null }
-  /** Jump to a thread picked in the review inbox. */
-  | { type: 'focusThread'; id: string }
-  | { type: 'error'; message: string };
 
 /**
  * The threads handed to the agent by the last Send, and how far it has got. A
@@ -148,55 +126,6 @@ export interface ReviewRun {
   finished: boolean;
 }
 
-export type FromWebview =
-  | { type: 'ready' }
-  | { type: 'saveSource'; original: string; changes: SourceChange[]; seq: number }
-  | { type: 'addComment'; anchor: store.Anchor; body: string; meta?: store.CommentMeta; suggestion?: string }
-  /** Apply a suggestion: the block's rendered text before and after, as for saveInline. */
-  | { type: 'applySuggestion'; id: string; from?: string; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
-  | { type: 'dismissSuggestion'; id: string; from?: string }
-  | { type: 'setMeta'; id: string; meta: store.CommentMeta }
-  | { type: 'reply'; id: string; body: string }
-  | { type: 'setStatus'; id: string; status: store.Status }
-  | { type: 'editBody'; id: string; body: string }
-  | { type: 'deleteComment'; id: string }
-  | { type: 'submitReview' }
-  | { type: 'getBlock'; ls: number; le: number }
-  | { type: 'saveBlock'; ls: number; le: number; original: string; newText: string }
-  | { type: 'saveInline'; ls: number; le: number; kind: BlockKind; oldText: string; newText: string }
-  | { type: 'openLink'; href: string }
-  | { type: 'toggleTask'; line: number; checked: boolean; key?: string }
-  | { type: 'undo' }
-  | { type: 'redo' }
-  | { type: 'sendToAgent'; id?: string }
-  | { type: 'setPrefs'; prefs: Record<string, unknown> }
-  | { type: 'composing'; on: boolean }
-  /** Hide the Send to Claude progress ('round') or the Review with Claude one ('review'). */
-  | { type: 'dismissRound'; which: 'round' | 'review' }
-  | { type: 'listReviewers' }
-  /** preset: a reviewer id from listReviewers, or 'custom' with the instruction typed in. */
-  | { type: 'startReview'; preset: string; instruction?: string }
-  /** An agent's draft: keep it as yours, or keep it and queue it for the agent's next Send. */
-  | { type: 'triage'; id: string; action: 'keep' | 'do' }
-  | { type: 'reanchor'; id: string; anchor: store.Anchor }
-  | { type: 'checkLinks'; hrefs: string[]; seq?: number }
-  | { type: 'showChanges'; on: boolean }
-  /** Revert or keep hunk `i` of the comparison `v`. */
-  | { type: 'revertChange'; v: string; i: number }
-  | { type: 'keepChange'; v: string; i: number }
-  | { type: 'acceptChanges' }
-  /** The session menu opened: list the sessions it can bind to. */
-  | { type: 'listSessions' }
-  | { type: 'bindSession'; agent: AgentKind; id: string; name?: string }
-  | { type: 'unbindSession' }
-  | { type: 'startSession'; agent: AgentKind; resume?: string }
-  | { type: 'setDelivery'; delivery: Delivery }
-  /** Submit drafts and copy the prompt instead of sending it: for any other agent. */
-  | { type: 'copyPrompt' }
-  /** Install the skill and hooks in the workspace folder. */
-  | { type: 'connectFolder' }
-  /** Refresh the chip: is the bound session still running, idle or busy? */
-  | { type: 'agentState' };
 
 export interface HostContext {
   mdPath: string;
@@ -840,11 +769,28 @@ export class ReviewSession {
         return;
       case 'addComment': {
         let id = '';
-        this.mutate((d) => {
-          const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
-          if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
-          id = c.id;
-        });
+        let created = false;
+        try {
+          this.mutate((d) => {
+            const existing = msg.requestId && d.comments.find(c => c.clientRequestId === msg.requestId);
+            if (existing) { id = existing.id; created = false; return; }
+            const c = store.addComment(d, author, msg.anchor, msg.body, msg.meta);
+            if (typeof msg.suggestion === 'string' && c.scope === undefined) c.suggestion = { text: msg.suggestion };
+            if (msg.requestId) c.clientRequestId = msg.requestId;
+            id = c.id; created = true;
+          });
+        } catch (error) {
+          if (!msg.requestId) throw error;
+          this.ctx.post({ type: 'commentSaveFailed', requestId: msg.requestId, message: String((error as Error).message || error) });
+          return;
+        }
+        if (msg.requestId) this.ctx.post({ type: 'commentSaved', requestId: msg.requestId, id });
+        if (!created) return; // A repeated save request must not create or deliver twice.
+        if (msg.send) {
+          try { this.sendToAgent([id]); }
+          catch (error) { this.ctx.post({ type: 'deliveryFailed', ids: [id], message: String((error as Error).message || error) }); }
+          return;
+        }
         // Live: praise needs nothing from the agent, so it stays a draft.
         if (this.liveOn() && msg.meta?.kind !== 'praise') this.queueLive(id);
         return;
@@ -892,7 +838,7 @@ export class ReviewSession {
       case 'reply': {
         let toAgent = false;
         this.mutate((d) => {
-          store.addReply(d, msg.id, author, msg.body);
+          store.addReply(d, msg.id, author, msg.body, msg.parentId);
           toAgent = store.find(d, msg.id).status === 'submitted';
         });
         // Live: answering the agent on an open thread goes straight back to it.
@@ -902,7 +848,7 @@ export class ReviewSession {
       case 'setStatus':
         return this.mutate((d) => store.setStatus(d, msg.id, msg.status));
       case 'editBody':
-        return this.mutate((d) => store.editBody(d, msg.id, msg.body));
+        return this.mutate((d) => store.editBody(d, msg.id, msg.body, msg.messageId));
       case 'deleteComment':
         return this.mutate((d) => store.deleteComment(d, msg.id));
       case 'submitReview':
@@ -1161,8 +1107,28 @@ export class ReviewSession {
       suggest: this.ctx.suggestMode?.(),
       source: before,
     });
+    const deliveryAgent = this.ctx.agents?.binding()?.agent;
+    const deliveryAt = store.now();
     const started = () => {
       // Only threads that are actually waiting on the agent count toward the round.
+      if (!copy && this.ctx.runAgent) {
+        const at = deliveryAt;
+        const agent = deliveryAgent;
+        try {
+          const receipt = store.mutate(this.ctx.mdPath, d => {
+            for (const c of d.comments) {
+              const sent = comments.find(sent => sent.id === c.id);
+              // A later edit or reply has not been delivered by this earlier request.
+              if (sent && c.body === sent.body && c.reopenedAt === sent.reopenedAt &&
+                c.replies.length === sent.replies.length && c.replies.every((r, i) => r.id === sent.replies[i].id && r.body === sent.replies[i].body)) c.delivery = { at, agent };
+            }
+          });
+          this.lastSidecarWrite = receipt.written;
+          this.sendComments();
+        } catch (error) {
+          this.ctx.post({ type: 'error', message: `The review was sent, but its delivery status could not be saved: ${String(error)}` });
+        }
+      }
       const waiting = comments.filter((c) => store.awaitsAgent(c));
       const sent = waiting.map((c) => c.id);
       this.snapshot(waiting, before);
@@ -1176,17 +1142,21 @@ export class ReviewSession {
       this.ctx.post({ type: 'agentPrompt', prompt, count: comments.length });
       return started();
     }
-    this.hand(prompt, started);
+    this.hand(prompt, started, message => this.ctx.post({ type: 'deliveryFailed', ids: comments.map(c => c.id), message }));
   }
 
   /**
    * Give the prompt to runAgent, then run `started` if it was delivered. A
    * host that answers at once (tests, the clipboard) is handled at once.
    */
-  private hand(prompt: string, started: () => void): void {
+  private hand(prompt: string, started: () => void, failed?: (message: string) => void): void {
+    const fail = (error: unknown) => {
+      const message = String((error as Error)?.message || error);
+      if (failed) failed(message); else this.ctx.post({ type: 'error', message });
+    };
     const done = (status: string | null) => {
       // Nothing delivered (the host said why): nothing to follow.
-      if (status === null) return;
+      if (status === null) { if (failed) failed('The comment was saved, but it was not delivered.'); return; }
       if (status) this.ctx.post({ type: 'toast', message: status });
       started();
     };
@@ -1194,12 +1164,12 @@ export class ReviewSession {
     try {
       r = this.ctx.runAgent!(prompt);
     } catch (e) {
-      this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+      fail(e);
       return;
     }
     if (r instanceof Promise) {
       r.then(done, (e) => {
-        this.ctx.post({ type: 'error', message: String((e as Error)?.message || e) });
+        fail(e);
         this.postAgent(); // the session may have gone: show it
       });
     } else done(r);
