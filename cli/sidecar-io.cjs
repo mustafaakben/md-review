@@ -10,31 +10,51 @@ function readText(file, io = fs) {
   catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }
 
+// A mutation is one synchronous read-modify-write that takes milliseconds, so a
+// local lock this old was leaked (e.g. its unlink failed) even if its owner lives.
+const STALE_MS = 10000;
+
+// Sync clients (Dropbox, OneDrive) and scanners briefly open new files, which
+// makes unlink fail with EPERM/EBUSY on Windows. Retry instead of leaking.
+function unlinkWithRetry(lock, io) {
+  for (let attempt = 0; ; attempt++) {
+    try { io.unlinkSync(lock); return true; }
+    catch (error) {
+      if (error.code === 'ENOENT') return true;
+      if (!temporary(error) || attempt >= 20) return false;
+      pause(25);
+    }
+  }
+}
+
 function acquire(file, io) {
   const lock = file + '.lock';
   const owner = JSON.stringify({ pid: process.pid, host: os.hostname() });
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < 100; attempt++) {
     try {
       io.writeFileSync(lock, owner, { flag: 'wx' });
-      return () => { if (readText(lock, io) === owner) io.unlinkSync(lock); };
+      // Never throw from release: the mutation already succeeded, and a lock that
+      // still cannot be removed is recovered as stale by the next writer.
+      return () => { try { if (readText(lock, io) === owner) unlinkWithRetry(lock, io); } catch { /* recovered as stale */ } };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      // Only recover a lock whose local owner is known to have exited. Never
+      // Only recover a local lock whose owner has exited or that is stale. Never
       // guess whether a different machine (including a synced copy) is alive.
       try {
         const raw = readText(lock, io);
         const previous = JSON.parse(raw);
         if (previous.host === os.hostname() && Number.isInteger(previous.pid) && previous.pid > 0) {
+          let exited = false;
           try { process.kill(previous.pid, 0); }
-          catch (probe) {
-            if (probe.code === 'ESRCH' && readText(lock, io) === raw) { io.unlinkSync(lock); continue; }
-          }
+          catch (probe) { exited = probe.code === 'ESRCH'; }
+          const stale = exited || Date.now() - io.statSync(lock).mtimeMs > STALE_MS;
+          if (stale && readText(lock, io) === raw && unlinkWithRetry(lock, io)) continue;
         }
       } catch { /* A lock being created or released is briefly incomplete. */ }
       pause(15);
     }
   }
-  throw new Error('Comments are being updated by another process. Please retry.');
+  throw new Error(`Comments are being updated by another process. Please retry. If this persists, delete ${lock}.`);
 }
 
 function mutateSidecar(file, transform, options = {}) {

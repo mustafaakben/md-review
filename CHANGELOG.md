@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Comments no longer get stuck behind a leftover lock
+
+- On Windows in a synced folder (Dropbox, OneDrive), saving a comment could leave its `.comments.json.lock` behind: the sync client briefly opens each new file, so the single attempt to delete the lock failed with EPERM. Because VS Code was still running, the lock was never treated as abandoned, and every later write from the CLI or an agent failed with "Comments are being updated by another process" until the window was reloaded. Now the lock's delete is retried, a lock that can't be removed no longer turns a successful save into an error, and a lock from this machine older than 10 seconds is recovered even if its owner is alive (a save takes milliseconds). Locks from other machines are still never touched. The remaining error names the lock file to delete. Tested end to end on Windows 11 in a Dropbox folder.
+
 ### Writing themes
 
 - Five new reading themes, each with a font of its own: Typewriter (off-white page, monospaced face, blue links), Manuscript (ivory paper, dark ink, oxblood accent, book serif), Sage (soft green-grey, humanist sans), Espresso (warm dark brown, cream text, amber accent, book serif) and Ocean (deep blue-green, sea-glass accent, humanist sans). Picking one sets Font to the theme's own, shown as a third choice next to Sans and Serif; going back to a theme without one returns to Sans. Text and accents meet WCAG AA contrast on every new page. Typewriter uses the bundled iA Writer Duo and Manuscript and Espresso the bundled Literata, so they look the same on Windows and macOS; the humanist sans comes from the system (Segoe UI Variable, Avenir Next).

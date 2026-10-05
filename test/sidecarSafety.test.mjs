@@ -49,6 +49,34 @@ test('empty and corrupt existing sidecars are not replaced by mutations', t => {
     assert.equal(fs.readFileSync(file, 'utf8'), text);
   }
 });
+test('a briefly busy lock file (sync client) is still released', t => {
+  const file = fresh(t);
+  let failures = 0;
+  const io = { ...fs, unlinkSync: p => { if (p.endsWith('.lock') && failures++ < 3) throw error('EPERM'); fs.unlinkSync(p); } };
+  mutateSidecar(file, () => ({ n: 1 }), { io });
+  assert.equal(fs.existsSync(file + '.lock'), false);
+});
+test('a lock that cannot be released never fails the save that succeeded', t => {
+  const file = fresh(t);
+  const io = { ...fs, unlinkSync: p => { if (p.endsWith('.lock')) throw error('EPERM'); fs.unlinkSync(p); } };
+  assert.deepEqual(mutateSidecar(file, () => ({ n: 1 }), { io }).data, { n: 1 });
+  assert.equal(JSON.parse(fs.readFileSync(file)).n, 1);
+});
+test('a leaked local lock held by a live process is recovered once stale', t => {
+  const file = fresh(t);
+  fs.writeFileSync(file + '.lock', JSON.stringify({ pid: process.pid, host: os.hostname() }));
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(file + '.lock', old, old);
+  mutateSidecar(file, () => ({ n: 1 }));
+  assert.equal(JSON.parse(fs.readFileSync(file)).n, 1);
+  assert.equal(fs.existsSync(file + '.lock'), false);
+});
+test('a fresh lock held by a live process is respected', t => {
+  const file = fresh(t);
+  fs.writeFileSync(file + '.lock', JSON.stringify({ pid: process.pid, host: os.hostname() }));
+  assert.throws(() => mutateSidecar(file, () => ({ n: 1 })), /being updated by another process/);
+  assert.equal(fs.existsSync(file), false);
+});
 test('simultaneous processes preserve every comment update', async t => {
   const file = fresh(t); fs.writeFileSync(file, '{"comments":[],"custom":"preserved"}');
   await Promise.all([0, 1, 2, 3].map(worker => new Promise((resolve, reject) => {
