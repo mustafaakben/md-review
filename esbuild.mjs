@@ -1,13 +1,20 @@
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 
 const watch = process.argv.includes('--watch');
+
+// Clears a generated folder but keeps the folder itself, so a Dropbox "ignored"
+// mark on it survives the build. Retries ride out a sync client briefly holding
+// a file (EPERM/EBUSY on Windows).
+function emptyDir(dir) {
+  mkdirSync(dir, { recursive: true });
+  for (const e of readdirSync(dir)) rmSync(`${dir}/${e}`, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+}
 
 // KaTeX stylesheet + fonts for the webview. The webview is Chromium, which
 // takes the first format each @font-face lists (woff2), so the woff and ttf
 // copies would only add weight to the package.
-rmSync('media/katex', { recursive: true, force: true });
-mkdirSync('media/katex', { recursive: true });
+emptyDir('media/katex');
 writeFileSync(
   'media/katex/katex.min.css',
   readFileSync('node_modules/katex/dist/katex.min.css', 'utf8').replace(/,url\(fonts\/[^)]+\.(woff|ttf)\) format\("(woff|truetype)"\)/g, ''),
@@ -18,7 +25,7 @@ cpSync('webview/features.css', 'media/features.css');
 // Mermaid, loaded by the webview only for documents with a diagram. The ES
 // module build splits each diagram type into its own chunk, so a flowchart
 // loads a fraction of the library. Source maps are left out.
-rmSync('media/mermaid', { recursive: true, force: true });
+emptyDir('media/mermaid');
 cpSync('node_modules/mermaid/dist/mermaid.esm.min.mjs', 'media/mermaid/mermaid.esm.min.mjs');
 cpSync('node_modules/mermaid/dist/chunks/mermaid.esm.min', 'media/mermaid/chunks/mermaid.esm.min', {
   recursive: true,
@@ -31,7 +38,7 @@ cpSync('node_modules/mermaid/dist/chunks/mermaid.esm.min', 'media/mermaid/chunks
 // font is in use, so the list costs nothing until a font is picked.
 const list = await esbuild.build({ entryPoints: ['src/readingFonts.ts'], bundle: true, write: false, format: 'esm', logLevel: 'silent' });
 const { EXTRA_FONTS, fontStack } = await import(`data:text/javascript;base64,${Buffer.from(list.outputFiles[0].text).toString('base64')}`);
-rmSync('media/fonts', { recursive: true, force: true });
+emptyDir('media/fonts');
 mkdirSync('media/fonts/licenses', { recursive: true });
 const faces = [];
 const looks = [];
