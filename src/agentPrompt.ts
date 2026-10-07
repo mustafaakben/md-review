@@ -177,11 +177,15 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     has((c) => !!c.suggestion && !c.suggestion.appliedAt) && '- <suggestion>: what the selection should become; use it unless the request says otherwise.',
   ].filter(Boolean) as string[];
   const nested = has(c => c.replies.some(r => r.parentId));
+  // Suggest mode: propose the selection's replacement for the reviewer to apply; never edit the file.
+  const verbs = o.suggest
+    ? `suggest <id> "<replacement>" "<why>" | reply <id> "<text>" | resolve <id> "<note>"`
+    : `fix <id> "<old>" "<new>" "<note>" | reply <id> "<text>" | resolve <id> "<note>"`;
   const out = [`<md_review file="${md}" path="${o.mdPath}" cwd="${o.cwd}" threads="${cs.length}">`];
   if (o.primed) {
     out.push(
       '<instructions>',
-      `Same MD Review instructions as before. One command, run in ${o.cwd}: ${cli} apply "${md}" then fix <id> "<old>" "<new>" "<note>" | reply <id> "<text>" | resolve <id> "<note>"${nested ? ' | reply-to <thread-id> <message-id> "<text>"' : ''}, repeated. Edit only <user_selected_text>. Don't read the files; no summary.`,
+      `Same MD Review instructions as before. One command, run in ${o.cwd}: ${cli} apply "${md}" then ${verbs}${nested ? ' | reply-to <thread-id> <message-id> "<text>"' : ''}, repeated. ${o.suggest ? "Suggest a replacement for the whole <user_selected_text>; don't edit the file." : 'Edit only <user_selected_text>.'} Don't read the files; no summary.`,
       `Messages shown as "[id] author: opening words …" were sent to you before; if you no longer have one, \`${cli} context "${md}" <thread-id>\` prints the whole thread.`,
       ...rules,
       '</instructions>',
@@ -192,11 +196,15 @@ function fastPrompt(o: PromptOptions, cli: string): string {
       `Handle every thread below with ONE command, run in ${o.cwd} exactly as written:`,
       `  ${cli} apply "${md}" <actions>`,
       'Actions, repeated as needed:',
-      '  fix <id> "<old>" "<new>" "<note>"   edit and resolve. old: the exact source text to replace, copied from <context> (markup included, just enough to be unique). new: its replacement. Keep it minimal.',
+      ...(o.suggest
+        ? ['  suggest <id> "<replacement>" "<why>"  propose what the whole <user_selected_text> should become, as it reads on screen: one line, no Markdown ("" deletes it). The reviewer applies it with one click; the thread stays open. Don\'t edit the file.']
+        : ['  fix <id> "<old>" "<new>" "<note>"   edit and resolve. old: the exact source text to replace, copied from <context> (markup included, just enough to be unique). new: its replacement. Keep it minimal.']),
       '  reply <id> "<text>"                 an answer, or your question if the request is unclear (stays open)',
-      '  resolve <id> "<note>"               nothing to change',
+      `  resolve <id> "<note>"               nothing to change${o.suggest ? ', or no replacement of the selection fits' : ''}`,
       ...(nested ? ['  reply-to <thread-id> <message-id> "<text>"  answer a specific message; keep the reply_to relationships shown below.'] : []),
-      '<user_selected_text> is exactly what the reviewer highlighted (no markup): the scope. Change only it unless the <request> asks for more. <context> is the source lines around it, for meaning and for copying <old>.',
+      o.suggest
+        ? '<user_selected_text> is exactly what the reviewer highlighted (no markup): your suggestion replaces all of it. <context> is the source lines around it, for meaning.'
+        : '<user_selected_text> is exactly what the reviewer highlighted (no markup): the scope. Change only it unless the <request> asks for more. <context> is the source lines around it, for meaning and for copying <old>.',
       `Later sends shrink messages you've seen to "[id] author: opening words …", drop unchanged <context>, and mark what's new with new="true"; \`${cli} context "${md}" <thread-id>\` prints a thread whole.`,
       ...rules,
       "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again, or edit the file yourself and run resolve. Then stop: no summary.",
@@ -224,7 +232,10 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     for (const r of c.replies) {
       const to = r.parentId ? ` reply_to="${r.parentId}"` : '';
       if (follow && isSeen(r.id, r.author)) out.push(`[${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${preview(r.body)}`);
-      else out.push(`<message id="${r.id}"${to} author="${r.author}"${follow ? ' new="true"' : ''}>${flat(r.body)}</message>`);
+      else {
+        const sug = r.suggestion ? ` [suggested: "${flat(r.suggestion.text)}"${r.suggestion.appliedAt ? ', applied' : r.suggestion.dismissedAt ? ', dismissed' : ''}]` : '';
+        out.push(`<message id="${r.id}"${to} author="${r.author}"${follow ? ' new="true"' : ''}>${flat(r.body)}${sug}</message>`);
+      }
     }
     out.push('</thread>');
   }
@@ -233,7 +244,7 @@ function fastPrompt(o: PromptOptions, cli: string): string {
 }
 
 export function buildAgentPrompt(o: PromptOptions): string {
-  const cliFast = o.cliPath && o.source !== undefined && !o.suggest ? cliCommand(o.cwd, o.cliPath) : undefined;
+  const cliFast = o.cliPath && o.source !== undefined ? cliCommand(o.cwd, o.cliPath) : undefined;
   if (cliFast) return fastPrompt(o, cliFast);
   const md = rel(o.cwd, o.mdPath);
   const side = md + '.comments.json';

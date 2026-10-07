@@ -19,7 +19,7 @@ node .claude/skills/md-review/mdreview.mjs context <file.md> <id>
 node .claude/skills/md-review/mdreview.mjs reply   <file.md> <id> "what you changed"
 node .claude/skills/md-review/mdreview.mjs resolve <file.md> <id> ["closing reply"]
 node .claude/skills/md-review/mdreview.mjs fix     <file.md> <id> "<old source text>" "<new source text>" "note"
-node .claude/skills/md-review/mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "note" reply <id> "text" resolve <id> "note" …
+node .claude/skills/md-review/mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "note" reply <id> "text" resolve <id> "note" suggest <id> "replacement" "note" …
 node .claude/skills/md-review/mdreview.mjs list    [paths…] --status submitted
 ```
 

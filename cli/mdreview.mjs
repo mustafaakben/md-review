@@ -9,7 +9,7 @@
 //   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude] [--parent <message-id>]
 //   node mdreview.mjs resolve <file.md> <id> ["<closing reply>"] [--author Claude]
 //   node mdreview.mjs fix     <file.md> <id> "<old source text>" "<new source text>" ["<note>"]
-//   node mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "<note>" reply <id> "<text>" resolve <id> "<note>" …
+//   node mdreview.mjs apply   <file.md> fix <id> "<old>" "<new>" "<note>" reply <id> "<text>" resolve <id> "<note>" suggest <id> "<replacement>" "<note>" …
 //   node mdreview.mjs suggest <file.md> <id> "<replacement for the quote>" ["<note>"]
 //   node mdreview.mjs reopen  <file.md> <id>
 //   node mdreview.mjs comment <file.md> --quote "<text as it reads>" [--line N] [--kind question|praise]
@@ -874,6 +874,7 @@ function applyActions(mdArg, actions) {
   for (const a of actions) {
     const c = find(data, a.id); // unknown ids/parents fail before anything is written
     if (a.parentId && a.parentId !== c.id && !c.replies.some(r => r.id === a.parentId)) fail('Parent message not found in this thread.');
+    if (a.verb === 'suggest' && (!c.anchor?.quote || c.scope)) fail(`${a.id} has no selection to replace (it's about a whole ${c.scope || 'document'}). Nothing was changed. Reply instead.`);
   }
   // Keep the file's line endings: the agent writes \n.
   const crlf = raw.includes('\r\n');
@@ -918,6 +919,12 @@ function applyActions(mdArg, actions) {
   mutate(md, (d) => {
     for (const a of actions) {
       const c = find(d, a.id);
+      if (a.verb === 'suggest') {
+        // One line of plain text, as `suggest` writes it; the thread stays open for the reviewer to apply.
+        c.replies.push({ id: newId('r'), author, createdAt: now(), body: a.note || 'Suggested edit.', suggestion: { text: a.text.replace(/\s*\n\s*/g, ' ') } });
+        unclaim(c);
+        continue;
+      }
       const body = a.verb === 'fix' ? a.note || `Changed "${clip(a.oldText)}" to "${clip(a.newText)}".` : a.verb === 'reply' ? a.text : a.note;
       if (body) c.replies.push({ id: newId('r'), author, createdAt: now(), body, ...(a.parentId ? { parentId: a.parentId } : {}) });
       if (a.verb !== 'reply') {
@@ -928,7 +935,7 @@ function applyActions(mdArg, actions) {
     }
   });
   const n = (v) => actions.filter((a) => a.verb === v).length;
-  console.log([done.length && `Fixed and resolved ${done.join(', ')}`, n('resolve') && `resolved ${n('resolve')}`, n('reply') && `replied to ${n('reply')}`].filter(Boolean).join('; ') + '.');
+  console.log([done.length && `Fixed and resolved ${done.join(', ')}`, n('suggest') && `suggested ${n('suggest')}`, n('resolve') && `resolved ${n('resolve')}`, n('reply') && `replied to ${n('reply')}`].filter(Boolean).join('; ') + '.');
 }
 
 switch (cmd) {
@@ -1089,18 +1096,19 @@ switch (cmd) {
     break;
   }
   case 'apply': {
-    // Every thread in one call: fix <id> <old> <new> <note> | reply <id> <text> | resolve <id> [<note>], repeated.
+    // Every thread in one call: fix <id> <old> <new> <note> | reply <id> <text> | resolve <id> [<note>] | suggest <id> <replacement> <note>, repeated.
     const [mdArg, ...tokens] = rest;
     if (!mdArg || !tokens.length) usage();
     const actions = [];
     for (let i = 0; i < tokens.length; ) {
       const verb = tokens[i];
-      const n = { fix: 4, reply: 2, 'reply-to': 3, resolve: 2 }[verb];
-      if (!n || i + n >= tokens.length + (verb === 'resolve' ? 1 : 0)) fail(`apply: expected fix <id> <old> <new> <note>, reply <id> <text> or resolve <id> <note>, got "${verb}" at argument ${i + 2}.`);
+      const n = { fix: 4, reply: 2, 'reply-to': 3, resolve: 2, suggest: 3 }[verb];
+      if (!n || i + n >= tokens.length + (verb === 'resolve' ? 1 : 0)) fail(`apply: expected fix <id> <old> <new> <note>, reply <id> <text>, resolve <id> <note> or suggest <id> <replacement> <note>, got "${verb}" at argument ${i + 2}.`);
       const [id, a, b, c] = tokens.slice(i + 1, i + 1 + n);
       if (verb === 'fix') actions.push({ verb, id, oldText: a, newText: b, note: c });
       else if (verb === 'reply') actions.push({ verb, id, text: a });
       else if (verb === 'reply-to') actions.push({ verb: 'reply', id, parentId: a, text: b });
+      else if (verb === 'suggest') actions.push({ verb, id, text: a, note: b });
       else actions.push({ verb, id, note: a });
       i += 1 + n;
     }

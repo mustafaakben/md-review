@@ -358,8 +358,11 @@ test('the prompt names the file absolutely, shows each quote\'s source lines, an
   assert.match(p, /^ {4}5 \| Other line\.$/m, 'a stale line hint still finds the line');
   assert.match(p, /\[question\]: answer with reply/);
   assert.doesNotMatch(p, /\[praise\]|major before minor|whole section/, 'rules only for what the comments use');
-  // Suggest mode keeps the full prompt.
-  assert.match(lib.buildAgentPrompt({ mdPath: '/w/a.md', cwd: '/w', cliPath: '/x/m.mjs', source: src, comments: [c('c_1', 'Other line.', 5, 'x')], suggest: true }), /suggest "a\.md"/);
+  // Suggest mode uses the same one-command prompt, with suggest in place of fix.
+  const sug = lib.buildAgentPrompt({ mdPath: '/w/a.md', cwd: '/w', cliPath: '/x/m.mjs', source: src, comments: [c('c_1', 'Other line.', 5, 'x')], suggest: true });
+  assert.match(sug, /apply "a\.md" <actions>/);
+  assert.match(sug, /^ {2}suggest <id> "<replacement>" "<why>"/m);
+  assert.doesNotMatch(sug, /^ {2}fix <id>/m);
   assert.deepEqual(lib.quoteLines(src, { anchor: { quote: 'not in the file', lineStart: 1, lineEnd: 1 } }), []);
 });
 

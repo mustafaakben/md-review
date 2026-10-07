@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 const lib = createRequire(import.meta.url)('../dist/lib.cjs');
 
 const LINE = 'Leadership scholarship offers well-developed accounts of how leaders grow through demanding experience (DeRue et al., 2012), and how they establish standards (Brown et al., 2005). **AI** unsettles these accounts.';
@@ -167,4 +167,39 @@ test('next --session: a thread the session was shown comes back with only what i
   lib.store.mutate(path.join(dir, 'm.md'), d => d.comments[0].replies.push({ id: 'r_d', author: 'Moose', body: 'One more.', createdAt: '4' }));
   assert.doesNotMatch(next('--session', 's2'), /follow_up="true"/);
   assert.doesNotMatch(execFileSync(process.execPath, [cli, 'context', 'm.md', 'c_1'], { cwd: dir, encoding: 'utf8' }), /follow_up="true"|^\[r_/m);
+});
+
+test('suggest mode: the lean prompt asks for apply … suggest, and apply proposes without editing', t => {
+  const p = lib.buildAgentPrompt(opts({ comments: [thread()], suggest: true }));
+  assert.match(p, /^ {2}suggest <id> "<replacement>" "<why>" {2}propose what the whole <user_selected_text> should become/m);
+  assert.doesNotMatch(p, /^ {2}fix <id>/m);
+  assert.ok(p.includes(`<user_selected_text>${SELECTED}</user_selected_text>`));
+  assert.match(p, /your suggestion replaces all of it/);
+  const short = lib.buildAgentPrompt(opts({ comments: [thread()], suggest: true, primed: true }));
+  assert.match(short, /then suggest <id> "<replacement>" "<why>" \| reply/);
+  assert.match(short, /Suggest a replacement for the whole <user_selected_text>; don't edit the file\./);
+  // An earlier suggestion shows in the thread with its state.
+  const withSug = lib.buildAgentPrompt(opts({ comments: [thread([{ id: 'r_s', author: 'Claude', body: 'Shorter.', createdAt: '1', suggestion: { text: 'Leaders grow through hard experience', dismissedAt: '2' } }])], suggest: true }));
+  assert.match(withSug, /<message id="r_s" author="Claude">Shorter\. \[suggested: "Leaders grow through hard experience", dismissed\]<\/message>/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-sug-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const md = path.join(dir, 'm.md');
+  fs.writeFileSync(md, SRC);
+  const doc = { ...thread(), id: 'c_doc', scope: 'document', anchor: { quote: '', prefix: '', suffix: '', lineStart: 0, lineEnd: 0 } };
+  fs.writeFileSync(md + '.comments.json', JSON.stringify({ schemaVersion: 1, file: 'm.md', comments: [thread(), doc] }));
+  const cli = path.resolve('cli/mdreview.mjs');
+  const apply = (...a) => spawnSync(process.execPath, [cli, 'apply', 'm.md', ...a], { cwd: dir, encoding: 'utf8' });
+  const before = fs.readFileSync(md + '.comments.json', 'utf8');
+  const bad = apply('suggest', 'c_1', 'New text', 'why', 'suggest', 'c_doc', 'x', 'y');
+  assert.notEqual(bad.status, 0);
+  assert.match(bad.stderr, /c_doc has no selection to replace/);
+  assert.equal(fs.readFileSync(md + '.comments.json', 'utf8'), before, 'nothing written when any part fails');
+  const ok = apply('suggest', 'c_1', 'Leaders grow\nthrough hard experience', 'Tighter.', 'reply', 'c_doc', 'Looks fine.');
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /suggested 1; replied to 1\./);
+  assert.equal(fs.readFileSync(md, 'utf8'), SRC, 'the file is not edited');
+  const c = lib.store.readSidecar(md).comments[0];
+  assert.equal(c.status, 'submitted', 'stays open for the reviewer');
+  assert.deepEqual([c.replies[0].author, c.replies[0].body, c.replies[0].suggestion.text], ['Claude', 'Tighter.', 'Leaders grow through hard experience']);
 });
