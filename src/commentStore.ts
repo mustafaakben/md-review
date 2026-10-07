@@ -42,7 +42,14 @@ export interface Anchor {
 export interface Comment {
   clientRequestId?: string;
   /** Last successful delivery, separate from merely submitting a draft. */
-  delivery?: { at: string; agent?: 'claude' | 'codex' };
+  delivery?: {
+    at: string;
+    agent?: 'claude' | 'codex';
+    /** The session it went to, the message ids it carried and a hash of its source lines: the next send to that session carries only what's new. */
+    session?: string;
+    seen?: string[];
+    lines?: string;
+  };
   id: string;
   author: string;
   createdAt: string;

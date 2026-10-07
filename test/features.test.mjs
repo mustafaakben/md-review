@@ -148,8 +148,8 @@ test('Ask Claude on one thread sends only that thread', () => {
   assert.equal(d.comments.find((c) => c.id === c1.id).status, 'draft', 'other drafts stay drafts');
   assert.equal(d.comments.find((c) => c.id === c2.id).status, 'submitted');
   assert.equal(calls.length, 1);
-  assert.match(calls[0], /^MD Review: 1 comment on one\.md/);
-  assert.match(calls[0], new RegExp(`^${c2.id}: "beta" -> Second\\.$`, 'm'));
+  assert.match(calls[0], /^<md_review file="one\.md" .* threads="1">$/m);
+  assert.match(calls[0], new RegExp(`^<thread id="${c2.id}">\n<request author="[^"]+">Second\\.</request>\n<user_selected_text>beta</user_selected_text>$`, 'm'));
   assert.ok(!calls[0].includes('First.'));
   assert.ok(calls[0].includes('node "/ext/cli/mdreview.mjs" apply "one.md" <actions>'));
   assert.match(calls[0], /^ +1 \| Alpha beta gamma\.$/m, 'the source line is in the prompt');

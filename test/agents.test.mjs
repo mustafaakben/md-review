@@ -352,7 +352,7 @@ test('the prompt names the file absolutely, shows each quote\'s source lines, an
   const src = '# T\n\nPlain **bold words** here.\n\nOther line.\n';
   const c = (id, quote, line, body, extra = {}) => ({ id, anchor: { quote, prefix: '', suffix: '', lineStart: line, lineEnd: line }, body, status: 'submitted', replies: [], ...extra });
   const p = lib.buildAgentPrompt({ mdPath: '/w/d/a.md', cwd: '/w', cliPath: '/w/.claude/skills/md-review/mdreview.mjs', source: src, comments: [c('c_1', 'bold words here', 3, 'Fix.'), c('c_2', 'Other line.', 1, 'Why?', { kind: 'question' })] });
-  assert.match(p, /^MD Review: 2 comments on d\/a\.md \(\/w\/d\/a\.md\)\.$/m);
+  assert.match(p, /^<md_review file="d\/a\.md" path="\/w\/d\/a\.md" cwd="\/w" threads="2">$/m);
   assert.match(p, /run in \/w exactly as written:\n {2}node \.claude\/skills\/md-review\/mdreview\.mjs apply "d\/a\.md" <actions>/);
   assert.match(p, /^ {4}3 \| Plain \*\*bold words\*\* here\.$/m, 'found through the markup');
   assert.match(p, /^ {4}5 \| Other line\.$/m, 'a stale line hint still finds the line');

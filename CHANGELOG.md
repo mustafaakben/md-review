@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Leaner messages to Claude, with the selection marked
+
+- Sending to a connected session no longer repeats everything every round. The full instructions go to a session once; after that each message carries a one-line reminder of the `apply` command. A thread the session has seen before is sent as a follow-up: the reviewer's earlier messages and Claude's own replies shrink to their id and first eight words (`[r_…] Claude: **Option B** (tighter, keeps …`), only messages Claude hasn't seen go in full (marked `new="true"`), and the source lines are left out unless they changed since the last send. In a three-round thread on one paragraph, rounds two and three are about 62% smaller, and they no longer grow with the thread. If Claude has lost a thread from its context, the CLI's `context` command prints it whole, and the message says so.
+- Messages are now in tagged blocks: `<instructions>`, and per thread `<request>`, `<user_selected_text>`, `<context>` and `<message>`. `<user_selected_text>` is exactly what you highlighted, never cut short (it used to be cut at 90 characters), and is marked as the scope of the edit; `<context>` holds the source lines around it, for meaning and for copying the text to replace. The request and the selection are sent whole in every round.
+- What a session has seen is recorded in the thread's `delivery` (its session id, the message ids and a hash of the source lines). A different session, an edited message and **Copy prompt** always get the full thread.
+
 ### Comments no longer get stuck behind a leftover lock
 
 - On Windows in a synced folder (Dropbox, OneDrive), saving a comment could leave its `.comments.json.lock` behind: the sync client briefly opens each new file, so the single attempt to delete the lock failed with EPERM. Because VS Code was still running, the lock was never treated as abandoned, and every later write from the CLI or an agent failed with "Comments are being updated by another process" until the window was reloaded. Now the lock's delete is retried, a lock that can't be removed no longer turns a successful save into an error, and a lock from this machine older than 10 seconds is recovered even if its owner is alive (a save takes milliseconds). Locks from other machines are still never touched. The remaining error names the lock file to delete. Tested end to end on Windows 11 in a Dropbox folder.

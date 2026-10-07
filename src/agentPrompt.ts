@@ -16,6 +16,18 @@ export interface PromptOptions {
   suggest?: boolean;
   /** The Markdown as it is now: each comment's source lines go into the prompt, so the agent needn't look them up. */
   source?: string;
+  /** The session already has the full instructions from an earlier send: repeat only a one-line reminder. */
+  primed?: boolean;
+  /** What the session was already sent, per thread id (from the thread's last delivery to it). */
+  known?: Record<string, Known>;
+  /** Author name of the session's own replies ("Claude"), which it has seen by writing them. */
+  agentName?: string;
+}
+
+/** A thread as the session last received it: the message ids it saw and a hash of the source lines. */
+export interface Known {
+  seen: string[];
+  lines?: string;
 }
 
 export interface FolderPromptOptions {
@@ -116,11 +128,34 @@ export function quoteLines(source: string, c: Pick<Comment, 'anchor' | 'scope'>,
   return out;
 }
 
+/** A short, stable fingerprint (FNV-1a) of the source lines a thread was sent with. */
+export function linesHash(lines: string[]): string {
+  let h = 0x811c9dc5;
+  const s = lines.join('\n');
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}
+
+/** What a session holds after receiving `c` with `source`: recorded on delivery, passed back as `known`. */
+export function knownAfterSend(c: Comment, source: string): Known {
+  return { seen: [c.id, ...c.replies.map(r => r.id)], lines: linesHash(quoteLines(source, c)) };
+}
+
+const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** The opening words of a message the session already has: enough to recognise it. */
+export function preview(s: string, n = 8): string {
+  const w = flat(s).split(' ');
+  return w.length > n ? w.slice(0, n).join(' ') + ' …' : w.join(' ');
+}
+
 /**
  * The short prompt, when the agent has the CLI and the source lines are known:
  * one `apply` command handles every thread, so the agent needs a single step.
- * Everything it needs is inline, and rules are included only when a comment
- * uses them (a shorter prompt is also less for the model to think over).
+ * Everything it needs is inline, in tagged blocks so the request, the exact
+ * selection and the surrounding lines can't be confused. The full instructions
+ * go to a session once; after that a one-line reminder. A thread the session
+ * has seen before carries only what's new: earlier messages shrink to their id
+ * and opening words, and the source lines are left out unless they changed.
  */
 function fastPrompt(o: PromptOptions, cli: string): string {
   const md = rel(o.cwd, o.mdPath);
@@ -130,31 +165,63 @@ function fastPrompt(o: PromptOptions, cli: string): string {
     has((c) => c.kind === 'question') && '- [question]: answer with reply; don\'t edit (resolve instead if the answer needs no change).',
     has((c) => c.kind === 'praise') && '- [praise]: nothing to change; resolve with a short note.',
     has((c) => !!c.severity) && '- major before minor; nit is optional polish.',
-    has((c) => c.scope === 'section') && '- [whole section]: the quote is a heading; the comment is about the section under it.',
-    has((c) => c.scope === 'document') && '- [whole document]: about the whole file; there is no quote.',
-    has((c) => !!c.suggestion && !c.suggestion.appliedAt) && '- suggestion: what the quote should become; use it unless the comment says otherwise.',
+    has((c) => c.scope === 'section') && '- [whole section]: the selection is a heading; the comment is about the section under it.',
+    has((c) => c.scope === 'document') && '- [whole document]: about the whole file; there is no selection.',
+    has((c) => !!c.suggestion && !c.suggestion.appliedAt) && '- <suggestion>: what the selection should become; use it unless the request says otherwise.',
   ].filter(Boolean) as string[];
-  const out = [
-    `MD Review: ${plural(cs.length, 'comment')} on ${md} (${o.mdPath}).`,
-    `Handle them all with ONE command, run in ${o.cwd} exactly as written:`,
-    `  ${cli} apply "${md}" <actions>`,
-    'Actions, repeated as needed:',
-    '  fix <id> "<old>" "<new>" "<note>"   edit and resolve. old: the exact source text to replace, from the lines below (markup included, just enough to be unique). new: its replacement. Keep it minimal.',
-    '  reply <id> "<text>"                 an answer, or your question if the request is unclear (stays open)',
-    '  resolve <id> "<note>"               nothing to change',
-    ...(has(c => c.replies.some(r => r.parentId)) ? ['  reply-to <thread-id> <message-id> "<text>"  answer a specific message; preserve the parent relationships shown below.'] : []),
-    ...rules,
-    "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again, or edit the file yourself and run resolve. Then stop: no summary.",
-    '',
-  ];
-  for (const c of cs) {
-    const quote = c.anchor.quote.replace(/\s+/g, ' ');
-    const what = c.scope === 'document' ? '' : ` "${quote.length > 90 ? quote.slice(0, 87) + '…' : quote}"`;
-    out.push(`${c.id}${tags(c)}:${what} -> ${c.body.replace(/\s+/g, ' ')}`);
-    if (c.suggestion && !c.suggestion.appliedAt) out.push(`    suggestion: "${c.suggestion.text.replace(/\s+/g, ' ')}"`);
-    out.push(...quoteLines(o.source!, c));
-    for (const r of c.replies) out.push(`    [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${r.body.replace(/\s+/g, ' ')}`);
+  const nested = has(c => c.replies.some(r => r.parentId));
+  const out = [`<md_review file="${md}" path="${o.mdPath}" cwd="${o.cwd}" threads="${cs.length}">`];
+  if (o.primed) {
+    out.push(
+      '<instructions>',
+      `Same MD Review instructions as before. One command, run in ${o.cwd}: ${cli} apply "${md}" then fix <id> "<old>" "<new>" "<note>" | reply <id> "<text>" | resolve <id> "<note>"${nested ? ' | reply-to <thread-id> <message-id> "<text>"' : ''}, repeated. Edit only <user_selected_text>. Don't read the files; no summary.`,
+      `Messages shown as "[id] author: opening words …" were sent to you before; if you no longer have one, \`${cli} context "${md}" <thread-id>\` prints the whole thread.`,
+      ...rules,
+      '</instructions>',
+    );
+  } else {
+    out.push(
+      '<instructions>',
+      `Handle every thread below with ONE command, run in ${o.cwd} exactly as written:`,
+      `  ${cli} apply "${md}" <actions>`,
+      'Actions, repeated as needed:',
+      '  fix <id> "<old>" "<new>" "<note>"   edit and resolve. old: the exact source text to replace, copied from <context> (markup included, just enough to be unique). new: its replacement. Keep it minimal.',
+      '  reply <id> "<text>"                 an answer, or your question if the request is unclear (stays open)',
+      '  resolve <id> "<note>"               nothing to change',
+      ...(nested ? ['  reply-to <thread-id> <message-id> "<text>"  answer a specific message; keep the reply_to relationships shown below.'] : []),
+      '<user_selected_text> is exactly what the reviewer highlighted (no markup): the scope. Change only it unless the <request> asks for more. <context> is the source lines around it, for meaning and for copying <old>.',
+      `Later sends shrink messages you've seen to "[id] author: opening words …", drop unchanged <context>, and mark what's new with new="true"; \`${cli} context "${md}" <thread-id>\` prints a thread whole.`,
+      ...rules,
+      "Don't read the files: everything you need is below. If apply fails, nothing was changed; correct it and run it again, or edit the file yourself and run resolve. Then stop: no summary.",
+      '</instructions>',
+    );
   }
+  for (const c of cs) {
+    const k = o.known?.[c.id];
+    const seen = new Set(k?.seen ?? []);
+    const lines = quoteLines(o.source!, c);
+    // Seen: what this session was sent, or wrote itself. A thread with nothing new goes whole (a resend).
+    const isSeen = (id: string, author: string) => seen.has(id) || (!!o.agentName && author === o.agentName);
+    const follow = !!k && seen.has(c.id) && c.replies.some(r => !isSeen(r.id, r.author));
+    const sameLines = follow && k!.lines === linesHash(lines);
+    const t = tags(c).slice(2, -1);
+    out.push(`<thread id="${c.id}"${t ? ` tags="${t}"` : ''}${follow ? ' follow_up="true"' : ''}>`);
+    // The request and the selection define the task, so they always go whole, even in a follow-up.
+    out.push(`<request author="${c.author}">${flat(c.body)}</request>`);
+    if (c.scope !== 'document' && c.anchor.quote) out.push(`<user_selected_text>${flat(c.anchor.quote)}</user_selected_text>`);
+    if (c.suggestion && !c.suggestion.appliedAt) out.push(`<suggestion>${flat(c.suggestion.text)}</suggestion>`);
+    if (lines.length) {
+      const span = `${lines[0].split('|')[0].trim()}${lines.length > 1 ? `-${lines[lines.length - 1].split('|')[0].trim()}` : ''}`;
+      out.push(sameLines ? `<context lines="${span}" unchanged="true"/>` : `<context lines="${span}">\n${lines.join('\n')}\n</context>`);
+    }
+    for (const r of c.replies) {
+      const to = r.parentId ? ` reply_to="${r.parentId}"` : '';
+      if (follow && isSeen(r.id, r.author)) out.push(`[${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${preview(r.body)}`);
+      else out.push(`<message id="${r.id}"${to} author="${r.author}"${follow ? ' new="true"' : ''}>${flat(r.body)}</message>`);
+    }
+    out.push('</thread>');
+  }
+  out.push('</md_review>');
   return out.join('\n');
 }
 
