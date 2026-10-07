@@ -12,7 +12,10 @@ import { hasUrlScheme, renderParsed, rendererFor, RenderEnv, ResolveImage } from
 import type { WordTargets } from './frontMatter';
 import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
-import { buildAgentPrompt } from './agentPrompt';
+import { buildAgentPrompt, knownAfterSend, Known } from './agentPrompt';
+
+/** Agent sessions ("claude:<id>") that have had the full MD Review instructions in this window. */
+const primedSessions = new Set<string>();
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 import { insideRealRoots, isNetworkPath, realRoots } from './bibliography';
 import * as redlines from './redlines';
@@ -1113,6 +1116,14 @@ export class ReviewSession {
     }
     // The copy the Changes view compares against, taken before the agent can start.
     const before = this.ctx.getText();
+    const binding = this.ctx.agents?.binding();
+    // A session that has had the instructions, or a thread before, gets only what's new.
+    // The clipboard can go anywhere, so it always gets everything.
+    const session = !copy && this.ctx.runAgent && binding ? binding : undefined;
+    const sessionKey = session && `${session.agent}:${session.id}`;
+    const ofSession = (c: store.Comment) => !!session && c.delivery?.session === session.id && (c.delivery.agent ?? 'claude') === session.agent;
+    const known: Record<string, Known> = {};
+    for (const c of comments) if (ofSession(c) && c.delivery!.seen) known[c.id] = { seen: c.delivery!.seen, lines: c.delivery!.lines };
     const prompt = buildAgentPrompt({
       mdPath: this.ctx.mdPath,
       cwd: this.agentCwd(),
@@ -1120,8 +1131,11 @@ export class ReviewSession {
       cliPath: this.cliPath(),
       suggest: this.ctx.suggestMode?.(),
       source: before,
+      primed: !!sessionKey && (primedSessions.has(sessionKey) || data.comments.some(ofSession)),
+      known,
+      agentName: session ? (session.agent === 'codex' ? 'Codex' : 'Claude') : undefined,
     });
-    const deliveryAgent = this.ctx.agents?.binding()?.agent;
+    const deliveryAgent = binding?.agent;
     const deliveryAt = store.now();
     const started = () => {
       // Only threads that are actually waiting on the agent count toward the round.
@@ -1134,9 +1148,12 @@ export class ReviewSession {
               const sent = comments.find(sent => sent.id === c.id);
               // A later edit or reply has not been delivered by this earlier request.
               if (sent && c.body === sent.body && c.reopenedAt === sent.reopenedAt &&
-                c.replies.length === sent.replies.length && c.replies.every((r, i) => r.id === sent.replies[i].id && r.body === sent.replies[i].body)) c.delivery = { at, agent };
+                c.replies.length === sent.replies.length && c.replies.every((r, i) => r.id === sent.replies[i].id && r.body === sent.replies[i].body)) {
+                c.delivery = session ? { at, agent, session: session.id, ...knownAfterSend(sent, before) } : { at, agent };
+              }
             }
           });
+          if (sessionKey) primedSessions.add(sessionKey);
           this.lastSidecarWrite = receipt.written;
           this.sendComments();
         } catch (error) {

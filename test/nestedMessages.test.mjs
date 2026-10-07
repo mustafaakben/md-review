@@ -75,7 +75,7 @@ test('both agent prompt routes identify nested messages and explain targeted rep
   const options={mdPath:'/work/paper.md',cwd:'/work',cliPath:'/work/cli/mdreview.mjs',comments:[c]};
   const fast=buildAgentPrompt({...options,source:'Passage'});
   assert.match(fast,/reply-to <thread-id> <message-id>/);
-  assert.match(fast,/\[r_user reply to r_agent\] Reviewer: Followup/);
+  assert.match(fast,/<message id="r_user" reply_to="r_agent" author="Reviewer">Followup<\/message>/);
   const full=buildAgentPrompt(options);
   assert.match(full,/--parent <message-id>/);
   assert.match(full,/\[r_user reply to r_agent\] Reviewer: Followup/);
