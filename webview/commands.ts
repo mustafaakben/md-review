@@ -26,6 +26,10 @@ export function commandForKey(e: Key, mac: boolean): ReviewCommand | null {
 export function isSaveReply(e: Key, mac: boolean): boolean {
   return e.key === 'Enter' && (mac ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey;
 }
+/** Cmd/Ctrl+Shift+Enter in an open thread: save what's being written there, then send the thread. */
+export function isSendThread(e: Key, mac: boolean): boolean {
+  return e.key === 'Enter' && (mac ? e.metaKey : e.ctrlKey) && e.shiftKey && !e.altKey;
+}
 export function nativeTextHistory(target: EventTarget | null, command: ReviewCommand | null): boolean {
   const el = target as HTMLElement | null;
   return (command === 'undo' || command === 'redo') && !!el && !el.closest('#mdr-canvas') && (el.isContentEditable || /^(INPUT|TEXTAREA)$/.test(el.tagName));

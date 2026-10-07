@@ -885,9 +885,6 @@ button.mdr-chip.on { color: var(--fg); border-color: transparent; background: va
 .mdr-thread-popover footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
 .mdr-thread-popover footer button.danger { color: var(--danger); }
 .mdr-thread-actions button.mdr-primary { background: var(--btn-bg); color: var(--btn-fg); }
-.mdr-thread-send-confirm { margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; }
-.mdr-thread-send-confirm p { margin: 0 0 8px; }
-.mdr-thread-send-confirm button + button { margin-left: 8px; }
 .mdr-compose-actions { flex-wrap: wrap; gap: 6px; }
 .mdr-compose-error { color: var(--danger); font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; }
 /* Comfortable review controls scale independently of document zoom. */

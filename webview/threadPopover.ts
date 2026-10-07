@@ -1,5 +1,5 @@
 // A movable conversation beside its passage, without changing document layout.
-import { isSaveReply } from './commands';
+import { isSaveReply, isSendThread } from './commands';
 import { isMac } from './keys';
 import { popupPosition } from './commentComposer';
 import { clampPopup, resizePopup, type PopupBox } from './popupGeometry';
@@ -29,7 +29,7 @@ export function createThreadPopover(options: Options) {
   el.setAttribute('aria-label', 'Comment thread');
   document.body.appendChild(el);
   let id: string | null = null, composing: string | undefined, editing: string | undefined;
-  let pinned = false, confirmingSend = false;
+  let pinned = false;
   let customBox: PopupBox | null = null;
   let hoverTimer: ReturnType<typeof setTimeout> | undefined, leaveTimer: ReturnType<typeof setTimeout> | undefined;
   let returnFocus: HTMLElement | null = null;
@@ -68,8 +68,7 @@ export function createThreadPopover(options: Options) {
     el.innerHTML = `<header title="Drag to move this comment window"><strong>${esc(c.author)}</strong><span class="mdr-thread-state">${esc(options.status(c.id))}</span>${pinned ? '<button data-thread-action="close" aria-label="Close comment" title="Close comment"></button>' : ''}</header><div class="mdr-thread-scroll">
       <blockquote class="mdr-thread-anchor">${esc(c.anchor.quote)}</blockquote><div data-message-id="${esc(c.id)}">${content(c)}${pinned ? messageActions(c, options.author(), 'data-thread-action', true) : ''}${composing === c.id ? composer : ''}</div>
       ${pinned && c.replies.length ? `<div class="mdr-thread-replies">${orderedReplies(c.id, c.replies).map(({ message: r, depth, parentId }) => `<div class="mdr-message" data-message-id="${esc(r.id)}" data-parent-id="${esc(parentId)}" style="--reply-depth:${Math.min(depth - 1, 3)}">${parentLabel(c, parentId)}<strong>${esc(r.author)}</strong>${content(r)}${messageActions(r, options.author(), 'data-thread-action')}${composing === r.id ? composer : ''}</div>`).join('')}</div>` : ''}
-      ${pinned ? `<div class="mdr-thread-actions">${c.status !== 'resolved' ? `<button class="mdr-primary" data-thread-action="send-thread" title="Send this thread only. Shift-click to send immediately.">Send to ${esc(options.agentName())}</button>` : ''}<button data-thread-action="resolve">${c.status === 'resolved' ? 'Reopen' : 'Resolve'}</button><button data-thread-action="edit">Edit passage</button></div>
-      ${confirmingSend ? `<div class="mdr-thread-send-confirm" role="group" aria-label="Send this thread"><p>Send this thread to ${esc(options.agentName())}?</p><button class="mdr-primary" data-thread-action="send-thread-now">Send now</button><button data-thread-action="cancel-send">Cancel</button></div>` : ''}
+      ${pinned ? `<div class="mdr-thread-actions">${c.status !== 'resolved' ? `<button class="mdr-primary" data-thread-action="send-thread" title="Send this thread only">Send to ${esc(options.agentName())}</button>` : ''}<button data-thread-action="resolve">${c.status === 'resolved' ? 'Reopen' : 'Resolve'}</button><button data-thread-action="edit">Edit passage</button></div>
       <footer><button data-thread-action="sidebar">Open in review pane</button><button data-thread-action="reset-window">Reset window</button><button class="danger" data-thread-action="delete" title="Delete this thread and its replies">Delete thread</button></footer>` : '<footer>Click the passage to open this thread</footer>'}</div>
       ${pinned ? ['n','e','s','w','ne','se','sw','nw'].map(edge => `<div class="mdr-resize-handle mdr-resize-${edge}" data-resize="${edge}" role="separator" tabindex="0" aria-label="Resize comment ${edge}" title="Drag to resize"></div>`).join('') : ''}`;
     el.hidden = false;
@@ -81,13 +80,13 @@ export function createThreadPopover(options: Options) {
   }
   function close(focus = false) {
     clearTimeout(hoverTimer); clearTimeout(leaveTimer); remember();
-    el.hidden = true; id = null; pinned = false; composing = undefined; editing = undefined; confirmingSend = false;
+    el.hidden = true; id = null; pinned = false; composing = undefined; editing = undefined;
     if (focus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
   function show(next: string, pin: boolean, keyboard = false) {
     clearTimeout(hoverTimer); clearTimeout(leaveTimer);
     if (pinned && !pin) return;
-    if (id !== next) { remember(); composing = undefined; editing = undefined; confirmingSend = false; el.replaceChildren(); el.hidden = true; }
+    if (id !== next) { remember(); composing = undefined; editing = undefined; el.replaceChildren(); el.hidden = true; }
     if (pin && !pinned) returnFocus = document.activeElement as HTMLElement;
     id = next; pinned = pin; render();
     if (keyboard) el.querySelector<HTMLButtonElement>('[data-thread-action="close"]')?.focus({ preventScroll: true });
@@ -111,9 +110,7 @@ export function createThreadPopover(options: Options) {
     if (!id) return;
     const link = target.closest<HTMLAnchorElement>('.mdr-message-markdown a');
     if (link) { e.preventDefault(); options.openLink(link.getAttribute('href') || ''); return; }
-    if (action === 'send-thread-now' || (action === 'send-thread' && e.shiftKey)) { const threadId = id; close(); options.sendThread(threadId); return; }
-    if (action === 'send-thread') { confirmingSend = true; render(); el.querySelector<HTMLButtonElement>('[data-thread-action="send-thread-now"]')?.focus({ preventScroll: true }); return; }
-    if (action === 'cancel-send') { confirmingSend = false; render(); return; }
+    if (action === 'send-thread') { const threadId = id; close(); options.sendThread(threadId); return; }
     if (action === 'close') close(true);
     if (action === 'reply') { remember(); composing = button?.dataset.parent || id; editing = undefined; render(); revealComposer(el); }
     if (action === 'cancel-reply') { remember(); composing = undefined; render(); }
@@ -151,8 +148,26 @@ export function createThreadPopover(options: Options) {
       customBox = resizePopup({ left: r.left, top: r.top, width: r.width, height: r.height }, edge, e.key === 'ArrowRight' ? 10 : e.key === 'ArrowLeft' ? -10 : 0, e.key === 'ArrowDown' ? 10 : e.key === 'ArrowUp' ? -10 : 0, document.documentElement.clientWidth, innerHeight); useBox(customBox);
     }
     if (isSaveReply(e, isMac)) { e.preventDefault(); e.stopPropagation(); if (editing) saveEdit(); else send(); }
+    // Send the thread, with whatever is being written in it saved first (the reply or the edit).
+    // Stopping it here keeps VS Code's Cmd+Shift+Enter (Submit review) from also running.
+    if (isSendThread(e, isMac) && id && pinned) {
+      e.preventDefault(); e.stopPropagation();
+      if (editing) saveEdit(); else send();
+      if (options.get(id)?.status === 'resolved') return;
+      const threadId = id; close(); options.sendThread(threadId);
+    }
   });
   document.addEventListener('keydown', e => { if (el.hidden || e.key !== 'Escape') return; e.preventDefault(); e.stopPropagation(); close(true); }, true);
+  // An open thread takes Cmd+Shift+Enter even when focus stayed in the document (a click on a
+  // highlight doesn't move it). Inside the window the handler above runs; another text box keeps its own.
+  document.addEventListener('keydown', e => {
+    if (el.hidden || !pinned || !id || !isSendThread(e, isMac)) return;
+    const t = e.target as HTMLElement;
+    if (el.contains(t) || (/^(INPUT|TEXTAREA)$/.test(t.tagName) && !t.closest('#mdr-canvas'))) return;
+    if (options.get(id)?.status === 'resolved') return;
+    e.preventDefault(); e.stopPropagation();
+    const threadId = id; close(); options.sendThread(threadId);
+  }, true);
   document.addEventListener('pointerdown', e => { if (!el.hidden && !el.contains(e.target as Node) && !(e.target as Element).closest('[data-thread], .mdr-hl')) close(); });
   window.addEventListener('scroll', place, { passive: true }); window.addEventListener('resize', place);
   return { show, close, refresh() { if (id) render(); }, hover(next: string | null, immediate = false) {

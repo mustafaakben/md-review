@@ -314,6 +314,19 @@ test('live: comments saved together go as one message; praise stays a draft; a r
   assert.equal(t.sent.length, 2);
 });
 
+test('live: a reply sent at once (Cmd+Shift+Enter or Send) goes once, not again when the live timer fires', () => {
+  const t = session({ bound: { agent: 'claude', id: 's1' }, delivery: 'live', sessions: [{ agent: 'claude', id: 's1', live: true, updatedAt: 1 }] });
+  t.s.handle({ type: 'addComment', anchor: t.anchor('Riders trust docks.', 3), body: 'One.' });
+  t.flush();
+  const id = lib.store.readSidecar(t.md).comments[0].id;
+  lib.store.mutate(t.md, (d) => lib.store.addReply(d, id, 'Claude', 'Which source?'));
+  t.s.handle({ type: 'reply', id, body: 'Rivera 2021.' });
+  t.s.handle({ type: 'sendToAgent', id });
+  assert.equal(t.sent.length, 2);
+  t.flush();
+  assert.equal(t.sent.length, 2, 'the queued live send was dropped');
+});
+
 test('the session menu lists sessions on request; starting one binds it', async () => {
   const t = session({ sessions: [{ agent: 'claude', id: 's1', live: true, updatedAt: 1 }] });
   t.s.handle({ type: 'listSessions' });

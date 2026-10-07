@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { transformSync } from 'esbuild';
 const sandbox = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(new URL('../webview/commands.ts', import.meta.url), 'utf8'), { loader: 'ts', format: 'cjs' }).code, Object.assign(sandbox, { module: { exports: sandbox.exports } }));
-const { commandForKey, isSaveReply, nativeTextHistory } = sandbox.module.exports;
+const { commandForKey, isSaveReply, isSendThread, nativeTextHistory } = sandbox.module.exports;
 const event = changes => ({ key: '', code: '', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, getModifierState: () => false, ...changes });
 test('Mac Option characters match physical keys and Windows uses Ctrl', () => {
   for (const mac of [true, false]) {
@@ -27,6 +27,9 @@ test('AltGr and extra modifiers never become comment or save commands', () => {
     assert.equal(isSaveReply(event({ ...mod, key: 'Enter' }), mac), true);
     for (const extra of [{ shiftKey: true }, { altKey: true }]) assert.equal(isSaveReply(event({ ...mod, ...extra, key: 'Enter' }), mac), false);
     assert.equal(commandForKey(event({ ...mod, shiftKey: true, altKey: true, key: 'Enter' }), mac), null);
+    // Cmd/Ctrl+Shift+Enter sends an open thread; plain save, Alt, or the other platform's modifier don't.
+    assert.equal(isSendThread(event({ ...mod, shiftKey: true, key: 'Enter' }), mac), true);
+    for (const other of [{ ...mod }, { ...mod, shiftKey: true, altKey: true }, { shiftKey: true, ...(mac ? { ctrlKey: true } : { metaKey: true }) }]) assert.equal(isSendThread(event({ ...other, key: 'Enter' }), mac), false);
   }
 });
 test('comment fields own native undo; the canvas owns its own history', () => {

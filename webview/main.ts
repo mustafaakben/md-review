@@ -6,7 +6,7 @@ import type { Comment, Status } from './commentTypes';
 import type { FromWebview, ToWebview } from '../src/protocol';
 import { createThreadPopover } from './threadPopover';
 import { confirmThreadDelete } from './deleteThread';
-import { commandForKey, isSaveReply, nativeTextHistory, type ReviewCommand } from './commands';
+import { commandForKey, isSaveReply, isSendThread, nativeTextHistory, type ReviewCommand } from './commands';
 import { createLiveEditor, LiveSelection } from './liveEditor';
 import { textMap, capture, locate, wrapRanges, unwrap, Captured } from './anchor';
 import { createSearch } from './search';
@@ -1114,6 +1114,17 @@ function applyTriageFocus() {
 sidebar.addEventListener('keydown', (e) => {
   const cardEl = (e.target as Element).closest('.mdr-card') as HTMLElement | null;
   if (cardEl && pickerKey(e, cardEl)) { e.stopPropagation(); return; }
+  // Cmd/Ctrl+Shift+Enter on a thread: save what's being written in it, then send that thread
+  // (stopped here so VS Code's Cmd+Shift+Enter, Submit review, doesn't run too).
+  if (cardEl && isSendThread(e, isMac)) {
+    e.preventDefault(); e.stopPropagation();
+    const id = cardEl.dataset.id!, target = e.target as Element;
+    if (target.classList.contains('mdr-body-edit')) cardEl.querySelector<HTMLButtonElement>('[data-act="save-body"]')?.click();
+    else if (target.classList.contains('mdr-message-edit')) cardEl.querySelector<HTMLButtonElement>('[data-act="save-message"]')?.click();
+    else sendReply(id, cardEl);
+    if (comments.find(c => c.id === id)?.status !== 'resolved') post({ type: 'sendToAgent', id });
+    return;
+  }
   // Shift or Alt with Ctrl/Cmd+Enter is Submit review / Send to Claude, not "save".
   if (!cardEl || !isSaveReply(e, isMac)) return;
   e.preventDefault(); e.stopPropagation();

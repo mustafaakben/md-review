@@ -1095,6 +1095,8 @@ export class ReviewSession {
   private sendToAgent(ids?: string[], copy = false): void {
     // No session yet: ask for one, and send once it's picked.
     if (!copy && this.needsSession(() => this.sendToAgent(ids))) return;
+    // A live send queued for these threads (a reply just saved) would deliver them a second time.
+    if (!copy) { if (ids) for (const id of ids) this.live.delete(id); else this.live.clear(); }
     const { data, written } = store.mutate(this.ctx.mdPath, (d) => {
       if (ids) {
         for (const id of ids) {

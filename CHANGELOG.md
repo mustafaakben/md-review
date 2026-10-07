@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Send from a thread popup in one click
+
+- **Send to Claude** in a thread popup sends right away. It used to open a second "Send this thread to Claude? Send now / Cancel" box (only Shift-click skipped it), so answering Claude from the popup took three clicks: Save reply, Send to Claude, Send now. Now it's Save reply, then Send to Claude, the same as **Ask Claude** in the review pane.
+- **Cmd+Shift+Enter** (Ctrl+Shift+Enter) in an open thread sends it: in a reply you're writing (to the comment or to any reply), it saves the reply and sends the thread in one step; with the thread just open, it sends it as it is. It works in the thread popup, even when the cursor is still in the document, and on a thread card in the review pane. It used to reach VS Code's own Cmd+Shift+Enter, Submit review, which submits drafts but sends nothing. Outside a thread it is still Submit review. A resolved thread isn't sent. Tested in VS Code: replies to replies, a thread opened without typing, and review-pane cards.
+- With live delivery on, a reply sent at once (by Send to Claude or Cmd+Shift+Enter) went to Claude twice: once right away and again when the live timer for the saved reply fired. A send now cancels the live send queued for the same threads.
+
 ### Leaner messages to Claude, with the selection marked
 
 - Sending to a connected session no longer repeats everything every round. The full instructions go to a session once; after that each message carries a one-line reminder of the `apply` command. A thread the session has seen before is sent as a follow-up: the reviewer's earlier messages and Claude's own replies shrink to their id and first eight words (`[r_…] Claude: **Option B** (tighter, keeps …`), only messages Claude hasn't seen go in full (marked `new="true"`), and the source lines are left out unless they changed since the last send. In a three-round thread on one paragraph, rounds two and three are about 62% smaller, and they no longer grow with the thread. If Claude has lost a thread from its context, the CLI's `context` command prints it whole, and the message says so.
