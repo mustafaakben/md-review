@@ -59,13 +59,13 @@ test('CLI: a section thread shows the whole section; a document thread has no li
   const sec = JSON.parse(run('context', 'p.md', 'c_sec', '--json'));
   assert.deepEqual([sec.found, sec.lineStart, sec.lineEnd], [true, 3, 14], 'through ### Data, up to ## Results; the fenced # is not a heading');
   const text = run('context', 'p.md', 'c_sec');
-  assert.match(text, /\(whole section, question\)/);
-  assert.match(text, /section: "Methods"/);
+  assert.match(text, /tags="whole section, question"/);
+  assert.match(text, /<user_selected_text section="true">Methods<\/user_selected_text>/);
   assert.match(text, /answer it in a reply/);
   const doc = JSON.parse(run('context', 'p.md', 'c_doc', '--json'));
   assert.deepEqual([doc.found, doc.lineStart, doc.source.length], [true, 0, 0]);
-  assert.match(run('context', 'p.md', 'c_doc'), /about: {3}the whole document/);
-  assert.match(run('next', 'p.md'), /^\[c_doc\] SUBMITTED/);
+  assert.match(run('context', 'p.md', 'c_doc'), /<about>the whole document<\/about>/);
+  assert.match(run('next', 'p.md'), /^<thread id="c_doc" file="p\.md" where="p\.md" status="submitted" tags="whole document, major">$/m);
 });
 
 test('CLI: a section ends at the next heading, not at fences, rules or deeper headings', () => {

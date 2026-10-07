@@ -12,10 +12,7 @@ import { hasUrlScheme, renderParsed, rendererFor, RenderEnv, ResolveImage } from
 import type { WordTargets } from './frontMatter';
 import { applyInlineEdit, InlineMapError, BlockKind, RenderedParse } from './inlineEdit';
 import { EditHistory, HistoryError } from './editHistory';
-import { buildAgentPrompt, knownAfterSend, Known } from './agentPrompt';
-
-/** Agent sessions ("claude:<id>") that have had the full MD Review instructions in this window. */
-const primedSessions = new Set<string>();
+import { buildAgentPrompt, knownAfterSend, Known, primedSessions } from './agentPrompt';
 import { buildReviewPrompt, findPreset, listReviewers } from './reviewPresets';
 import { insideRealRoots, isNetworkPath, realRoots } from './bibliography';
 import * as redlines from './redlines';

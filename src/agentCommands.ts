@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { awaitsAgent, readSidecar } from './commentStore';
-import { buildFolderPrompt } from './agentPrompt';
+import { buildFolderPrompt, primedSessions } from './agentPrompt';
 import { agentHostFor, pickSession } from './agentRun';
 import { MdReviewEditorProvider } from './editorProvider';
 
@@ -85,7 +85,12 @@ async function sendReviews(context: vscode.ExtensionContext, folder: vscode.Uri,
   const host = agentHostFor(context, cwd, path.basename(cwd));
   if (!(await pickSession(host, path.basename(cwd)))) return null;
   const local = path.join(cwd, '.claude', 'skills', 'md-review', 'mdreview.mjs');
+  // A session that has had the instructions gets a reminder; `next --session` shortens what it was shown.
+  const bound = host.binding();
+  const key = bound && `${bound.agent}:${bound.id}`;
   const prompt = buildFolderPrompt({
+    session: bound?.agent === 'claude' ? bound.id : undefined,
+    primed: !!key && primedSessions.has(key),
     folder: folder.fsPath,
     cwd,
     files,
@@ -101,6 +106,7 @@ async function sendReviews(context: vscode.ExtensionContext, folder: vscode.Uri,
     void vscode.window.showErrorMessage((e as Error).message);
     return null;
   }
+  if (status !== null && key) primedSessions.add(key);
   if (status !== null) for (const [mdPath, text] of before) if (text !== undefined) MdReviewEditorProvider.snapshotSent(context, mdPath, text);
   return status;
 }

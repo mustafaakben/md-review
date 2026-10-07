@@ -25,12 +25,8 @@ node .claude/skills/md-review/mdreview.mjs list    [paths…] --status submitted
 
 ## Loop
 
-1. Run `next` (on the file or folder the user named, or the project root).
-   It prints the comment, its thread, and the source lines its quote is on,
-   marked with `>`.
-2. Make a minimal, targeted edit to the Markdown that addresses the comment.
-   Don't reformat anything else. The quote is the *rendered* text, so the
-   source may have `**bold**`, `[links](…)`, or citations inside it.
+1. Run `next` (on the file or folder the user named, or the project root). It prints a `<thread>` block: the `<request>`, the `<user_selected_text>` (exactly what the reviewer highlighted), the source lines around it in `<context>` (the selected ones marked with `>`), and the messages. With `--session <id>` (MD Review's Send all adds it), a thread you were shown before comes back as `follow_up="true"`: messages you have seen shrink to `[id] author: opening words …` and `new="true"` marks what's new; `context` prints a thread whole.
+2. Make a minimal, targeted edit to the Markdown that addresses the comment. Change only the selected text unless the request asks for more, and don't reformat anything else. The selection is the *rendered* text, so the source may have `**bold**`, `[links](…)`, or citations inside it.
 3. `resolve` it with a one-line reply saying what you changed. If the request
    is unclear or needs the author's judgment, `reply` with your question
    instead and leave it open. `next` skips threads whose last reply is yours,

@@ -38,7 +38,14 @@ export interface FolderPromptOptions {
   files: { mdPath: string; open: number }[];
   cliPath: string;
   suggest?: boolean;
+  /** The bound session's id: `next --session <id>` then shortens what that session was shown before. */
+  session?: string;
+  /** The session already has the full instructions: a short reminder instead. */
+  primed?: boolean;
 }
+
+/** Agent sessions ("claude:<id>") that have had the full MD Review instructions in this window. */
+export const primedSessions = new Set<string>();
 
 function rel(cwd: string, p: string): string {
   const r = path.relative(cwd, p);
@@ -266,27 +273,42 @@ export function buildAgentPrompt(o: PromptOptions): string {
 
 /**
  * Every open review under a folder. The comments themselves aren't inlined:
- * the agent pulls them one at a time with `next`, which also shows the source
- * lines each quote is on.
+ * the agent pulls them one at a time with `next`, which prints each as the same
+ * tagged <thread> block a Send puts inline. With the session's id, `next`
+ * shortens what that session was shown before; a primed session gets a
+ * reminder instead of the instructions.
  */
 export function buildFolderPrompt(o: FolderPromptOptions): string {
   const here = path.relative(o.cwd, o.folder) === '';
   const folder = here ? '.' : rel(o.cwd, o.folder);
   const total = o.files.reduce((n, f) => n + f.open, 0);
   const cli = cliCommand(o.cwd, o.cliPath);
-  return [
-    `Please address the ${plural(total, 'open MD Review comment')} in ${plural(o.files.length, 'file')} ${here ? 'in this folder' : `under ${folder}`}:`,
-    ...o.files.map((f) => `- ${rel(o.cwd, f.mdPath)} (${f.open} open)`),
-    '',
-    `Each file's comments live beside it in <name>.md.comments.json (MD Review sidecar, schema v1). ${ANCHOR_NOTE}`,
-    '',
-    ...steps('that file', o.suggest, cli),
-    '',
-    'Work through them with the helper CLI, which does the sidecar writes safely:',
-    `  ${cli} next "${folder}"    # the next open comment, with the source lines its quote is on`,
-    `  ${cli} reply <file.md> <id> "your question"`,
-    `  ${cli} resolve <file.md> <id> "what you changed"`,
-    ...(o.suggest ? [`  ${cli} suggest <file.md> <id> "replacement for the quote" "why"`] : []),
-    `Repeat \`next\` until it says there are no open comments (it skips threads whose last reply is yours), then summarize what you changed and which threads you left open.`,
-  ].join('\n');
+  const next = `${cli} next "${folder}"${o.session ? ` --session ${o.session}` : ''}`;
+  const act = o.suggest
+    ? `\`${cli} suggest <file.md> <id> "<replacement for the whole selection>" "<why>"\` (plain text on one line; don't edit the file), or reply/resolve when no text change fits`
+    : `\`${cli} fix <file.md> <id> "<old>" "<new>" "<note>"\` (old: exact source text copied from <context>, markup included, just enough to be unique; it edits and resolves), \`reply <file.md> <id> "<text>"\` to answer or ask, \`resolve <file.md> <id> "<note>"\` when nothing changes`;
+  const out = [
+    `<md_review folder="${folder}" cwd="${o.cwd}" threads="${total}">`,
+    '<files>',
+    ...o.files.map((f) => `${rel(o.cwd, f.mdPath)} (${f.open} open)`),
+    '</files>',
+    '<instructions>',
+  ];
+  if (o.primed) {
+    out.push(
+      `Same MD Review instructions as before. In ${o.cwd}, run \`${next}\` for each open thread, act on it with ${o.suggest ? 'suggest' : 'fix, reply or resolve'}, and repeat until it says there are no open comments. Edit only <user_selected_text>. Then summarize in a line or two.`,
+      `Messages shown as "[id] author: opening words …" you have seen before; \`${cli} context <file.md> <thread-id>\` prints a thread whole.`,
+    );
+  } else {
+    out.push(
+      `Work in ${o.cwd}. Run \`${next}\` to get the next open thread as a <thread> block, act on it, and repeat until it says there are no open comments.`,
+      '<user_selected_text> is exactly what the reviewer highlighted (no markup): the scope. Change only it unless the <request> asks for more. <context> is the source lines around it (">" marks the lines the selection is on), for meaning and for copying <old>.',
+      `Act with ${act}. To answer one message: \`${cli} reply <file.md> <thread-id> "<text>" --parent <message-id>\`.`,
+      '<note> says how to treat questions and praise; tags: major before minor, nit is optional; section means the comment covers the section under the heading; a document thread has no selection.',
+      `A thread you were shown before comes back with follow_up="true": messages you have seen shrink to "[id] author: opening words …", and new="true" marks what's new. \`${cli} context <file.md> <thread-id>\` prints a thread whole.`,
+      "Don't read the sidecar files; `next` gives you everything. When done, summarize what you changed and which threads you left open, in a line or two.",
+    );
+  }
+  out.push('</instructions>', '</md_review>');
+  return out.join('\n');
 }

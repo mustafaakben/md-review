@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 const lib = createRequire(import.meta.url)('../dist/lib.cjs');
 
 const LINE = 'Leadership scholarship offers well-developed accounts of how leaders grow through demanding experience (DeRue et al., 2012), and how they establish standards (Brown et al., 2005). **AI** unsettles these accounts.';
@@ -123,4 +124,47 @@ test('a session gets the instructions once, then only what is new; another sessi
   const copied = q.messages.filter(m => m.type === 'agentPrompt').at(-1).prompt;
   assert.match(copied, /Handle every thread below/);
   assert.doesNotMatch(copied, /follow_up="true"/);
+});
+
+test('Send all: the folder prompt passes the session to next, and a primed session gets a reminder', () => {
+  const o = { folder: '/w', cwd: '/w', files: [{ mdPath: '/w/a.md', open: 2 }], cliPath: '/x/mdreview.mjs', session: 's1' };
+  const full = lib.buildFolderPrompt(o);
+  assert.match(full, /^<md_review folder="\." cwd="\/w" threads="2">\n<files>\na\.md \(2 open\)\n<\/files>\n<instructions>$/m);
+  assert.match(full, /`node "\/x\/mdreview\.mjs" next "\." --session s1`/);
+  assert.match(full, /<user_selected_text> is exactly what the reviewer highlighted/);
+  assert.match(full, /fix <file\.md> <id> "<old>" "<new>" "<note>"/);
+  const short = lib.buildFolderPrompt({ ...o, primed: true });
+  assert.match(short, /^Same MD Review instructions as before\. In \/w, run `node "\/x\/mdreview\.mjs" next "\." --session s1`/m);
+  assert.ok(short.length < full.length / 2, `${short.length} vs ${full.length}`);
+  assert.doesNotMatch(lib.buildFolderPrompt({ ...o, session: undefined }), /--session/);
+  assert.match(lib.buildFolderPrompt({ ...o, suggest: true }), /suggest <file\.md> <id> "<replacement for the whole selection>"/);
+});
+
+test('next --session: a thread the session was shown comes back with only what is new', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mdreview-next-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, 'm.md'), SRC);
+  const c = { ...thread([{ id: 'r_a', author: 'Claude', body: 'Option A: one long rewrite of the whole passage for the reviewer.', createdAt: '1' }]), createdAt: '0', submittedAt: '0', resolvedAt: null };
+  c.replies.push({ id: 'r_b', author: 'Moose', parentId: 'r_a', body: 'Shorter, please.', createdAt: '2' });
+  fs.writeFileSync(path.join(dir, 'm.md.comments.json'), JSON.stringify({ schemaVersion: 1, file: 'm.md', comments: [c] }));
+  const cli = path.resolve('cli/mdreview.mjs');
+  const next = (...a) => execFileSync(process.execPath, [cli, 'next', '.', ...a], { cwd: dir, encoding: 'utf8' });
+  const first = next('--session', 's1');
+  assert.doesNotMatch(first, /follow_up="true"/);
+  assert.ok(first.includes(`<user_selected_text>${SELECTED}</user_selected_text>`));
+  assert.match(first, /<message id="r_a" author="Claude">Option A: one long rewrite of the whole passage for the reviewer\.<\/message>/);
+  assert.match(first, /^> 3 \| Leadership/m);
+  assert.deepEqual(lib.store.readSidecar(path.join(dir, 'm.md')).comments[0].delivery.seen, ['c_1', 'r_a', 'r_b']);
+  // The reviewer answers again; the same session sees only that in full.
+  lib.store.mutate(path.join(dir, 'm.md'), d => d.comments[0].replies.push({ id: 'r_c', author: 'Moose', body: 'And keep the citation.', createdAt: '3' }));
+  const again = next('--session', 's1');
+  assert.match(again, /follow_up="true"/);
+  assert.match(again, /^\[r_a\] Claude: Option A: one long rewrite of the whole …$/m);
+  assert.match(again, /^\[r_b reply to r_a\] Moose: Shorter, please\.$/m);
+  assert.match(again, /<message id="r_c" author="Moose" new="true">And keep the citation\.<\/message>/);
+  assert.ok(again.includes(`<user_selected_text>${SELECTED}</user_selected_text>`), 'the selection always goes whole');
+  // Another session, and `context`, get the thread whole.
+  lib.store.mutate(path.join(dir, 'm.md'), d => d.comments[0].replies.push({ id: 'r_d', author: 'Moose', body: 'One more.', createdAt: '4' }));
+  assert.doesNotMatch(next('--session', 's2'), /follow_up="true"/);
+  assert.doesNotMatch(execFileSync(process.execPath, [cli, 'context', 'm.md', 'c_1'], { cwd: dir, encoding: 'utf8' }), /follow_up="true"|^\[r_/m);
 });

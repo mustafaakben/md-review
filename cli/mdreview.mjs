@@ -3,7 +3,7 @@
 //
 //   node mdreview.mjs list    [paths…] [--status draft|submitted|resolved] [--json]
 //   node mdreview.mjs summary [paths…]
-//   node mdreview.mjs next    [paths…] [--all] [--json]
+//   node mdreview.mjs next    [paths…] [--all] [--session <id>] [--json]
 //   node mdreview.mjs context <file.md> <id> [--lines 2] [--json]
 //   node mdreview.mjs show    <file.md> <id>
 //   node mdreview.mjs reply   <file.md> <id> "<text>" [--author Claude] [--parent <message-id>]
@@ -23,6 +23,8 @@
 // folder). `next` prints the first open comment with the source lines its quote
 // is on, so an agent can loop: next -> edit -> reply/resolve -> next. It skips
 // threads whose last reply is from --author (waiting on the reviewer) unless --all.
+// With --session, a thread that session was shown before comes back as a follow-up:
+// messages it has seen (or wrote) shrink to their id and opening words.
 // `comment` is for an agent reviewing first: it adds a draft from --author,
 // marked origin "agent", for the reviewer to keep, act on, or dismiss;
 // `review-done` then tells the viewer the review is finished.
@@ -54,6 +56,7 @@ const bool = (name) => {
 const status = flag('status');
 const author = flag('author', 'Claude');
 const parentArg = flag('parent');
+const sessionArg = flag('session');
 const around = Math.max(0, Number(flag('lines', 2)) || 0);
 const asJson = bool('json');
 const force = bool('force');
@@ -661,23 +664,43 @@ function describe(c) {
   for (const r of c.replies || []) s += `\n    ↳ [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author} (${r.createdAt}): ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
   return s;
 }
-function describeWithContext(c, ctx) {
+const flat = (t) => String(t ?? '').replace(/\s+/g, ' ').trim();
+/** The opening words of a message the session already has: enough to recognise it. */
+function preview(t, n = 8) {
+  const w = flat(t).split(' ');
+  return w.length > n ? w.slice(0, n).join(' ') + ' …' : w.join(' ');
+}
+/**
+ * A thread as tagged blocks, the same shape as the editor's Send: the request,
+ * exactly what the reviewer selected, and the source lines around it. With
+ * `seen` (the ids a session was shown before), a thread with something new is
+ * a follow-up: messages in `seen`, or by --author, shrink to their opening words.
+ */
+function describeWithContext(c, ctx, seen) {
   const where = ctx.lineStart
     ? `${ctx.file}:${ctx.lineStart}${ctx.lineEnd !== ctx.lineStart ? `-${ctx.lineEnd}` : ''}`
     : ctx.file;
   const tags = tagsOf(c);
-  let s = `[${c.id}] ${String(c.status).toUpperCase()} ${where} ${c.author}${tags.length ? ` (${tags.join(', ')})` : ''}\n  comment: ${c.body}`;
-  if (c.scope === 'document') s += '\n  about:   the whole document';
-  else s += `\n  ${c.scope === 'section' ? 'section:' : 'quote:  '} "${c.anchor?.quote}"`;
-  if (Object.hasOwn(KIND_HINT, c.kind ?? '')) s += `\n  (${KIND_HINT[c.kind]})`;
-  if (c.suggestion) s += `\n  suggestion: replace the quote with "${c.suggestion.text}"${sugState(c.suggestion)}`;
-  for (const r of c.replies || []) s += `\n    ↳ [${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${r.body}${r.suggestion ? ` [suggests "${r.suggestion.text}"${sugState(r.suggestion)}]` : ''}`;
-  if (!ctx.found) s += `\n  (quote not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''})`;
+  const known = (r) => seen.has(r.id) || r.author === author;
+  const follow = !!seen && seen.has(c.id) && (c.replies || []).some((r) => !known(r));
+  const out = [`<thread id="${c.id}" file="${ctx.file}" where="${where}" status="${c.status}"${tags.length ? ` tags="${tags.join(', ')}"` : ''}${follow ? ' follow_up="true"' : ''}>`];
+  out.push(`<request author="${c.author}">${flat(c.body)}</request>`);
+  if (c.scope === 'document') out.push('<about>the whole document</about>');
+  else out.push(`<user_selected_text${c.scope === 'section' ? ' section="true"' : ''}>${flat(c.anchor?.quote)}</user_selected_text>`);
+  if (Object.hasOwn(KIND_HINT, c.kind ?? '')) out.push(`<note>${KIND_HINT[c.kind]}</note>`);
+  if (c.suggestion) out.push(`<suggestion>${flat(c.suggestion.text)}${sugState(c.suggestion)}</suggestion>`);
+  if (!ctx.found) out.push(`<note>selection not found in the source as-is${ctx.lineStart ? '; showing the stored line hint' : ''}</note>`);
   if (ctx.source.length) {
     const w = String(ctx.source.at(-1).line).length;
-    s += '\n' + ctx.source.map((l) => `${l.quoted ? '>' : ' '} ${String(l.line).padStart(w)} | ${l.text}`).join('\n');
+    out.push(`<context lines="${ctx.source[0].line}-${ctx.source.at(-1).line}" marked=">">`, ...ctx.source.map((l) => `${l.quoted ? '>' : ' '} ${String(l.line).padStart(w)} | ${l.text}`), '</context>');
   }
-  return s;
+  for (const r of c.replies || []) {
+    const sug = r.suggestion ? ` [suggests "${flat(r.suggestion.text)}"${sugState(r.suggestion)}]` : '';
+    if (follow && known(r)) out.push(`[${r.id}${r.parentId ? ` reply to ${r.parentId}` : ''}] ${r.author}: ${preview(r.body)}`);
+    else out.push(`<message id="${r.id}"${r.parentId ? ` reply_to="${r.parentId}"` : ''} author="${r.author}"${follow ? ' new="true"' : ''}>${flat(r.body)}${sug}</message>`);
+  }
+  out.push('</thread>');
+  return out.join('\n');
 }
 // Waiting on us: submitted, and our reply isn't the last word (or the reviewer
 // reopened the thread after it). Same rule as awaitsAgent() in the extension.
@@ -979,11 +1002,18 @@ switch (cmd) {
     const { md, c } = open[0];
     if (awaits(c)) claim(md, c.id); // not a thread that's waiting on the reviewer (--all)
     const ctx = contextOf(md, c);
+    const agentKind = agentArg === 'codex' ? 'codex' : 'claude';
+    const seenBefore = sessionArg && c.delivery?.session === sessionArg && (c.delivery.agent ?? 'claude') === agentKind ? new Set(c.delivery.seen || []) : null;
+    // What this session has now been shown: its next `next` on the thread carries only what's new.
+    if (sessionArg && !asJson) mutate(md, (d) => {
+      const t = d.comments.find((x) => x.id === c.id);
+      if (t) t.delivery = { at: now(), agent: agentKind, session: sessionArg, seen: [t.id, ...(t.replies || []).map((r) => r.id)] };
+    });
     if (asJson) {
       console.log(JSON.stringify({ comment: c, ...ctx, remaining: open.length - 1, waiting }, null, 2));
       break;
     }
-    console.log(describeWithContext(c, ctx));
+    console.log(describeWithContext(c, ctx, seenBefore));
     const more = open.length - 1;
     console.log(`\n${more ? `${more} more open after this one.` : 'This is the last open comment.'}${also} When done: reply/resolve "${ctx.file}" ${c.id}`);
     break;

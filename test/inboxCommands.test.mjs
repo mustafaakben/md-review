@@ -205,8 +205,8 @@ test("Send All: each workspace folder's open reviews go into the session bound t
   assert.equal(calls.terminals.length, 0, 'no new process: the sessions are running');
   const [a] = await arrived(inboxOne);
   const [b] = await arrived(inboxTwo);
-  assert.match(a, /- a\.md \(1 open\)/);
-  assert.match(b, /- docs\/b\.md \(1 open\)/);
+  assert.match(a, /^a\.md \(1 open\)$/m);
+  assert.match(b, /^docs\/b\.md \(1 open\)$/m);
   assert.deepEqual(calls.info, ["Sent the open reviews in one, two, each to its folder's session."]);
   inboxOne.length = inboxTwo.length = 0;
 });
@@ -278,7 +278,7 @@ test('no session bound: the one started with MD Review\'s hook is taken; otherwi
   state.folders = [four];
   await sendWorkspaceToClaude(context);
   assert.equal(calls.quickPicks.length, 0, 'no question asked');
-  assert.match((await arrived(hooked))[0], /- d\.md \(1 open\)/);
+  assert.match((await arrived(hooked))[0], /^d\.md \(1 open\)$/m);
   assert.equal(context.workspaceState.get(`mdReview.agent.binding:${four}`).id, '44444444-0000-4000-8000-000000000004');
 
   const five = mkroot('five');
@@ -297,7 +297,7 @@ test('no session bound: the one started with MD Review\'s hook is taken; otherwi
   reset();
   state.quickPick = (items) => items.find((i) => i.detail === '55555555-0000-4000-8000-00000000000b');
   await sendWorkspaceToClaude(context);
-  assert.match((await arrived(b))[0], /- e\.md \(1 open\)/);
+  assert.match((await arrived(b))[0], /^e\.md \(1 open\)$/m);
   assert.equal(a.length, 0);
   state.quickPick = undefined;
 });

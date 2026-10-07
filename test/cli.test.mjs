@@ -111,7 +111,7 @@ test('context finds the quote in the source despite markup and stale hints', () 
   const gone = ctx('c_gone');
   assert.equal(gone.found, false);
   assert.equal(gone.lineStart, 5, 'falls back to the stored hint');
-  assert.match(run(['context', 'ch1/paper.md', 'c_gone']), /quote not found in the source as-is/);
+  assert.match(run(['context', 'ch1/paper.md', 'c_gone']), /<note>selection not found in the source as-is; showing the stored line hint<\/note>/);
 
   const text = run(['context', 'ch1/paper.md', 'c_bold', '--lines', '1']);
   assert.match(text, /^> 3 \| Riders/m);
@@ -137,7 +137,8 @@ test('next walks open comments in order and skips ones waiting on the reviewer',
   assert.equal(next('ch2', '--all').comment.id, 'c_asked');
 
   const text = run(['next', '--all', 'ch1']);
-  assert.match(text, /^\[c_tags\] SUBMITTED ch1\/paper\.md:7 Reviewer/m);
+  assert.match(text, /^<thread id="c_tags" file="ch1\/paper\.md" where="ch1\/paper\.md:7" status="submitted">$/m);
+  assert.match(text, /^<request author="Reviewer">/m);
   assert.match(text, /This is the last open comment\./);
 });
 
@@ -184,12 +185,10 @@ test('folder prompt lists files and drives the next loop', () => {
     ],
     cliPath: '/ext/cli/mdreview.mjs',
   });
-  assert.match(p, /^Please address the 3 open MD Review comments in 2 files under papers:/);
-  assert.match(p, /^- papers\/a\.md \(2 open\)$/m);
-  assert.match(p, /^- papers\/b\/c\.md \(1 open\)$/m);
+  assert.match(p, /^<md_review folder="papers" cwd="\/w" threads="3">\n<files>\npapers\/a\.md \(2 open\)\npapers\/b\/c\.md \(1 open\)\n<\/files>$/m);
   assert.match(p, /node "\/ext\/cli\/mdreview\.mjs" next "papers"/);
   const one = lib.buildFolderPrompt({ folder: '/w', cwd: '/w', files: [{ mdPath: '/w/a.md', open: 1 }], cliPath: '/c.mjs' });
-  assert.match(one, /^Please address the 1 open MD Review comment in 1 file in this folder:/);
+  assert.match(one, /^<md_review folder="\." cwd="\/w" threads="1">$/m);
   assert.match(one, /next "\."/);
 });
 
